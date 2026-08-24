@@ -1,0 +1,13 @@
+rtx.useVertexCapture = True
+rtx.defaultToAdvancedUI = True
+rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = False
+rtx.fallbackLightDirection = -0.2, -1, 0.4
+rtx.fallbackLightMode = 2
+rtx.fallbackLightType = 0
+rtx.autoExposure.evMinValue = -80
+rtx.useVertexCapturedNormals = True
+rtx.autoExposure.enabled = True
+rtx.autoExposure.evMaxValue = 13.01
+rtx.fallbackLightRadiance = 100, 100, 100
+rtx.uiTextures = 0x09D3003885F55296, 0x59C75A9843A6EA77, 0x86390A104AFAD70F, 0xA2964BFD0B1A6B4B, 0xB0CE09C5B0B706E1, 0xBEA29516D4FCBD40, 0xF071109C8E0009AC, 0xF1A42F0E82DC4604, -0x3869FE5976C427DA, -0x3AE04A318AA2ABB1, -0x5B91B13CC0D843DE, -0x6FF3AF54ED2B7F4B, -0x827A4FAA2F277D91, -0x942D9D2D8BC2FE21, -0xBEB1F14DAC1829C9, -0xC30C879C35540D50, -0xC61DEEAC248BDB1F, -0xD438D01456670C31, -0xEC4D56F69B91E758, -0xEF774348202B71F0, -0xEF9BB9DCB372B5C8, -0xF9053587CED1BEC7
+rtx.fallbackLightAngle = 5

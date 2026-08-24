@@ -1,0 +1,1942 @@
+// sr3-rtx - RTX Remix compatibility shim for Saints Row: The Third (2011, DX9).
+//
+// Saints Row transforms every vertex in its own shaders and (we believe) never sets the
+// D3D9 fixed-function transform state. RTX Remix reads its camera exclusively from that
+// state - D3D9Rtx::processRenderState() pulls worldToView/viewToProjection out of
+// D3DTS_VIEW/D3DTS_PROJECTION even for programmable draws - so with nothing set, Remix
+// has no valid camera and falls back to rasterising the frame.
+//
+// The engine's matrices live at fixed vertex shader constant registers (recovered by
+// disassembling shaders.vpp_pc; see docs/shader-map.md):
+//
+//     c28  projTM         4 regs   world -> clip   (fused VIEW * PROJECTION)
+//     c32  objTM          3 regs   object -> world
+//     c48  IR_World2View  3 regs   world -> view
+//
+// We watch SetVertexShaderConstantF for those writes, recover a true projection matrix as
+// projTM * inverse(view), and publish world/view/projection through SetTransform. The game
+// ignores that state, so writing it is side-effect free; Remix then sees a real camera.
+
+#include <d3d9.h>
+#include <windows.h>
+#include <intrin.h>   // _ReturnAddress: identify which engine region issued a draw
+
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <share.h>
+#include <shlwapi.h>
+#include <unordered_map>
+
+namespace {
+
+// ---------------------------------------------------------------- configuration
+
+// Constant registers, from docs/shader-map.md.
+constexpr UINT kRegProjTM = 28;        // 4 registers
+constexpr UINT kRegObjTM = 32;         // 3 registers
+constexpr UINT kRegWorld2View = 48;    // 3 registers
+
+// COM vtable slots. IDirect3D9 has 17 methods (0..16); IDirect3D9Ex appends five more,
+// putting CreateDeviceEx at 20.
+constexpr int kSlotCreateDevice = 16;
+constexpr int kSlotCreateDeviceEx = 20;
+constexpr int kSlotPresent = 17;
+constexpr int kSlotSetTransform = 44;
+constexpr int kSlotSetLight = 51;
+constexpr int kSlotLightEnable = 53;
+constexpr int kSlotSetTexture = 65;
+constexpr int kSlotDrawPrimitive = 81;
+constexpr int kSlotDrawIndexedPrimitive = 82;
+constexpr int kSlotCreateVertexShader = 91;
+constexpr int kSlotSetVertexShader = 92;
+constexpr int kSlotSetVertexShaderConstantF = 94;
+// Geometry interception (the re-submission project). Slots verified against the ones already
+// in use: CreatePixelShader=106 and CreateVertexShader=91 anchor the standard D3D9 layout.
+constexpr int kSlotSetRenderState = 57;
+constexpr int kSlotSetTextureStageState = 67;
+constexpr int kSlotSetRenderTarget = 37;
+constexpr int kSlotDrawPrimitiveUP = 83;
+constexpr int kSlotDrawIndexedPrimitiveUP = 84;
+constexpr int kSlotSetVertexDeclaration = 87;
+constexpr int kSlotSetFVF = 89;
+constexpr int kSlotSetStreamSource = 100;
+constexpr int kSlotSetIndices = 104;
+constexpr int kSlotCreatePixelShader = 106;
+constexpr int kSlotSetPixelShader = 107;
+constexpr int kSlotSetPixelShaderConstantF = 109;
+
+// Shadow copy of pixel shader constants, so a light's parameters can be read at draw time.
+constexpr UINT kMaxPsConst = 96;
+
+// ---------------------------------------------------------------- logging
+
+FILE* g_log = nullptr;
+
+void Log(const char* format, ...) {
+    if (!g_log) return;
+    va_list args;
+    va_start(args, format);
+    vfprintf(g_log, format, args);
+    va_end(args);
+    fputc('\n', g_log);
+    fflush(g_log);
+}
+
+// ---------------------------------------------------------------- math
+
+// Shader constants hold rows of a column-vector matrix (clip = M * pos, per the dp4
+// ordering in the disassembly). D3D9's SetTransform expects the row-vector form, so the
+// register rows become columns. Missing rows default to the affine identity.
+D3DMATRIX FromRegisters(const float* regs, int rows) {
+    D3DMATRIX m{};
+    for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+            (&m._11)[col * 4 + row] = (row < rows) ? regs[row * 4 + col] : 0.0f;
+        }
+    }
+    if (rows < 4) m._44 = 1.0f;
+    return m;
+}
+
+bool Invert(const D3DMATRIX& in, D3DMATRIX& out) {
+    const float* m = &in._11;
+    float inv[16];
+
+    inv[0]  =  m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+    inv[4]  = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+    inv[8]  =  m[4]*m[9]*m[15]  - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+    inv[12] = -m[4]*m[9]*m[14]  + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+    inv[1]  = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+    inv[5]  =  m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+    inv[9]  = -m[0]*m[9]*m[15]  + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+    inv[13] =  m[0]*m[9]*m[14]  - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+    inv[2]  =  m[1]*m[6]*m[15]  - m[1]*m[7]*m[14]  - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7]  - m[13]*m[3]*m[6];
+    inv[6]  = -m[0]*m[6]*m[15]  + m[0]*m[7]*m[14]  + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7]  + m[12]*m[3]*m[6];
+    inv[10] =  m[0]*m[5]*m[15]  - m[0]*m[7]*m[13]  - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7]  - m[12]*m[3]*m[5];
+    inv[14] = -m[0]*m[5]*m[14]  + m[0]*m[6]*m[13]  + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6]  + m[12]*m[2]*m[5];
+    inv[3]  = -m[1]*m[6]*m[11]  + m[1]*m[7]*m[10]  + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7]   + m[9]*m[3]*m[6];
+    inv[7]  =  m[0]*m[6]*m[11]  - m[0]*m[7]*m[10]  - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7]   - m[8]*m[3]*m[6];
+    inv[11] = -m[0]*m[5]*m[11]  + m[0]*m[7]*m[9]   + m[4]*m[1]*m[11] - m[4]*m[3]*m[9]  - m[8]*m[1]*m[7]   + m[8]*m[3]*m[5];
+    inv[15] =  m[0]*m[5]*m[10]  - m[0]*m[6]*m[9]   - m[4]*m[1]*m[10] + m[4]*m[2]*m[9]  + m[8]*m[1]*m[6]   - m[8]*m[2]*m[5];
+
+    float det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+    if (std::fabs(det) < 1e-12f) return false;
+    det = 1.0f / det;
+    for (int i = 0; i < 16; ++i) (&out._11)[i] = inv[i] * det;
+    return true;
+}
+
+D3DMATRIX Multiply(const D3DMATRIX& a, const D3DMATRIX& b) {
+    D3DMATRIX r{};
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j)
+            for (int k = 0; k < 4; ++k)
+                (&r._11)[i * 4 + j] += (&a._11)[i * 4 + k] * (&b._11)[k * 4 + j];
+    return r;
+}
+
+// ---------------------------------------------------------------- hook state
+
+typedef HRESULT(WINAPI* CreateDevice_t)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD,
+                                        D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
+typedef HRESULT(WINAPI* CreateDeviceEx_t)(IDirect3D9Ex*, UINT, D3DDEVTYPE, HWND, DWORD,
+                                          D3DPRESENT_PARAMETERS*, D3DDISPLAYMODEEX*,
+                                          IDirect3DDevice9Ex**);
+typedef HRESULT(WINAPI* SetVSConstF_t)(IDirect3DDevice9*, UINT, const float*, UINT);
+typedef HRESULT(WINAPI* SetTransform_t)(IDirect3DDevice9*, D3DTRANSFORMSTATETYPE,
+                                        const D3DMATRIX*);
+typedef HRESULT(WINAPI* Present_t)(IDirect3DDevice9*, const RECT*, const RECT*, HWND,
+                                   const RGNDATA*);
+typedef HRESULT(WINAPI* SetLight_t)(IDirect3DDevice9*, DWORD, const D3DLIGHT9*);
+typedef HRESULT(WINAPI* LightEnable_t)(IDirect3DDevice9*, DWORD, BOOL);
+typedef HRESULT(WINAPI* CreatePixelShader_t)(IDirect3DDevice9*, const DWORD*,
+                                             IDirect3DPixelShader9**);
+typedef HRESULT(WINAPI* SetPixelShader_t)(IDirect3DDevice9*, IDirect3DPixelShader9*);
+typedef HRESULT(WINAPI* SetPSConstF_t)(IDirect3DDevice9*, UINT, const float*, UINT);
+typedef HRESULT(WINAPI* SetTexture_t)(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+typedef HRESULT(WINAPI* CreateVertexShader_t)(IDirect3DDevice9*, const DWORD*,
+                                              IDirect3DVertexShader9**);
+typedef HRESULT(WINAPI* SetVertexShader_t)(IDirect3DDevice9*, IDirect3DVertexShader9*);
+typedef HRESULT(WINAPI* DrawPrimitive_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
+typedef HRESULT(WINAPI* DrawIndexedPrimitive_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, INT,
+                                                UINT, UINT, UINT, UINT);
+
+CreateDevice_t g_origCreateDevice = nullptr;
+CreateDeviceEx_t g_origCreateDeviceEx = nullptr;
+SetVSConstF_t g_origSetVSConstF = nullptr;
+SetTransform_t g_origSetTransform = nullptr;
+Present_t g_origPresent = nullptr;
+SetLight_t g_origSetLight = nullptr;
+LightEnable_t g_origLightEnable = nullptr;
+CreatePixelShader_t g_origCreatePixelShader = nullptr;
+SetPixelShader_t g_origSetPixelShader = nullptr;
+SetPSConstF_t g_origSetPSConstF = nullptr;
+SetTexture_t g_origSetTexture = nullptr;
+CreateVertexShader_t g_origCreateVertexShader = nullptr;
+SetVertexShader_t g_origSetVertexShader = nullptr;
+DrawPrimitive_t g_origDrawPrimitive = nullptr;
+DrawIndexedPrimitive_t g_origDrawIndexedPrimitive = nullptr;
+
+D3DMATRIX g_world{}, g_view{}, g_viewProj{};
+bool g_worldFresh = false;   // the current draw supplied its own objTM (needed by FFP)
+D3DMATRIX g_lastView{}, g_lastProjection{};
+bool g_haveWorld = false, g_haveView = false, g_haveViewProj = false;
+bool g_cameraDirty = false;
+bool g_publishing = false;         // guards against recursion into our own SetTransform
+unsigned g_frames = 0;
+unsigned g_gameSetTransformCalls = 0;   // does the game set FF transforms itself?
+unsigned g_writesProj = 0, g_writesWorld = 0, g_writesView = 0;
+unsigned g_publishCount = 0, g_rejectedPasses = 0;
+bool g_loggedFirstPublish = false;
+
+// Remix treats every camera change as a potential camera cut, and a cut resets expensive
+// state (the neural radiance cache re-initialises). The engine submits more than one
+// perspective pass at the back-buffer aspect per frame, so without this latch the camera
+// flip-flops mid-frame and Remix sees a cut every few frames.
+bool g_publishedThisFrame = false;
+unsigned g_candidatesThisFrame = 0, g_maxCandidatesPerFrame = 0;
+float g_camX = 0.0f, g_camY = 0.0f, g_camZ = 0.0f;
+
+// Aspect ratio of the back buffer, captured at device creation. The engine reuses these
+// same constant registers for shadow maps and light volumes, whose projections have a
+// different (usually square) aspect - that is how we tell the real camera apart.
+float g_targetAspect = 0.0f;
+UINT g_backWidth = 0, g_backHeight = 0;   // for spotting fullscreen-sized quads
+
+// Tunables, read from sr3-rtx.ini next to the exe so hypotheses can be tested without a
+// rebuild. Defaults match the behaviour that first produced a path-traced frame.
+// Two operating modes.
+//
+// INTERPOSE (mode=0, the current approach): sit on the D3D9 boundary and classify the
+// engine's draws - demote, skip or fix them as they pass. Everything built so far. Its limit
+// is that the engine still believes every draw happened, so removing one leaves the engine
+// depending on output that no longer exists; that is why skipping composite passes blacks the
+// screen and why skipping fixed-function draws froze the image.
+//
+// ENGINE (mode=1): patch the game's own rendering code at runtime, so unwanted work is never
+// submitted in the first place and the engine stays internally consistent. Disabling a
+// subsystem at its source avoids the inconsistency that makes draw-level skipping fragile.
+// In this mode the interpose-side heuristics stay off - camera publication and light
+// injection remain, because Remix needs both regardless of how geometry arrives.
+enum RenderMode { kModeInterpose = 0, kModeEngine = 1 };
+
+struct Settings {
+    int mode = kModeInterpose;
+    bool publishWorld = false;  // see sr3-rtx.ini: breaks skinned meshes, keep off
+    bool oneCameraPerFrame = true;
+    bool aspectFilter = true;
+    bool injectLights = true;   // translate the engine's light volumes into D3D9 lights
+    bool fixAlbedoStage = true; // rebind the real diffuse map to stage 0 for Remix
+    bool screenSpaceAsUI = true; // give screen-space quads an orthographic transform
+    bool skinnedAsUI = true;     // keep broken skinned meshes out of the ray-traced world
+    bool proceduralAsUI = true;  // same for particle / billboard quads
+    // Keep any draw whose projTM differs from the published camera out of the ray-traced
+    // world. Principled replacement for the per-shader-class heuristics above: such draws
+    // cannot be reconstructed correctly by vertex capture regardless of what they are.
+    bool demoteCameraMismatch = false;
+    // DANGEROUS - both default OFF, and the defaults must stay OFF. Each was tried, each
+    // caused a visible regression, and each is off in sr3-rtx.ini. A `true` default here
+    // would silently resurrect the regression if the ini were ever missing or renamed.
+    bool demoteLightVolumes = false;  // breaks light PLACEMENT, see BeginScreenSpaceDraw
+    bool skipCompositePasses = false; // removes the actual scene, not just the composite
+    // Bisection instrument: DROP a whole class of draws instead of demoting it, so the
+    // ray-traced scene can be reduced to world geometry alone and each class of suspected
+    // junk ruled in or out one at a time. All default off. These never apply to a draw that
+    // carries a light - EmitLight runs first and the skip is refused for light volumes.
+    // Drop the light-volume mesh itself. Safe to try only because EmitLight runs FIRST in the
+    // draw hook, so the light has already been harvested and SetLight already called by the
+    // time the draw is dropped. The open question this answers: does Remix still register a
+    // light whose draw never happens? If lights survive, this removes the spheres for good.
+    bool skipLightVolumes = false;
+    // Drop draws submitted under a projection other than the one we published. Vertex capture
+    // reconstructs world positions with OUR matrices, so a shadow-map or reflection pass is
+    // rebuilt in the wrong place - proven 2026-08-14 by a capture holding the player mesh
+    // twice, at x=+96.2 (correct) and x=-96.2 (a mirrored duplicate sitting on the camera).
+    // Measured at ~22% of all draws. Unlike demoteCameraMismatch this REMOVES them instead of
+    // handing them an identity transform, which only deformed them.
+    // Collapse untextured clip-space quads to a point for the duration of their draw. Targets
+    // the white fullscreen plane welded to the camera without dropping any draw call.
+    bool cullBlankScreenQuads = false;
+    bool logBlankDraws = false;   // dump the shape of untextured draws, capped at 40 lines
+    // Collapse draws whose pixel shader never samples stage 0. Remix reads stage 0 as albedo,
+    // so these are painted with whatever texture the previous draw happened to leave bound.
+    bool cullStaleAlbedoDraws = false;
+    bool logGeometry = false;   // phase 1 of the re-submission project: dump vertex layouts
+    // Collapse the engine's fullscreen composite quads. Identified 2026-08-15 by reading the
+    // vertex array at the call: every DrawPrimitiveUP is 2 triangles spanning exactly
+    // 0..backbufferWidth x 0..backbufferHeight in screen pixels - 57 of them per frame, all
+    // from one call site with one vertex shader and one render target. This is the white plane
+    // welded to the camera. Texture-based removal cannot work (we ignored its 1280x720 white
+    // hash and the geometry stayed), so it is matched on geometry instead.
+    bool cullFullscreenQuads = false;
+    bool logSmallDraws = false;  // lock stream 0 on <=2-primitive draws and dump positions
+    // Pass-level bisection: collapse every draw whose render target is this index, to find out
+    // which PASS contributes the planes. -1 = off. Indices come from the "render target #N"
+    // lines in the log. Collapses rather than skips, so the draw still executes.
+    int collapseTarget = -1;
+    // Same pass selection, but DROP the draw instead of collapsing it. Collapsing 502 draws a
+    // frame to zero-area triangles crashed the Remix runtime (ACCESS_VIOLATION reading 0x20 in
+    // d3d9.dll - a null deref, consistent with building acceleration structures from geometry
+    // with no valid triangles). Skipping hands Remix nothing at all, so there is no degenerate
+    // input to choke on.
+    // Up to 8 render targets to drop, as a comma-separated list in the ini. A list rather than
+    // a single index because the composite quads that block the camera live in more than one
+    // pass, and #31 (spheres) has to stay dropped at the same time.
+    // Re-issue world draws as fixed function instead of letting Remix reconstruct them from
+    // vertex-shader output. The technique proven by the Saints Row 2 Remix proxy.
+    bool ffpConvert = false;
+    int skipTargets[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    int skipTargetCount = 0;
+    bool skipCameraMismatch = false;
+    bool skipSkinned = false;      // characters, pedestrians (432 shaders)
+    bool skipProcedural = false;   // particles, billboards
+    bool skipScreenSpace = false;  // fullscreen / HUD quads (no projTM)
+    float lightScale = 1.0f;    // multiplier on light radiance
+    float lightRangeScale = 1.0f;
+} g_settings;
+
+// Saints Row uses "inferred lighting": each light is a volume draw whose pixel shader carries
+// the light's parameters in its constants. We recognise those shaders by the constant names
+// in their embedded CTAB, then re-emit each one as a D3D9 light, which stock Remix converts
+// into a real ray-traced light (RtxContext::addLights).
+struct LightShader {
+    enum Kind { NotLight, Point, Spot, Directional } kind = NotLight;
+    int regPos = -1, regDir = -1, regColor = -1, regInfo = -1, regSpot = -1;
+};
+
+// Remix takes texture stage 0 as a surface's albedo. Saints Row only puts the diffuse map
+// there about half the time - 903 of its shaders bind a normal map to s0 and keep the diffuse
+// at s1 or s3 - so those materials were being shaded with a normal map as their base colour,
+// which is where the yellow-green tint came from. We record each shader's real diffuse
+// register and rebind it to stage 0 for the duration of the draw.
+struct ShaderInfo {
+    LightShader light;
+    int diffuseStage = -1;   // >0 means the diffuse is not where Remix expects it
+    int albedoStage = -1;    // best colour-carrying sampler, ranked (see AlbedoRank)
+    int albedoRank = 0;      // 0 => this shader has NO colour texture at all
+    bool usesProjTM = false; // vertex shaders only: false implies a screen-space pass
+    // Does the shader take an object matrix at all? Static world geometry in SR3 is already in
+    // world space and never writes objTM (c32), so requiring a fresh one rejected ~96% of the
+    // world - only 68.9 of ~1800 indexed draws/frame converted. If a shader does not reference
+    // objTM, the correct world transform is IDENTITY, not the previous object's matrix.
+    bool usesObjTM = false;
+    bool skinned = false;    // vertex shaders only: has a Bone_weights palette
+    bool proceduralGeometry = false;  // particle / billboard quads built in the shader
+    bool samplesGBuffer = false;      // reads IR_GBuffer/IR_LBuffer => deferred/composite pass
+    bool samplesStage0 = false;       // false => Remix will shade it with a STALE texture
+    bool isPixelShader = false;       // so the stage-0 test only applies to real PS draws
+};
+
+std::unordered_map<void*, ShaderInfo> g_shaders;
+ShaderInfo g_current;
+
+// Screen-space draws (post-process passes, HUD atlases) have vertex shaders that never
+// reference projTM - they emit clip-space positions directly. Before this shim existed they
+// carried no meaningful transform and Remix left them alone; now they inherit the perspective
+// camera we publish and get ray-traced as world geometry hanging in front of the player.
+// Giving them an identity (orthographic) transform puts them back in Remix's UI bucket.
+std::unordered_map<void*, bool> g_screenSpaceVS;
+bool g_currentIsScreenSpace = false;
+
+// Vertex-shader class, recorded for EVERY shader independently of the demotion toggles, so
+// the skip* bisection switches work regardless of how the demote* switches are set.
+enum VSClass { VS_SCREEN = 1, VS_SKINNED = 2, VS_PROCEDURAL = 4 };
+std::unordered_map<void*, unsigned> g_vsClass;
+std::unordered_map<void*, bool> g_vsUsesObjTM;   // shader takes an object matrix
+bool g_currentVSUsesObjTM = false;
+unsigned g_currentVSClass = 0;
+int g_currentTarget = -1;   // index into g_targets; declared early, used by the cull tests
+unsigned g_skippedByClass = 0;
+
+// Degenerate-geometry cull. Some draws cannot be removed any other way: the white fullscreen
+// plane welded to the camera is an UNTEXTURED clip-space quad, so it has no texture hash for
+// rtx.ignoreTextures to match, and dropping whole draw classes froze the image (the runtime
+// evidently needs those draws to advance a frame). Instead we swap in a tiny vertex shader
+// that collapses every vertex to one point, for the duration of that draw only. The draw
+// still executes - device state and frame pacing are untouched - but it produces no triangles,
+// so nothing reaches the ray-traced scene.
+IDirect3DVertexShader9* g_killVS = nullptr;
+IDirect3DVertexShader9* g_currentVS = nullptr;   // the game's shader, so we can restore it
+bool g_killVSTried = false;
+unsigned g_culledBlankQuads = 0;
+
+struct ID3DXBufferLite : public IUnknown {
+    virtual void* WINAPI GetBufferPointer() = 0;
+    virtual DWORD WINAPI GetBufferSize() = 0;
+};
+typedef HRESULT(WINAPI* D3DXAssembleShader_t)(const char*, UINT, const void*, void*, DWORD,
+                                              ID3DXBufferLite**, ID3DXBufferLite**);
+unsigned g_screenSpaceDraws = 0, g_skinnedShaders = 0, g_proceduralShaders = 0;
+unsigned g_mismatchedDraws = 0, g_totalDraws = 0, g_lightVolumeDraws = 0;
+unsigned g_skippedComposites = 0;
+D3DMATRIX g_publishedViewProj{};   // the projTM that was in effect when we published
+IDirect3DBaseTexture9* g_boundTextures[16] = {};
+float g_psConst[kMaxPsConst][4] = {};
+unsigned g_lightsEmitted = 0, g_lightShadersSeen = 0, g_albedoFixes = 0;
+
+void LoadSettings() {
+    char path[MAX_PATH]{};
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (char* slash = strrchr(path, '\\')) strcpy_s(slash + 1, 32, "sr3-rtx.ini");
+    g_settings.mode = GetPrivateProfileIntA("sr3-rtx", "mode", kModeInterpose, path);
+    g_settings.publishWorld =
+        GetPrivateProfileIntA("sr3-rtx", "publishWorld", 0, path) != 0;
+    g_settings.oneCameraPerFrame =
+        GetPrivateProfileIntA("sr3-rtx", "oneCameraPerFrame", 1, path) != 0;
+    g_settings.aspectFilter =
+        GetPrivateProfileIntA("sr3-rtx", "aspectFilter", 1, path) != 0;
+    g_settings.injectLights =
+        GetPrivateProfileIntA("sr3-rtx", "injectLights", 1, path) != 0;
+    g_settings.fixAlbedoStage =
+        GetPrivateProfileIntA("sr3-rtx", "fixAlbedoStage", 1, path) != 0;
+    g_settings.screenSpaceAsUI =
+        GetPrivateProfileIntA("sr3-rtx", "screenSpaceAsUI", 1, path) != 0;
+    g_settings.skinnedAsUI =
+        GetPrivateProfileIntA("sr3-rtx", "skinnedAsUI", 1, path) != 0;
+    g_settings.proceduralAsUI =
+        GetPrivateProfileIntA("sr3-rtx", "proceduralAsUI", 1, path) != 0;
+    g_settings.demoteCameraMismatch =
+        GetPrivateProfileIntA("sr3-rtx", "demoteCameraMismatch", 0, path) != 0;
+    g_settings.demoteLightVolumes =
+        GetPrivateProfileIntA("sr3-rtx", "demoteLightVolumes", 0, path) != 0;
+    g_settings.skipCompositePasses =
+        GetPrivateProfileIntA("sr3-rtx", "skipCompositePasses", 0, path) != 0;
+    g_settings.skipLightVolumes =
+        GetPrivateProfileIntA("sr3-rtx", "skipLightVolumes", 0, path) != 0;
+    g_settings.skipCameraMismatch =
+        GetPrivateProfileIntA("sr3-rtx", "skipCameraMismatch", 0, path) != 0;
+    g_settings.cullBlankScreenQuads =
+        GetPrivateProfileIntA("sr3-rtx", "cullBlankScreenQuads", 0, path) != 0;
+    g_settings.logBlankDraws =
+        GetPrivateProfileIntA("sr3-rtx", "logBlankDraws", 0, path) != 0;
+    g_settings.cullStaleAlbedoDraws =
+        GetPrivateProfileIntA("sr3-rtx", "cullStaleAlbedoDraws", 0, path) != 0;
+    g_settings.logGeometry =
+        GetPrivateProfileIntA("sr3-rtx", "logGeometry", 0, path) != 0;
+    g_settings.cullFullscreenQuads =
+        GetPrivateProfileIntA("sr3-rtx", "cullFullscreenQuads", 0, path) != 0;
+    g_settings.ffpConvert =
+        GetPrivateProfileIntA("sr3-rtx", "ffpConvert", 0, path) != 0;
+    g_settings.logSmallDraws =
+        GetPrivateProfileIntA("sr3-rtx", "logSmallDraws", 0, path) != 0;
+    g_settings.collapseTarget =
+        GetPrivateProfileIntA("sr3-rtx", "collapseTarget", -1, path);
+    {
+        char list[128]{};
+        GetPrivateProfileStringA("sr3-rtx", "skipTargets", "", list, sizeof(list), path);
+        g_settings.skipTargetCount = 0;
+        char* ctx = nullptr;
+        for (char* tok = strtok_s(list, ", 	", &ctx);
+             tok && g_settings.skipTargetCount < 8; tok = strtok_s(nullptr, ", 	", &ctx)) {
+            const int v = atoi(tok);
+            if (v >= 0) g_settings.skipTargets[g_settings.skipTargetCount++] = v;
+        }
+    }
+    g_settings.skipSkinned =
+        GetPrivateProfileIntA("sr3-rtx", "skipSkinned", 0, path) != 0;
+    g_settings.skipProcedural =
+        GetPrivateProfileIntA("sr3-rtx", "skipProcedural", 0, path) != 0;
+    g_settings.skipScreenSpace =
+        GetPrivateProfileIntA("sr3-rtx", "skipScreenSpace", 0, path) != 0;
+    g_settings.lightScale =
+        GetPrivateProfileIntA("sr3-rtx", "lightScalePercent", 100, path) / 100.0f;
+    g_settings.lightRangeScale =
+        GetPrivateProfileIntA("sr3-rtx", "lightRangePercent", 100, path) / 100.0f;
+
+    // Engine mode owns geometry selection at the source, so the interpose-side heuristics are
+    // forced off rather than merely defaulted off - otherwise both layers would be removing
+    // draws and neither result would be attributable.
+    if (g_settings.mode == kModeEngine) {
+        g_settings.screenSpaceAsUI = false;
+        g_settings.skinnedAsUI = false;
+        g_settings.proceduralAsUI = false;
+        g_settings.demoteCameraMismatch = false;
+        g_settings.demoteLightVolumes = false;
+        g_settings.skipCompositePasses = false;
+        g_settings.skipLightVolumes = false;
+        g_settings.skipSkinned = false;
+        g_settings.skipProcedural = false;
+        g_settings.skipScreenSpace = false;
+        g_settings.skipCameraMismatch = false;
+        g_settings.cullBlankScreenQuads = false;
+        g_settings.cullStaleAlbedoDraws = false;
+    }
+}
+
+// ---------------------------------------------------------------- shader reflection
+
+// Walk a D3D9 shader token stream and return its length in bytes, or 0 if malformed.
+size_t ShaderLength(const DWORD* tokens) {
+    for (size_t i = 1; i < 65536; ++i) {
+        if (tokens[i] == 0x0000FFFF) return (i + 1) * sizeof(DWORD);
+        if ((tokens[i] & 0xFFFF) == 0xFFFE)          // comment token: skip its payload
+            i += (tokens[i] >> 16) & 0x7FFF;
+    }
+    return 0;
+}
+
+// Read the constant table a shader carries and decide whether it is one of the engine's
+// light volumes. Names come straight from Volition's HLSL, so this needs no hash database.
+ShaderInfo ReflectShader(const DWORD* tokens) {
+    ShaderInfo result;
+    LightShader& info = result.light;
+    const size_t length = ShaderLength(tokens);
+    if (!length) return result;
+
+    const char* bytes = reinterpret_cast<const char*>(tokens);
+    const char* ctab = nullptr;
+    for (size_t i = 0; i + 4 <= length; ++i) {
+        if (memcmp(bytes + i, "CTAB", 4) == 0) { ctab = bytes + i; break; }
+    }
+    if (!ctab) return result;
+
+    const char* base = ctab + 4;
+    const DWORD size = *reinterpret_cast<const DWORD*>(base);
+    const DWORD count = *reinterpret_cast<const DWORD*>(base + 12);
+    const DWORD infoOffset = *reinterpret_cast<const DWORD*>(base + 16);
+    if (size != 28 || count > 256) return result;
+
+    for (DWORD i = 0; i < count; ++i) {
+        const char* entry = base + infoOffset + i * 20;
+        if (entry + 20 > bytes + length) break;
+        const DWORD nameOffset = *reinterpret_cast<const DWORD*>(entry);
+        const WORD registerSet = *reinterpret_cast<const WORD*>(entry + 4);
+        const WORD reg = *reinterpret_cast<const WORD*>(entry + 6);
+        const char* name = base + nameOffset;
+        if (name < bytes || name >= bytes + length) continue;
+
+        if (!strcmp(name, "projTM")) result.usesProjTM = true;
+        if (!strcmp(name, "objTM")) result.usesObjTM = true;
+        else if (!strcmp(name, "Bone_weights")) result.skinned = true;
+        // Particle and billboard shaders build camera-facing quads in the vertex shader,
+        // which vertex capture reconstructs just as badly as skinning - they end up as
+        // screen-filling planes.
+        else if (StrStrIA(name, "particle") || StrStrIA(name, "Billboard"))
+            result.proceduralGeometry = true;
+
+        if (registerSet == 3) {   // D3DXRS_SAMPLER
+            // Which sampler actually carries base colour? Measured across all pixel shaders:
+            // stage 0 holds Diffuse_Map 804 times but a NORMAL map 903 times (Normal_Map 415 +
+            // Damage_Normal_Map 488). Remix reads stage 0 as albedo, so those ~900 materials
+            // are shaded with a tangent-space normal map - the green/orange "yellow geometry".
+            // Many of them have no Diffuse sampler anywhere, so name-matching "Diffuse" alone
+            // finds nothing and leaves the normal map in place. Rank every sampler instead and
+            // take the best; rank 0 means no colour texture exists, and binding NOTHING (white)
+            // is still better than binding a normal map.
+            const int rank =
+                (_strnicmp(name, "Diffuse", 7) == 0)      ? 100 :
+                (StrStrIA(name, "Decal_Map") != nullptr)  ?  90 :
+                (StrStrIA(name, "Pattern_Map") != nullptr)?  80 :
+                (StrStrIA(name, "Blend_Map") != nullptr)  ?  70 :
+                (StrStrIA(name, "Grime") != nullptr ||
+                 StrStrIA(name, "Dirt_Rust") != nullptr)  ?  60 :
+                (StrStrIA(name, "base_sampler") != nullptr) ? 50 :
+                (StrStrIA(name, "Illumination") != nullptr ||
+                 StrStrIA(name, "Glow") != nullptr)       ?  20 : 0;
+            if (rank > result.albedoRank) {
+                result.albedoRank = rank;
+                result.albedoStage = reg;
+            }
+            // Does this shader sample stage 0 at all? Remix reads stage 0 as albedo, so a
+            // shader that never samples it is shaded with whatever texture the PREVIOUS draw
+            // left bound. That is the mechanism behind the planes and spheres that "flicker
+            // through different textures": the engine does not bind anything for these draws,
+            // so the stale binding survives and Remix paints it on. Detecting it needs the
+            // CTAB, not the bound-texture state - from D3D's side a texture IS bound.
+            if (reg == 0) result.samplesStage0 = true;
+            // Case varies across shaders ("Diffuse_MapSampler", "Diffuse_mapSampler", ...).
+            if (_strnicmp(name, "Diffuse", 7) == 0 && result.diffuseStage < 0)
+                result.diffuseStage = reg;
+            // NOTE: do NOT treat a "Viewsphere*" sampler as a reflection shell to hide. That
+            // was tried (demoteViewSpheres) and it broke characters. Checked against
+            // re/shader_constants.csv: the sampler appears in exactly 128 pixel shaders across
+            // 46 files, ALL of which also carry Tint_color and Base_Paint_Color, and 19 of the
+            // files are skinned. "viewsphere" names a car/character *material that samples an
+            // environment map*, not the geometry of a sphere. There is no shell shader to hide.
+            // A shader that reads the G-buffer or light buffer is one of the engine's own
+            // deferred/composite passes rather than a piece of scene geometry.
+            else if (_strnicmp(name, "IR_GBuffer", 10) == 0 ||
+                     _strnicmp(name, "IR_LBuffer", 10) == 0) result.samplesGBuffer = true;
+            continue;
+        }
+
+        if (!strcmp(name, "IR_Light_Pos")) info.regPos = reg;
+        else if (!strcmp(name, "IR_Light_Dir")) info.regDir = reg;
+        else if (!strcmp(name, "IR_Light_Color")) info.regColor = reg;
+        else if (!strcmp(name, "IR_Light_Info")) info.regInfo = reg;
+        else if (!strcmp(name, "IR_Spot_Info")) info.regSpot = reg;
+    }
+
+    // Directional lights carry no IR_Light_Info (no distance falloff); spots add IR_Spot_Info.
+    if (info.regPos >= 0 && info.regColor >= 0) {
+        if (info.regSpot >= 0) info.kind = LightShader::Spot;
+        else if (info.regInfo >= 0) info.kind = LightShader::Point;
+        else info.kind = LightShader::Directional;
+    }
+    return result;
+}
+
+// Records the original entry and, when `hook` is non-null, replaces it. Passing a null hook
+// just captures the original so we can call the method without intercepting it.
+bool PatchVTable(void* instance, int slot, void* hook, void** original) {
+    void** vtable = *reinterpret_cast<void***>(instance);
+    if (original) *original = vtable[slot];
+    if (!hook) return true;
+
+    DWORD old = 0;
+    if (!VirtualProtect(&vtable[slot], sizeof(void*), PAGE_EXECUTE_READWRITE, &old))
+        return false;
+    vtable[slot] = hook;
+    VirtualProtect(&vtable[slot], sizeof(void*), old, &old);
+    return true;
+}
+
+// ---------------------------------------------------------------- hooks
+
+bool Same(const D3DMATRIX& a, const D3DMATRIX& b) {
+    return memcmp(&a, &b, sizeof(D3DMATRIX)) == 0;
+}
+
+// Row-vector transforms, matching the D3D convention the published matrices use.
+D3DVECTOR TransformPoint(const float* v, const D3DMATRIX& m) {
+    return {v[0]*m._11 + v[1]*m._21 + v[2]*m._31 + m._41,
+            v[0]*m._12 + v[1]*m._22 + v[2]*m._32 + m._42,
+            v[0]*m._13 + v[1]*m._23 + v[2]*m._33 + m._43};
+}
+
+D3DVECTOR TransformDir(const float* v, const D3DMATRIX& m) {
+    D3DVECTOR d{v[0]*m._11 + v[1]*m._21 + v[2]*m._31,
+                v[0]*m._12 + v[1]*m._22 + v[2]*m._32,
+                v[0]*m._13 + v[1]*m._23 + v[2]*m._33};
+    const float len = std::sqrt(d.x*d.x + d.y*d.y + d.z*d.z);
+    if (len > 1e-6f) { d.x /= len; d.y /= len; d.z /= len; }
+    return d;
+}
+
+// Emit the light this volume draw represents. The parameters are in view space (the shader
+// reconstructs surface positions along a view ray), so they are moved to world space with the
+// inverse of the view matrix we already track. Every light reuses D3D9 light slot 0: Remix
+// accumulates game lights per draw call, so one slot is enough for an unbounded light count
+// and the usual 8-simultaneous-light cap never applies.
+void EmitLight(IDirect3DDevice9* device) {
+    if (!g_settings.injectLights || g_current.light.kind == LightShader::NotLight) return;
+    if (!g_publishCount) return;
+
+    // Use the *published main camera's* view matrix, not the live one. g_view holds whatever
+    // pass wrote c48 most recently - shadow maps and reflections included - so transforming
+    // with it placed lights against a matrix that changed within the frame. The result was
+    // lights drifting as the camera moved, which Remix reads as a constant stream of new
+    // lights (they are de-duplicated by world position), making the scene's colour churn.
+    D3DMATRIX invView;
+    if (!Invert(g_lastView, invView)) return;
+
+    const LightShader& ls = g_current.light;
+    if (ls.regPos < 0 || ls.regPos >= static_cast<int>(kMaxPsConst)) return;
+    if (ls.regColor < 0 || ls.regColor >= static_cast<int>(kMaxPsConst)) return;
+
+    const float* pos = g_psConst[ls.regPos];
+    const float* col = g_psConst[ls.regColor];
+
+    D3DLIGHT9 light{};
+    light.Diffuse.r = col[0] * g_settings.lightScale;
+    light.Diffuse.g = col[1] * g_settings.lightScale;
+    light.Diffuse.b = col[2] * g_settings.lightScale;
+    light.Specular = light.Diffuse;
+
+    if (ls.kind == LightShader::Directional) {
+        light.Type = D3DLIGHT_DIRECTIONAL;
+        // IR_Light_Pos holds a direction for this shader (used straight as N.L).
+        const D3DVECTOR dir = TransformDir(pos, invView);
+        light.Direction = {-dir.x, -dir.y, -dir.z};
+    } else {
+        // IR_Light_Info = (falloff exponent, inner radius, outer radius, -)
+        const float* info = (ls.regInfo >= 0) ? g_psConst[ls.regInfo] : nullptr;
+        const float outer = info ? info[2] : 10.0f;
+        light.Position = TransformPoint(pos, invView);
+        light.Range = (outer > 0.01f ? outer : 10.0f) * g_settings.lightRangeScale;
+        // Approximate pow(1 - t, k) falloff with D3D9's quadratic model; Remix least-squares
+        // fits the curve when converting anyway.
+        light.Attenuation0 = 0.0f;
+        light.Attenuation1 = 0.0f;
+        light.Attenuation2 = 1.0f / (light.Range * light.Range * 0.25f + 1e-4f);
+
+        if (ls.kind == LightShader::Spot && ls.regDir >= 0 && ls.regSpot >= 0) {
+            light.Type = D3DLIGHT_SPOT;
+            light.Direction = TransformDir(g_psConst[ls.regDir], invView);
+            // IR_Spot_Info.y = cos(outer half-angle), .z = 1/(cos inner - cos outer)
+            const float* spot = g_psConst[ls.regSpot];
+            float cosOuter = spot[1];
+            float cosInner = (std::fabs(spot[2]) > 1e-6f) ? cosOuter + 1.0f / spot[2] : cosOuter;
+            cosOuter = max(-1.0f, min(1.0f, cosOuter));
+            cosInner = max(cosOuter, min(1.0f, cosInner));
+            light.Phi = 2.0f * std::acos(cosOuter);
+            light.Theta = 2.0f * std::acos(cosInner);
+            light.Falloff = 1.0f;
+        } else {
+            light.Type = D3DLIGHT_POINT;
+        }
+    }
+
+    g_publishing = true;
+    if (SUCCEEDED(g_origSetLight(device, 0, &light))) {
+        g_origLightEnable(device, 0, TRUE);
+        ++g_lightsEmitted;
+    }
+    g_publishing = false;
+}
+
+// Publish view/projection, but only for the main scene camera. The engine drives shadow
+// maps and light volumes through the same registers; forwarding those made Remix think the
+// camera teleported many times per frame, which wrecked temporal stability.
+void PublishCamera(IDirect3DDevice9* device) {
+    if (!g_cameraDirty || !g_haveView || !g_haveViewProj) return;
+    g_cameraDirty = false;
+
+    D3DMATRIX invView;
+    if (!Invert(g_view, invView)) return;
+
+    // projTM = view * projection  =>  projection = inverse(view) * projTM
+    const D3DMATRIX projection = Multiply(invView, g_viewProj);
+
+    // Perspective projections put a 1 in _34 and 0 in _44; anything else is an ortho pass
+    // (directional shadow maps), so reject it.
+    if (std::fabs(projection._34) < 0.5f || std::fabs(projection._44) > 0.5f) {
+        ++g_rejectedPasses;
+        return;
+    }
+    // cot(fovY/2) / cot(fovX/2) is the aspect ratio; the real camera matches the back buffer,
+    // shadow and reflection passes generally do not.
+    if (std::fabs(projection._11) < 1e-6f) { ++g_rejectedPasses; return; }
+    const float aspect = projection._22 / projection._11;
+    if (g_settings.aspectFilter && g_targetAspect > 0.0f &&
+        std::fabs(aspect - g_targetAspect) > 0.1f) {
+        ++g_rejectedPasses;
+        return;
+    }
+
+    // Reject cameras parked at the world origin. Steelport's coordinates are in the hundreds
+    // or thousands, so a camera at 0,0,0 is a degenerate/utility pass; latching onto one
+    // leaves the path tracer staring at empty space (a black screen) even though geometry and
+    // lights are being submitted normally.
+    const float distSq = invView._41 * invView._41 + invView._42 * invView._42 +
+                         invView._43 * invView._43;
+    if (distSq < 1.0f) {
+        ++g_rejectedPasses;
+        return;
+    }
+
+    // Passed every filter, so this is a plausible main camera for the frame.
+    ++g_candidatesThisFrame;
+    if (g_settings.oneCameraPerFrame) {
+        if (g_publishedThisFrame) return;
+        g_publishedThisFrame = true;
+    }
+
+    if (Same(g_view, g_lastView) && Same(projection, g_lastProjection)) return;
+    g_lastView = g_view;
+    g_lastProjection = projection;
+    g_publishedViewProj = g_viewProj;
+    g_camX = invView._41; g_camY = invView._42; g_camZ = invView._43;
+
+    g_publishing = true;
+    g_origSetTransform(device, D3DTS_VIEW, &g_view);
+    g_origSetTransform(device, D3DTS_PROJECTION, &projection);
+    g_publishing = false;
+    ++g_publishCount;
+
+    if (!g_loggedFirstPublish) {
+        g_loggedFirstPublish = true;
+        Log("first camera published:");
+        Log("  camera pos = %.2f %.2f %.2f", invView._41, invView._42, invView._43);
+        Log("  projection _11=%.4f _22=%.4f _33=%.4f _43=%.2f  aspect=%.3f (target %.3f)",
+            projection._11, projection._22, projection._33, projection._43,
+            aspect, g_targetAspect);
+    }
+}
+
+HRESULT WINAPI Hook_SetVertexShaderConstantF(IDirect3DDevice9* device, UINT start,
+                                             const float* data, UINT count) {
+    const HRESULT hr = g_origSetVSConstF(device, start, data, count);
+
+    if (data && count) {
+        const UINT end = start + count;
+        if (start <= kRegProjTM && end >= kRegProjTM + 4) {
+            g_viewProj = FromRegisters(data + (kRegProjTM - start) * 4, 4);
+            g_haveViewProj = true;
+            g_cameraDirty = true;
+            ++g_writesProj;
+        }
+        if (start <= kRegWorld2View && end >= kRegWorld2View + 3) {
+            g_view = FromRegisters(data + (kRegWorld2View - start) * 4, 3);
+            g_haveView = true;
+            g_cameraDirty = true;
+            ++g_writesView;
+        }
+        PublishCamera(device);
+
+        // The world matrix is per-object. ALWAYS track it now - FFP conversion needs the
+        // object transform at draw time even though publishWorld leaves it unpublished (a
+        // stale world matrix on a skinned draw is what exploded characters back in session 8).
+        if (start <= kRegObjTM && end >= kRegObjTM + 3) {
+            const D3DMATRIX world = FromRegisters(data + (kRegObjTM - start) * 4, 3);
+            ++g_writesWorld;
+            g_worldFresh = true;      // this draw's object matrix is genuinely its own
+            if (!g_haveWorld || !Same(world, g_world)) {
+                g_world = world;
+                g_haveWorld = true;
+                if (g_settings.publishWorld) {
+                    g_publishing = true;
+                    g_origSetTransform(device, D3DTS_WORLD, &g_world);
+                    g_publishing = false;
+                }
+            }
+        }
+    }
+    return hr;
+}
+
+HRESULT WINAPI Hook_CreatePixelShader(IDirect3DDevice9* device, const DWORD* function,
+                                      IDirect3DPixelShader9** shader) {
+    const HRESULT hr = g_origCreatePixelShader(device, function, shader);
+    if (SUCCEEDED(hr) && shader && *shader && function) {
+        ShaderInfo info = ReflectShader(function);
+        info.isPixelShader = true;
+        // Store EVERY pixel shader now, not just lights and albedo-fix candidates: the
+        // stale-albedo test needs to know that a shader samples nothing at stage 0, and a
+        // shader we never recorded is indistinguishable from one we never saw.
+        g_shaders[*shader] = info;
+        {
+            if (info.light.kind != LightShader::NotLight && ++g_lightShadersSeen <= 8) {
+                static const char* kNames[] = {"none", "point", "spot", "directional"};
+                Log("light shader found: %s (pos=c%d dir=c%d color=c%d info=c%d spot=c%d)",
+                    kNames[info.light.kind], info.light.regPos, info.light.regDir,
+                    info.light.regColor, info.light.regInfo, info.light.regSpot);
+            }
+        }
+    }
+    return hr;
+}
+
+HRESULT WINAPI Hook_SetPixelShader(IDirect3DDevice9* device, IDirect3DPixelShader9* shader) {
+    const auto it = g_shaders.find(shader);
+    g_current = (it != g_shaders.end()) ? it->second : ShaderInfo{};
+    return g_origSetPixelShader(device, shader);
+}
+
+HRESULT WINAPI Hook_CreateVertexShader(IDirect3DDevice9* device, const DWORD* function,
+                                       IDirect3DVertexShader9** shader) {
+    const HRESULT hr = g_origCreateVertexShader(device, function, shader);
+    if (SUCCEEDED(hr) && shader && *shader && function) {
+        const ShaderInfo info = ReflectShader(function);
+        // A world-space vertex shader always multiplies by projTM; one that doesn't is
+        // emitting clip-space coordinates itself, i.e. a fullscreen or HUD quad.
+        //
+        // Skinned shaders are grouped with them for a different reason: Remix's vertex
+        // capture only handles simple vertex shaders, and Saints Row skins through a
+        // 192-register bone palette. The reconstruction fails badly enough that characters
+        // land in front of the camera as giant blobs, so keep them out of the ray-traced
+        // world and let them rasterise as normal.
+        unsigned cls = 0;
+        if (info.usesObjTM)            g_vsUsesObjTM[*shader] = true;
+        if (!info.usesProjTM)          cls |= VS_SCREEN;
+        if (info.skinned)              cls |= VS_SKINNED;
+        if (info.proceduralGeometry)   cls |= VS_PROCEDURAL;
+        if (cls) g_vsClass[*shader] = cls;
+
+        const bool demote = !info.usesProjTM ||
+                            (info.skinned && g_settings.skinnedAsUI) ||
+                            (info.proceduralGeometry && g_settings.proceduralAsUI);
+        if (demote) {
+            g_screenSpaceVS[*shader] = true;
+            if (info.skinned) ++g_skinnedShaders;
+            if (info.proceduralGeometry) ++g_proceduralShaders;
+        }
+    }
+    return hr;
+}
+
+HRESULT WINAPI Hook_SetVertexShader(IDirect3DDevice9* device, IDirect3DVertexShader9* shader) {
+    // A null shader means fixed-function, which Saints Row uses for HUD/overlay quads with
+    // pre-transformed vertices. Those ignore the transform pipeline in the game's own
+    // rendering, but Remix still reads our published camera for them and places them in the
+    // world - which is why the HUD icon atlas kept appearing as floating geometry.
+    g_currentIsScreenSpace = !shader || g_screenSpaceVS.count(shader) != 0;
+    g_currentVS = shader;
+    const auto cls = g_vsClass.find(shader);
+    g_currentVSClass = (cls != g_vsClass.end()) ? cls->second : (shader ? 0u : VS_SCREEN);
+    g_currentVSUsesObjTM = g_vsUsesObjTM.count(shader) != 0;
+    return g_origSetVertexShader(device, shader);
+}
+
+HRESULT WINAPI Hook_SetTexture(IDirect3DDevice9* device, DWORD stage,
+                               IDirect3DBaseTexture9* texture) {
+    if (stage < 16) g_boundTextures[stage] = texture;
+    return g_origSetTexture(device, stage, texture);
+}
+
+// Put the shader's real diffuse map in stage 0 so Remix reads the right albedo, then put
+// stage 0 back so the game's own state is untouched. Returns the texture to restore.
+IDirect3DBaseTexture9* BeginAlbedoFix(IDirect3DDevice9* device, bool demoted) {
+    if (!g_settings.fixAlbedoStage) return nullptr;
+    // Only safe for draws Remix ray-traces, where the game's own shading is discarded and
+    // only the bound texture matters. A demoted draw (characters, particles, UI) is rasterised
+    // through the game's real pixel shader, so swapping its stage 0 feeds that shader the wrong
+    // map - which is what turned character bodies orange/blue/green.
+    if (demoted) return nullptr;
+    const int stage = (g_current.albedoRank > 0) ? g_current.albedoStage
+                                                : g_current.diffuseStage;
+    if (stage <= 0 || stage >= 16) return nullptr;
+    IDirect3DBaseTexture9* diffuse = g_boundTextures[stage];
+    if (!diffuse || diffuse == g_boundTextures[0]) return nullptr;
+
+    IDirect3DBaseTexture9* previous = g_boundTextures[0];
+    g_publishing = true;
+    g_origSetTexture(device, 0, diffuse);
+    g_publishing = false;
+    ++g_albedoFixes;
+    return previous ? previous : reinterpret_cast<IDirect3DBaseTexture9*>(1);
+}
+
+// Swap the perspective camera for an identity transform around a screen-space draw. Remix
+// treats a projection with _44 == 1 as orthographic and (with rtx.orthographicIsUI, on by
+// default) keeps it out of the ray-traced world.
+// Vertex capture reconstructs world positions as clip * inverse(projection) * inverse(view),
+// using the matrices we published. That is only correct for draws that actually used the same
+// projTM. The engine renders several cameras per frame, so a draw submitted under a different
+// one is reconstructed with the wrong matrix and lands somewhere arbitrary - which is how a
+// character ends up as a screen-filling blob. This reports how often that happens.
+bool DrawMatchesPublishedCamera() {
+    return g_haveViewProj && Same(g_viewProj, g_publishedViewProj);
+}
+
+bool BeginScreenSpaceDraw(IDirect3DDevice9* device) {
+    if (!g_publishCount) return false;
+
+    // Inferred lighting draws a sphere around every point light (a cone for spots) into the
+    // irradiance buffer. That mesh is invisible helper geometry, but Remix ray-traces it as a
+    // real object, so hiding it looks attractive.
+    //
+    // User-observed signature (2026-08-14, confirmed by hovering the mesh in Remix's Game
+    // Setup): spheres enclosing the player, textured with whatever was last bound - character
+    // clothing and body maps that change as the camera moves - several overlapping at once,
+    // and not rotating with the camera. The count matches the 11-17 lights injected per frame.
+    // The texture itself must NOT be tagged: it belongs to the character that legitimately
+    // owns it, so tagging deletes the clothes rather than the sphere.
+    //
+    // *** HOW THIS FAILED THE FIRST TIME, AND WHY IT SHOULD WORK NOW. ***
+    // EmitLight() runs first (in the draw hook) and calls SetLight with a WORLD-space position
+    // derived from the published view matrix. The original version then set BOTH D3DTS_VIEW
+    // and D3DTS_PROJECTION to identity for that same draw, so Remix resolved a world-space
+    // light against an identity view: lights landed in the wrong place or were dropped. That
+    // is exactly what the user saw - "most lights not working / no direct light outdoors" -
+    // while the log still reported a healthy ~17 lights emitted per frame, because SetLight
+    // itself kept succeeding. Corroboration in that log: demoted light-volume draws and
+    // emitted lights matched exactly (16.9/frame each), i.e. every light rode a corrupted draw.
+    //
+    // Remix's orthographic-is-UI test reads the PROJECTION matrix only, so overriding just the
+    // projection hides the volume mesh without disturbing the matrix the light depends on.
+    // Note this changes only what Remix sees: the game transforms through shader constants,
+    // never the fixed-function state, so its own light-buffer pass is unaffected and the
+    // rasterised (demoted) draws keep their lighting.
+    if (g_settings.demoteLightVolumes && g_current.light.kind != LightShader::NotLight) {
+        static const D3DMATRIX identity = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        g_publishing = true;
+        // PROJECTION ONLY - do not touch D3DTS_VIEW here. See the note above: Remix resolves
+        // the light EmitLight just set against the view matrix, so clobbering the view is what
+        // misplaced every light last time. The orthographic test that puts this draw in
+        // Remix's UI bucket reads the projection alone, so overriding just that hides the
+        // volume mesh and leaves light injection intact.
+        g_origSetTransform(device, D3DTS_PROJECTION, &identity);
+        g_publishing = false;
+        ++g_lightVolumeDraws;
+        return true;
+    }
+    if (!DrawMatchesPublishedCamera()) {
+        ++g_mismatchedDraws;
+        if (g_settings.demoteCameraMismatch) {
+            static const D3DMATRIX identity = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            g_publishing = true;
+            g_origSetTransform(device, D3DTS_VIEW, &identity);
+            g_origSetTransform(device, D3DTS_PROJECTION, &identity);
+            g_publishing = false;
+            ++g_screenSpaceDraws;
+            return true;
+        }
+    }
+    if (!g_settings.screenSpaceAsUI || !g_currentIsScreenSpace) return false;
+    static const D3DMATRIX identity = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    g_publishing = true;
+    g_origSetTransform(device, D3DTS_VIEW, &identity);
+    g_origSetTransform(device, D3DTS_PROJECTION, &identity);
+    g_publishing = false;
+    ++g_screenSpaceDraws;
+    return true;
+}
+
+void EndScreenSpaceDraw(IDirect3DDevice9* device, bool active) {
+    if (!active) return;
+    g_publishing = true;
+    g_origSetTransform(device, D3DTS_VIEW, &g_lastView);
+    g_origSetTransform(device, D3DTS_PROJECTION, &g_lastProjection);
+    g_publishing = false;
+}
+
+void EndAlbedoFix(IDirect3DDevice9* device, IDirect3DBaseTexture9* previous) {
+    if (!previous) return;
+    IDirect3DBaseTexture9* restore =
+        (previous == reinterpret_cast<IDirect3DBaseTexture9*>(1)) ? nullptr : previous;
+    g_publishing = true;
+    g_origSetTexture(device, 0, restore);
+    g_publishing = false;
+    g_boundTextures[0] = restore;
+}
+
+HRESULT WINAPI Hook_SetPixelShaderConstantF(IDirect3DDevice9* device, UINT start,
+                                            const float* data, UINT count) {
+    if (data) {
+        for (UINT i = 0; i < count && start + i < kMaxPsConst; ++i)
+            memcpy(g_psConst[start + i], data + i * 4, sizeof(float) * 4);
+    }
+    return g_origSetPSConstF(device, start, data, count);
+}
+
+// SR3's composite pass draws its finished, rasterised frame as a fullscreen quad. Demoting it
+// to UI is not enough - Remix then rasterises it as an overlay *on top of* the path-traced
+// image, which is why the old rasterised look reappeared welded to the camera. It has to be
+// dropped entirely. Identified as: a screen-space vertex shader whose pixel shader reads the
+// engine's G-buffer or light buffer.
+bool ShouldSkipCompositePass() {
+    // Light volumes also read the G-buffer, but they must NOT be skipped here: EmitLight
+    // harvests each one's parameters to build a real ray-traced light. They are excluded
+    // below and handled by demoteLightVolumes instead.
+    if (g_current.light.kind != LightShader::NotLight) return false;
+    return g_settings.skipCompositePasses && g_publishCount &&
+           g_currentIsScreenSpace && g_current.samplesGBuffer;
+}
+
+// Bisection: drop an entire class of draws so the ray-traced scene can be reduced to world
+// geometry alone. Refused for light volumes - those draws carry the light parameters that
+// EmitLight harvests, and dropping them would delete the scene's lighting along with the mesh.
+// ================================================================ engine map (mode=1)
+// Static analysis of SaintsRowTheThird.exe found the engine's D3D9 wrapper layer - see
+// docs/engine-map.md. The exe has RELOCS_STRIPPED and no DYNAMIC_BASE, so it cannot load
+// anywhere except its image base 0xC1C000 and these addresses are valid verbatim.
+//
+// Nothing is patched yet. This verifies the map against the running process first: if a single
+// byte differs the build is not the one that was analysed, and patching it would corrupt the
+// game. Cheap insurance against the class of mistake that has cost this project the most -
+// acting on an assumption that was never checked against the live system.
+// 2026-08-15: the first version of this table used 0xC1C000, which is the exe's BaseOfData,
+// not its ImageBase - for PE32 the ImageBase is at optional-header offset 28, and offset 24 is
+// BaseOfData. Every address was inflated by 0x81C000. The runtime check below caught it on the
+// first run ("BASE MISMATCH ... Not patching"), which is exactly why it exists: had the shim
+// patched on trust, it would have written into arbitrary code.
+constexpr DWORD kExpectedImageBase = 0x00400000;
+
+struct EngineSite {
+    const char* name;
+    DWORD va;
+    unsigned char bytes[8];
+};
+
+// Each site is the `call reg` that dispatches the D3D9 method, plus the following bytes for
+// disambiguation. Captured from the exe with tools/find_render_calls.py.
+const EngineSite kEngineSites[] = {
+    {"DrawPrimitive",          0x0049D594, {0xFF,0xD0,0x83,0x05,0x50,0xD6,0xE5,0x02}},
+    {"DrawPrimitiveUP",        0x0049D608, {0xFF,0xD0,0x8B,0x15,0x50,0xD6,0xE5,0x02}},
+    {"DrawIndexedPrimitive",   0x0049D690, {0xFF,0xD0,0x83,0x05,0x50,0xD6,0xE5,0x02}},
+    {"DrawIndexedPrimitiveUP", 0x0049D720, {0xFF,0xD1,0x5F,0xC7,0x05,0x7C,0x5E,0x39}},
+    {"SetTexture",             0x0049D4F0, {0xFF,0xD0,0x83,0x0D,0x7C,0x5E,0x39,0x03}},
+    {"SetVertexShader",        0x0049D398, {0xFF,0xD0,0x83,0x0D,0x7C,0x5E,0x39,0x03}},
+    {"SetStreamSource",        0x0049D46B, {0xFF,0xD1,0x8B,0x4F,0x14,0xA1,0x68,0x1B}},
+    {"SetIndices",             0x0049D428, {0xFF,0xD0,0x83,0x05,0x50,0xD6,0xE5,0x02}},
+    {"BeginScene",             0x0049C9FE, {0xFF,0xD2,0x83,0x05,0x50,0xD6,0xE5,0x02}},
+    // The fixed-function renderers. What they draw is still unidentified; if real geometry
+    // flows through them it is already in the form Remix handles natively.
+    {"FF_SetTransform",        0x00E3304D, {0xFF,0xD0,0xC3,0xC6,0x81,0x9D,0x00,0x00}},
+    {"FF_SetMaterial",         0x00E27FC1, {0xFF,0xD2,0xB0,0x01,0x5E,0xC2,0x08,0x00}},
+    {"FF_SetLight",            0x00E3131D, {0xFF,0xD0,0xC3,0x56,0x57,0x8B,0xF9,0x8B}},
+};
+
+bool g_engineMapVerified = false;
+
+// Which part of the engine issued a draw. The engine's draw calls go through the device vtable
+// we already hook, so the caller can be identified from the return address - no patching, no
+// risk. This answers the open question in docs/engine-map.md: what do the fixed-function
+// renderers actually draw? If real geometry flows through them it is already in the form Remix
+// consumes natively, and much of the re-submission project would be unnecessary.
+enum CallerRegion { kFromWrapper = 0, kFromFF = 1, kFromFF2 = 2, kFromOther = 3, kRegions = 4 };
+const char* const kRegionName[kRegions] = {
+    "wrapper 0x49cxxx", "ff-renderer 0xe2-0xe3", "ff-cluster 0xf5exxx", "elsewhere"};
+
+int ClassifyCaller(const void* ra) {
+    const DWORD a = reinterpret_cast<DWORD>(ra);
+    if (a >= 0x0049C000 && a < 0x0049E000) return kFromWrapper;
+    if (a >= 0x00E20000 && a < 0x00E40000) return kFromFF;
+    if (a >= 0x00F50000 && a < 0x00F70000) return kFromFF2;
+    return kFromOther;
+}
+
+// [region][0]=indexed [1]=non-indexed [2]=indexed UP [3]=UP
+unsigned g_drawsByRegion[kRegions][4] = {};
+unsigned g_ffReports = 0;
+
+// User-pointer draws hand D3D9 a plain vertex array, so the geometry is readable right here -
+// no buffer to lock. ~57 of these per frame, a small distinct population and a strong suspect
+// for the HUD, the flickering planes and the white plane welded to the camera.
+// Positions in roughly -1..1 mean clip space (a screen-space quad); large values mean world
+// geometry. This is also the exact submission form the re-submission project must imitate.
+unsigned g_upReports = 0;
+void ReportUPDraw(const char* kind, UINT primCount, const void* data, UINT stride,
+                  const void* ra) {
+    if (!g_settings.logGeometry || g_upReports >= 30) return;
+    ++g_upReports;
+    char verts[192];
+    verts[0] = '\0';
+    int n = 0;
+    if (data && stride >= 12) {
+        const unsigned char* p = static_cast<const unsigned char*>(data);
+        const UINT show = (primCount + 2 < 4) ? primCount + 2 : 4;
+        for (UINT i = 0; i < show && n < 150; ++i) {
+            const float* f = reinterpret_cast<const float*>(p + i * stride);
+            n += _snprintf_s(verts + n, sizeof(verts) - n, _TRUNCATE,
+                             "(%.2f %.2f %.2f) ", f[0], f[1], f[2]);
+        }
+    }
+    Log("UP #%u %s prims=%u stride=%u vs=%p tex0=%p ra=%p | %s",
+        g_upReports, kind, primCount, stride, static_cast<void*>(g_currentVS),
+        static_cast<void*>(g_boundTextures[0]), ra, verts);
+}
+
+void ReportEngineDraw(int region, const char* kind, UINT verts, UINT prims, const void* ra) {
+    if (region == kFromWrapper || region == kFromOther) return;
+    if (!g_settings.logGeometry || g_ffReports >= 25) return;
+    ++g_ffReports;
+    Log("engine draw #%u [%s] %s verts=%u prims=%u ra=%p | vs=%p ps=%s tex0=%p",
+        g_ffReports, kRegionName[region], kind, verts, prims, ra,
+        static_cast<void*>(g_currentVS),
+        g_current.isPixelShader ? "yes" : "none",
+        static_cast<void*>(g_boundTextures[0]));
+}
+
+void VerifyEngineMap() {
+    const HMODULE exe = GetModuleHandleA(nullptr);
+    const DWORD actualBase = reinterpret_cast<DWORD>(exe);
+    Log("engine map: module base %#010lx (expected %#010lx)", actualBase, kExpectedImageBase);
+    if (actualBase != kExpectedImageBase) {
+        Log("engine map: BASE MISMATCH - relocated despite stripped relocs. Not patching.");
+        return;
+    }
+    unsigned ok = 0, bad = 0;
+    for (const EngineSite& s : kEngineSites) {
+        const unsigned char* p = reinterpret_cast<const unsigned char*>(s.va);
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) {
+            Log("  %-24s %#010lx UNREADABLE", s.name, s.va);
+            ++bad;
+            continue;
+        }
+        if (memcmp(p, s.bytes, sizeof(s.bytes)) == 0) {
+            ++ok;
+        } else {
+            ++bad;
+            Log("  %-24s %#010lx MISMATCH: got %02X %02X %02X %02X %02X %02X %02X %02X",
+                s.name, s.va, p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+        }
+    }
+    g_engineMapVerified = (bad == 0);
+    Log("engine map: %u/%u sites verified%s", ok, ok + bad,
+        g_engineMapVerified ? " - map is valid for this build" : " - DO NOT PATCH");
+}
+
+// ================================================================ geometry interception
+// The re-submission project. Goal: stop asking Remix to reconstruct geometry from shader
+// output, and instead hand it plain fixed-function triangles we build ourselves - world-space
+// positions, one honest UV set, the real diffuse texture at stage 0. That removes the guessing
+// that produces wrong UVs, stale albedo, mirrored duplicates and mangled skinning all at once.
+//
+// PHASE 1 (this code): read and interpret the vertex/index streams, and prove we can do it.
+// Nothing is re-submitted yet. Misreading a vertex declaration produces silent garbage, so the
+// layout parsing is verified from the log before anything depends on it.
+
+struct VertexField { int offset = -1; int type = -1; };
+struct VertexLayout {
+    bool parsed = false;
+    VertexField pos, normal, uv, blendWeight, blendIndex;
+    unsigned elements = 0;
+};
+
+std::unordered_map<void*, VertexLayout> g_layouts;
+VertexLayout g_currentLayout;
+
+// Active stream 0 and index buffer, tracked so a draw can find its own data.
+IDirect3DVertexBuffer9* g_stream0 = nullptr;
+UINT g_stream0Offset = 0, g_stream0Stride = 0;
+IDirect3DIndexBuffer9* g_indexBuffer = nullptr;
+
+typedef HRESULT(WINAPI* SetVertexDeclaration_t)(IDirect3DDevice9*,
+                                                IDirect3DVertexDeclaration9*);
+typedef HRESULT(WINAPI* SetStreamSource_t)(IDirect3DDevice9*, UINT,
+                                           IDirect3DVertexBuffer9*, UINT, UINT);
+typedef HRESULT(WINAPI* SetIndices_t)(IDirect3DDevice9*, IDirect3DIndexBuffer9*);
+typedef HRESULT(WINAPI* DrawIndexedPrimitiveUP_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT,
+                                                  UINT, UINT, const void*, D3DFORMAT,
+                                                  const void*, UINT);
+typedef HRESULT(WINAPI* DrawPrimitiveUP_t)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT,
+                                           const void*, UINT);
+DrawIndexedPrimitiveUP_t g_origDrawIndexedPrimitiveUP = nullptr;
+DrawPrimitiveUP_t g_origDrawPrimitiveUP = nullptr;
+SetVertexDeclaration_t g_origSetVertexDeclaration = nullptr;
+SetStreamSource_t g_origSetStreamSource = nullptr;
+SetIndices_t g_origSetIndices = nullptr;
+
+const char* DeclTypeName(int t) {
+    switch (t) {
+        case D3DDECLTYPE_FLOAT1: return "float1";
+        case D3DDECLTYPE_FLOAT2: return "float2";
+        case D3DDECLTYPE_FLOAT3: return "float3";
+        case D3DDECLTYPE_FLOAT4: return "float4";
+        case D3DDECLTYPE_D3DCOLOR: return "d3dcolor";
+        case D3DDECLTYPE_UBYTE4: return "ubyte4";
+        case D3DDECLTYPE_SHORT2: return "short2";
+        case D3DDECLTYPE_SHORT4: return "short4";
+        case D3DDECLTYPE_UBYTE4N: return "ubyte4n";
+        case D3DDECLTYPE_SHORT2N: return "short2n";
+        case D3DDECLTYPE_SHORT4N: return "short4n";
+        case D3DDECLTYPE_FLOAT16_2: return "half2";
+        case D3DDECLTYPE_FLOAT16_4: return "half4";
+        default: return "?";
+    }
+}
+
+// Only stream 0 is recorded: SR3 may split data across streams, and if the fields we need are
+// not all in stream 0 we must know that rather than silently read the wrong bytes.
+VertexLayout ParseDeclaration(IDirect3DVertexDeclaration9* decl) {
+    VertexLayout out;
+    if (!decl) return out;
+    D3DVERTEXELEMENT9 elems[64]{};   // MAXD3DDECLLENGTH is 64; the header constant is not
+                                     // exposed by every SDK version, so size it explicitly
+    UINT count = 0;
+    if (FAILED(decl->GetDeclaration(elems, &count))) return out;
+    for (UINT i = 0; i < count; ++i) {
+        const D3DVERTEXELEMENT9& e = elems[i];
+        if (e.Stream == 0xFF) break;          // D3DDECL_END
+        ++out.elements;
+        if (e.Stream != 0) continue;
+        VertexField f{static_cast<int>(e.Offset), static_cast<int>(e.Type)};
+        switch (e.Usage) {
+            case D3DDECLUSAGE_POSITION:     if (e.UsageIndex == 0) out.pos = f; break;
+            case D3DDECLUSAGE_NORMAL:       if (e.UsageIndex == 0) out.normal = f; break;
+            case D3DDECLUSAGE_TEXCOORD:     if (e.UsageIndex == 0) out.uv = f; break;
+            case D3DDECLUSAGE_BLENDWEIGHT:  out.blendWeight = f; break;
+            case D3DDECLUSAGE_BLENDINDICES: out.blendIndex = f; break;
+            default: break;
+        }
+    }
+    out.parsed = true;
+    return out;
+}
+
+HRESULT WINAPI Hook_SetVertexDeclaration(IDirect3DDevice9* device,
+                                         IDirect3DVertexDeclaration9* decl) {
+    const auto it = g_layouts.find(decl);
+    if (it != g_layouts.end()) {
+        g_currentLayout = it->second;
+    } else {
+        g_currentLayout = ParseDeclaration(decl);
+        if (decl) g_layouts[decl] = g_currentLayout;
+    }
+    return g_origSetVertexDeclaration(device, decl);
+}
+
+HRESULT WINAPI Hook_SetStreamSource(IDirect3DDevice9* device, UINT stream,
+                                    IDirect3DVertexBuffer9* buffer, UINT offset, UINT stride) {
+    if (stream == 0) { g_stream0 = buffer; g_stream0Offset = offset; g_stream0Stride = stride; }
+    return g_origSetStreamSource(device, stream, buffer, offset, stride);
+}
+
+HRESULT WINAPI Hook_SetIndices(IDirect3DDevice9* device, IDirect3DIndexBuffer9* indices) {
+    g_indexBuffer = indices;
+    return g_origSetIndices(device, indices);
+}
+
+// Diagnostic: dump the layout of real world-geometry draws, so the field offsets can be
+// checked by eye before any of this is trusted to build vertices.
+unsigned g_geomReports = 0;
+void ReportGeometry(UINT numVertices, UINT primitiveCount) {
+    if (!g_settings.logGeometry || g_geomReports >= 30 || !g_publishCount) return;
+    if (!g_currentLayout.parsed || g_currentLayout.pos.offset < 0) return;
+    if (g_currentVSClass & VS_SCREEN) return;      // want real geometry, not quads
+    if (g_current.light.kind != LightShader::NotLight) return;
+    ++g_geomReports;
+    Log("geom #%u: verts=%u prims=%u stride=%u elems=%u | pos@%d(%s) normal@%d(%s) "
+        "uv@%d(%s) bw@%d(%s) bi@%d(%s) | skinned=%d vb=%p ib=%p diffuseStage=%d",
+        g_geomReports, numVertices, primitiveCount, g_stream0Stride, g_currentLayout.elements,
+        g_currentLayout.pos.offset, DeclTypeName(g_currentLayout.pos.type),
+        g_currentLayout.normal.offset, DeclTypeName(g_currentLayout.normal.type),
+        g_currentLayout.uv.offset, DeclTypeName(g_currentLayout.uv.type),
+        g_currentLayout.blendWeight.offset, DeclTypeName(g_currentLayout.blendWeight.type),
+        g_currentLayout.blendIndex.offset, DeclTypeName(g_currentLayout.blendIndex.type),
+        (g_currentVSClass & VS_SKINNED) ? 1 : 0,
+        static_cast<void*>(g_stream0), static_cast<void*>(g_indexBuffer),
+        g_current.diffuseStage);
+}
+
+// Assemble the collapse shader once, lazily. c255 is used because the engine's own constants
+// stop at c243 (Bone_weights c52 + 192), so nothing can overwrite it. Extra outputs are
+// declared so pixel shaders reading texcoord/colour still have their inputs linked.
+IDirect3DVertexShader9* GetKillVS(IDirect3DDevice9* device) {
+    if (g_killVS || g_killVSTried) return g_killVS;
+    g_killVSTried = true;
+    HMODULE d3dx = LoadLibraryA("d3dx9_43.dll");
+    if (!d3dx) { Log("cull: d3dx9_43.dll not found - blank-quad cull disabled"); return nullptr; }
+    auto assemble = reinterpret_cast<D3DXAssembleShader_t>(
+        GetProcAddress(d3dx, "D3DXAssembleShader"));
+    if (!assemble) { Log("cull: D3DXAssembleShader missing"); return nullptr; }
+
+    static const char* kSrc =
+        "vs_3_0\n"
+        "def c255, 0, 0, 0, 1\n"
+        "dcl_position o0\n"
+        "dcl_texcoord0 o1\n"
+        "dcl_texcoord1 o2\n"
+        "dcl_color0 o3\n"
+        "mov o0, c255\n"
+        "mov o1, c255\n"
+        "mov o2, c255\n"
+        "mov o3, c255\n";
+
+    ID3DXBufferLite* code = nullptr;
+    ID3DXBufferLite* errors = nullptr;
+    const HRESULT hr = assemble(kSrc, static_cast<UINT>(strlen(kSrc)), nullptr, nullptr, 0,
+                                &code, &errors);
+    if (FAILED(hr) || !code) {
+        Log("cull: shader assembly failed (hr=0x%08X)", hr);
+        if (errors) errors->Release();
+        return nullptr;
+    }
+    const HRESULT cr = g_origCreateVertexShader(
+        device, static_cast<const DWORD*>(code->GetBufferPointer()), &g_killVS);
+    Log("cull: collapse shader %s", SUCCEEDED(cr) ? "ready" : "FAILED to create");
+    code->Release();
+    if (errors) errors->Release();
+    if (FAILED(cr)) g_killVS = nullptr;
+    return g_killVS;
+}
+
+// The white plane: an UNTEXTURED quad. The first attempt also required the screen-space class
+// and matched nothing, which proves the plane's vertex shader does reference projTM - it is
+// classified as world geometry even though it behaves as a fullscreen quad. So key on the
+// geometry signature instead: no texture at stage 0, and at most two triangles.
+// The user also reports Remix will not let them tag it in Game Setup, which is consistent:
+// the categorizer works on textures, and this draw has none.
+bool IsBlankScreenQuad(UINT primCount) {
+    if (!g_publishCount || g_current.light.kind != LightShader::NotLight) return false;
+    // pass-level bisection takes priority: collapse everything drawn to the chosen target
+    if (g_settings.collapseTarget >= 0 && g_currentTarget == g_settings.collapseTarget)
+        return true;
+    // (a) genuinely nothing bound - rare, only 1 draw in an 18,000-frame session
+    if (g_settings.cullBlankScreenQuads && g_boundTextures[0] == nullptr && primCount <= 2)
+        return true;
+    // (b) the real case: the shader never samples stage 0, so Remix shades this draw with a
+    // stale texture left by an earlier draw. This is what makes the planes and spheres cycle
+    // through unrelated images, and why no texture tag or ignore-hash could ever catch them -
+    // the offending texture is different every frame and belongs to something legitimate.
+    return g_settings.cullStaleAlbedoDraws && g_current.isPixelShader &&
+           !g_current.samplesStage0;
+}
+
+// Diagnostic: report the shape of untextured draws so the plane can be identified from the
+// log rather than guessed at. Capped so it cannot flood the file.
+unsigned g_blankReports = 0;
+void ReportBlankDraw(UINT primCount, UINT vertCount) {
+    if (!g_settings.logBlankDraws || g_blankReports >= 40 || !g_publishCount) return;
+    if (g_boundTextures[0] != nullptr) return;
+    if (g_current.light.kind != LightShader::NotLight) return;
+    ++g_blankReports;
+    Log("blank draw #%u: prims=%u verts=%u vsClass=%u (screen=%d skinned=%d proc=%d) "
+        "stage1=%p cameraMatch=%d",
+        g_blankReports, primCount, vertCount, g_currentVSClass,
+        (g_currentVSClass & VS_SCREEN) ? 1 : 0, (g_currentVSClass & VS_SKINNED) ? 1 : 0,
+        (g_currentVSClass & VS_PROCEDURAL) ? 1 : 0,
+        static_cast<void*>(g_boundTextures[1]), DrawMatchesPublishedCamera() ? 1 : 0);
+}
+
+bool ShouldSkipDrawClass() {
+    if (!g_publishCount) return false;
+    // EmitLight has already run for this draw, so the light is harvested either way.
+    if (g_current.light.kind != LightShader::NotLight) return g_settings.skipLightVolumes;
+    if (g_settings.skipCameraMismatch && !DrawMatchesPublishedCamera()) return true;
+    for (int i = 0; i < g_settings.skipTargetCount; ++i)
+        if (g_currentTarget == g_settings.skipTargets[i]) return true;
+    return (g_settings.skipSkinned && (g_currentVSClass & VS_SKINNED)) ||
+           (g_settings.skipProcedural && (g_currentVSClass & VS_PROCEDURAL)) ||
+           (g_settings.skipScreenSpace && (g_currentVSClass & VS_SCREEN));
+}
+
+// The UP (user-pointer) draws take geometry as a plain memory array rather than a vertex
+// buffer - the exact submission form the re-submission project intends to produce. Hooked only
+// to find out who uses them and for what.
+// Does this UP draw span the whole screen in pixel coordinates? The engine's composite quads
+// are 2 triangles covering 0..width x 0..height exactly; nothing else submitted this way is
+// that size, so the test is specific without needing a shader or texture heuristic.
+bool IsFullscreenUPQuad(UINT primitiveCount, const void* data, UINT stride) {
+    if (!g_settings.cullFullscreenQuads || !data || stride < 12) return false;
+    if (primitiveCount != 2 || !g_backWidth || !g_backHeight) return false;
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+    for (UINT i = 0; i < 4; ++i) {
+        const float* f = reinterpret_cast<const float*>(p + i * stride);
+        minX = min(minX, f[0]); maxX = max(maxX, f[0]);
+        minY = min(minY, f[1]); maxY = max(maxY, f[1]);
+    }
+    const float w = static_cast<float>(g_backWidth), h = static_cast<float>(g_backHeight);
+    // Do NOT require the quad to start at the origin. The first version did, and it matched
+    // only the intro video (which vanished, proving the mechanism works) while missing every
+    // gameplay composite: those are inset, e.g. 40..1240 instead of 0..1280. Instead: the quad
+    // must lie inside the back buffer in pixel space and cover most of it.
+    if (minX < -1.0f || minY < -1.0f || maxX > w + 1.0f || maxY > h + 1.0f) return false;
+    return (maxX - minX) >= 0.4f * w && (maxY - minY) >= 0.4f * h;
+}
+
+// ================================================================ FFP conversion (mode=1)
+// The approach proven by BRAGme/sr2-rtx-remix-proxy on Saints Row 2 - same studio, same engine
+// lineage, same problem. Remix path-traces FIXED-FUNCTION geometry natively; anything else it
+// has to RECONSTRUCT from vertex-shader output, and that reconstruction is the root of nearly
+// every defect chased in this project: mis-scaled short2 UVs, meshes duplicated 2-3x, quads
+// landing on the camera, stale albedo.
+//
+// So instead of publishing a camera and hoping vertex capture reconstructs correctly, each
+// world draw is re-issued as fixed function: null both shaders, apply world/view/projection
+// through SetTransform, set up texture stage 0 with the real albedo, disable stages 1-7, draw,
+// then restore. Remix then receives unambiguous geometry with no guessing involved.
+//
+// Deliberately NOT converted: skinned meshes (they transform through the c52 bone palette, so
+// objTM is meaningless for them - the SR2 proxy skips them too), screen-space quads, and light
+// volumes (EmitLight harvests those and they must keep their own state).
+unsigned g_ffpConverted = 0, g_ffpSkipped = 0, g_albedoBlanked = 0;
+
+typedef HRESULT(WINAPI* SetTextureStageState_t)(IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
+typedef HRESULT(WINAPI* SetRenderState_t)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+SetTextureStageState_t g_origSetTextureStageState = nullptr;
+SetRenderState_t g_origSetRenderState = nullptr;
+
+bool ShouldConvertToFFP() {
+    if (!g_settings.ffpConvert || !g_publishCount) return false;
+    if (g_current.light.kind != LightShader::NotLight) return false;  // lights keep their state
+    if (g_currentVSClass & (VS_SCREEN | VS_SKINNED | VS_PROCEDURAL)) return false;
+    if (!g_haveView || !g_haveViewProj) return false;
+    // A shader that takes objTM must have supplied a fresh one; a shader that does not is
+    // already in world space and gets identity.
+    if (g_currentVSUsesObjTM) return g_worldFresh && g_haveWorld;
+    return true;
+}
+
+// Returns the texture that was in stage 0, or nullptr if no conversion happened.
+bool BeginFFP(IDirect3DDevice9* device, IDirect3DBaseTexture9** restoreTex,
+              IDirect3DVertexShader9** restoreVS, IDirect3DPixelShader9** restorePS) {
+    if (!ShouldConvertToFFP()) { ++g_ffpSkipped; return false; }
+    *restoreVS = g_currentVS;
+    *restorePS = nullptr;
+    *restoreTex = nullptr;
+
+    g_publishing = true;
+    g_origSetVertexShader(device, nullptr);
+    g_origSetPixelShader(device, nullptr);
+
+    static const D3DMATRIX kIdentity = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    g_origSetTransform(device, D3DTS_WORLD,
+                       g_currentVSUsesObjTM ? &g_world : &kIdentity);
+    g_origSetTransform(device, D3DTS_VIEW, &g_lastView);
+    g_origSetTransform(device, D3DTS_PROJECTION, &g_lastProjection);
+
+    // Put the shader's real diffuse in stage 0. Saints Row leaves stage 0 holding whatever the
+    // previous draw bound for most materials, which is why surfaces wore other objects'
+    // textures; under FFP the stage-0 texture IS the material, so this matters more than ever.
+    const int stage = g_current.albedoStage;
+    if (g_current.albedoRank > 0 && stage >= 0 && stage < 16 && stage != 0 &&
+        g_boundTextures[stage]) {
+        *restoreTex = g_boundTextures[0] ? g_boundTextures[0]
+                                         : reinterpret_cast<IDirect3DBaseTexture9*>(1);
+        g_origSetTexture(device, 0, g_boundTextures[stage]);
+        ++g_albedoFixes;
+    } else if (g_current.albedoRank == 0 && g_boundTextures[0]) {
+        // No colour texture in this shader at all. Whatever is in stage 0 is a normal or
+        // specular map, so unbind it - untextured white beats a normal map as base colour.
+        *restoreTex = g_boundTextures[0];
+        g_origSetTexture(device, 0, nullptr);
+        ++g_albedoBlanked;
+    }
+
+    if (g_origSetTextureStageState) {
+        g_origSetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        g_origSetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_origSetTextureStageState(device, 0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        g_origSetTextureStageState(device, 0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        g_origSetTextureStageState(device, 0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        g_origSetTextureStageState(device, 0, D3DTSS_TEXCOORDINDEX, 0);
+        for (DWORD s = 1; s < 8; ++s)
+            g_origSetTextureStageState(device, s, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    }
+    g_publishing = false;
+    ++g_ffpConverted;
+    return true;
+}
+
+void EndFFP(IDirect3DDevice9* device, bool active, IDirect3DBaseTexture9* restoreTex,
+            IDirect3DVertexShader9* restoreVS, IDirect3DPixelShader9* restorePS) {
+    if (!active) return;
+    g_publishing = true;
+    if (restoreTex) {
+        IDirect3DBaseTexture9* t =
+            (restoreTex == reinterpret_cast<IDirect3DBaseTexture9*>(1)) ? nullptr : restoreTex;
+        g_origSetTexture(device, 0, t);
+        g_boundTextures[0] = t;
+    }
+    g_origSetVertexShader(device, restoreVS);
+    g_origSetPixelShader(device, restorePS);
+    g_publishing = false;
+}
+
+// ---------------------------------------------------------------- render-target inventory
+// Which PASS is a draw part of? Characters and buildings are not separable this way - they are
+// draws into the same targets, distinguished only by shader. But the engine's passes are
+// genuinely separate render targets: the inferred-lighting depth/DSF prepass, the low-res light
+// buffer, the material pass, shadow maps, reflections, the post chain. That is a real engine
+// structure rather than a heuristic, which makes it the sounder axis to bisect along.
+struct RenderTargetInfo {
+    IDirect3DSurface9* surface;
+    UINT width, height;
+    D3DFORMAT format;
+    unsigned draws;
+};
+// 2026-08-15: was 24, and the engine hit the cap exactly - 24 targets discovered and ~1200 of
+// ~2000 draws/frame left unattributed because every target past the cap indexed as -1. The
+// truncation was visible in the numbers, not guessed at.
+constexpr int kMaxTargets = 96;
+RenderTargetInfo g_targets[kMaxTargets] = {};
+int g_targetCount = 0;
+
+typedef HRESULT(WINAPI* SetRenderTarget_t)(IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
+SetRenderTarget_t g_origSetRenderTarget = nullptr;
+
+int IndexOfTarget(IDirect3DSurface9* s) {
+    for (int i = 0; i < g_targetCount; ++i)
+        if (g_targets[i].surface == s) return i;
+    if (g_targetCount >= kMaxTargets || !s) return -1;
+    D3DSURFACE_DESC d{};
+    if (FAILED(s->GetDesc(&d))) return -1;
+    RenderTargetInfo& t = g_targets[g_targetCount];
+    t.surface = s;
+    t.width = d.Width;
+    t.height = d.Height;
+    t.format = d.Format;
+    t.draws = 0;
+    Log("render target #%d: %ux%u format=%d", g_targetCount, d.Width, d.Height,
+        static_cast<int>(d.Format));
+    return g_targetCount++;
+}
+
+HRESULT WINAPI Hook_SetRenderTarget(IDirect3DDevice9* device, DWORD index,
+                                    IDirect3DSurface9* target) {
+    if (index == 0) g_currentTarget = IndexOfTarget(target);
+    return g_origSetRenderTarget(device, index, target);
+}
+
+// The camera-welded plane is not a UP draw (measured: the engine only submits fullscreen
+// composite quads that way during video playback). So it comes from a vertex buffer. This
+// locks stream 0 for small draws - 2 triangles or fewer - and reports the actual positions,
+// which is the same measure-at-the-source approach that identified the UP quads in one shot.
+// Capped hard: locking a buffer mid-frame can stall, so this is a diagnostic, never a default.
+unsigned g_smallDrawReports = 0;
+void ReportSmallVBDraw(UINT primCount, UINT numVertices, UINT minIndex) {
+    if (!g_settings.logSmallDraws || g_smallDrawReports >= 24 || !g_publishCount) return;
+    if (primCount > 2 || !g_stream0 || g_stream0Stride < 12) return;
+    if (!g_currentLayout.parsed || g_currentLayout.pos.offset < 0) return;
+
+    void* mapped = nullptr;
+    const UINT first = g_stream0Offset + minIndex * g_stream0Stride;
+    if (FAILED(g_stream0->Lock(first, 4 * g_stream0Stride, &mapped,
+                               D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) || !mapped) {
+        return;
+    }
+    char verts[192];
+    int n = 0;
+    verts[0] = '\0';
+    const unsigned char* p = static_cast<const unsigned char*>(mapped);
+    for (UINT i = 0; i < 4 && n < 150; ++i) {
+        const float* f = reinterpret_cast<const float*>(
+            p + i * g_stream0Stride + g_currentLayout.pos.offset);
+        n += _snprintf_s(verts + n, sizeof(verts) - n, _TRUNCATE,
+                         "(%.1f %.1f %.1f) ", f[0], f[1], f[2]);
+    }
+    g_stream0->Unlock();
+    ++g_smallDrawReports;
+    Log("small VB draw #%u: prims=%u verts=%u stride=%u vs=%p screenSpace=%d tex0=%p | %s",
+        g_smallDrawReports, primCount, numVertices, g_stream0Stride,
+        static_cast<void*>(g_currentVS), g_currentIsScreenSpace ? 1 : 0,
+        static_cast<void*>(g_boundTextures[0]), verts);
+}
+
+// Record every distinct quad footprint once, so the real sizes are known instead of assumed.
+struct QuadBounds { int x0, y0, x1, y1; };
+QuadBounds g_seenQuads[24];
+unsigned g_seenQuadCount = 0;
+void NoteQuadBounds(UINT primitiveCount, const void* data, UINT stride, bool culled) {
+    if (!g_settings.logGeometry || !data || stride < 12 || primitiveCount != 2) return;
+    if (g_seenQuadCount >= 24) return;
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    float minX = 1e30f, maxX = -1e30f, minY = 1e30f, maxY = -1e30f;
+    for (UINT i = 0; i < 4; ++i) {
+        const float* f = reinterpret_cast<const float*>(p + i * stride);
+        minX = min(minX, f[0]); maxX = max(maxX, f[0]);
+        minY = min(minY, f[1]); maxY = max(maxY, f[1]);
+    }
+    QuadBounds b{static_cast<int>(minX), static_cast<int>(minY),
+                 static_cast<int>(maxX), static_cast<int>(maxY)};
+    for (unsigned i = 0; i < g_seenQuadCount; ++i) {
+        const QuadBounds& s = g_seenQuads[i];
+        if (s.x0 == b.x0 && s.y0 == b.y0 && s.x1 == b.x1 && s.y1 == b.y1) return;
+    }
+    g_seenQuads[g_seenQuadCount++] = b;
+    Log("quad footprint #%u: x %d..%d  y %d..%d  (%dx%d) %s",
+        g_seenQuadCount, b.x0, b.x1, b.y0, b.y1, b.x1 - b.x0, b.y1 - b.y0,
+        culled ? "COLLAPSED" : "kept");
+}
+
+HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* device, D3DPRIMITIVETYPE type,
+                                    UINT primitiveCount, const void* data, UINT stride) {
+    const int region = ClassifyCaller(_ReturnAddress());
+    ++g_drawsByRegion[region][3];
+    ReportEngineDraw(region, "DrawPrimitiveUP", primitiveCount * 3, primitiveCount,
+                     _ReturnAddress());
+    ReportUPDraw("DrawPrimitiveUP", primitiveCount, data, stride, _ReturnAddress());
+
+    // Collapse rather than skip: the draw still executes, so device state and frame pacing are
+    // untouched. Dropping draws outright is what froze the image when skipScreenSpace was tried.
+    IDirect3DVertexShader9* restoreVS = nullptr;
+    const bool fullscreen = IsFullscreenUPQuad(primitiveCount, data, stride);
+    NoteQuadBounds(primitiveCount, data, stride, fullscreen);
+    if (fullscreen) {
+        if (IDirect3DVertexShader9* kill = GetKillVS(device)) {
+            restoreVS = g_currentVS;
+            g_publishing = true;
+            g_origSetVertexShader(device, kill);
+            g_publishing = false;
+            ++g_culledBlankQuads;
+        }
+    }
+    const HRESULT hr = g_origDrawPrimitiveUP(device, type, primitiveCount, data, stride);
+    if (restoreVS) {
+        g_publishing = true;
+        g_origSetVertexShader(device, restoreVS);
+        g_publishing = false;
+    }
+    return hr;
+}
+
+HRESULT WINAPI Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9* device, D3DPRIMITIVETYPE type,
+                                           UINT minIndex, UINT numVertices, UINT primitiveCount,
+                                           const void* indexData, D3DFORMAT indexFormat,
+                                           const void* vertexData, UINT stride) {
+    const int region = ClassifyCaller(_ReturnAddress());
+    ++g_drawsByRegion[region][2];
+    ReportEngineDraw(region, "DrawIndexedPrimitiveUP", numVertices, primitiveCount,
+                     _ReturnAddress());
+    return g_origDrawIndexedPrimitiveUP(device, type, minIndex, numVertices, primitiveCount,
+                                        indexData, indexFormat, vertexData, stride);
+}
+
+HRESULT WINAPI Hook_DrawPrimitive(IDirect3DDevice9* device, D3DPRIMITIVETYPE type,
+                                  UINT start, UINT count) {
+    const int region = ClassifyCaller(_ReturnAddress());
+    ++g_drawsByRegion[region][1];
+    ReportEngineDraw(region, "DrawPrimitive", count * 3, count, _ReturnAddress());
+    if (g_currentTarget >= 0) ++g_targets[g_currentTarget].draws;
+    EmitLight(device);   // must run before any skip: this is where lights are harvested
+    if (ShouldSkipCompositePass()) { ++g_skippedComposites; return D3D_OK; }
+    if (ShouldSkipDrawClass()) { ++g_skippedByClass; return D3D_OK; }
+    // Collapse-shader swap: bind, draw, restore. The draw still happens.
+    ReportBlankDraw(count, count * 3);
+    IDirect3DVertexShader9* restoreVS = nullptr;
+    if (IsBlankScreenQuad(count)) {
+        if (IDirect3DVertexShader9* kill = GetKillVS(device)) {
+            restoreVS = g_currentVS;
+            g_publishing = true;
+            g_origSetVertexShader(device, kill);
+            g_publishing = false;
+            ++g_culledBlankQuads;
+        }
+    }
+    ++g_totalDraws;
+    const bool screenSpace = BeginScreenSpaceDraw(device);
+    IDirect3DBaseTexture9* previous = BeginAlbedoFix(device, screenSpace);
+    const HRESULT hr = g_origDrawPrimitive(device, type, start, count);
+    EndAlbedoFix(device, previous);
+    EndScreenSpaceDraw(device, screenSpace);
+    if (restoreVS) {
+        g_publishing = true;
+        g_origSetVertexShader(device, restoreVS);
+        g_publishing = false;
+    }
+    return hr;
+}
+
+HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* device, D3DPRIMITIVETYPE type,
+                                         INT baseVertex, UINT minIndex, UINT numVertices,
+                                         UINT startIndex, UINT primitiveCount) {
+    const int region = ClassifyCaller(_ReturnAddress());
+    ++g_drawsByRegion[region][0];
+    ReportEngineDraw(region, "DrawIndexedPrimitive", numVertices, primitiveCount,
+                     _ReturnAddress());
+    EmitLight(device);   // must run before any skip: this is where lights are harvested
+    if (ShouldSkipCompositePass()) { ++g_skippedComposites; return D3D_OK; }
+    if (ShouldSkipDrawClass()) { ++g_skippedByClass; return D3D_OK; }
+    // Collapse-shader swap: bind, draw, restore. The draw still happens.
+    ReportBlankDraw(primitiveCount, numVertices);
+    ReportGeometry(numVertices, primitiveCount);
+    ReportSmallVBDraw(primitiveCount, numVertices, minIndex);
+    if (g_currentTarget >= 0) ++g_targets[g_currentTarget].draws;
+    IDirect3DVertexShader9* restoreVS = nullptr;
+    if (IsBlankScreenQuad(primitiveCount)) {
+        if (IDirect3DVertexShader9* kill = GetKillVS(device)) {
+            restoreVS = g_currentVS;
+            g_publishing = true;
+            g_origSetVertexShader(device, kill);
+            g_publishing = false;
+            ++g_culledBlankQuads;
+        }
+    }
+    ++g_totalDraws;
+    IDirect3DBaseTexture9* ffpTex = nullptr;
+    IDirect3DVertexShader9* ffpVS = nullptr;
+    IDirect3DPixelShader9* ffpPS = nullptr;
+    const bool ffp = BeginFFP(device, &ffpTex, &ffpVS, &ffpPS);
+    const bool screenSpace = ffp ? false : BeginScreenSpaceDraw(device);
+    IDirect3DBaseTexture9* previous = ffp ? nullptr : BeginAlbedoFix(device, screenSpace);
+    const HRESULT hr = g_origDrawIndexedPrimitive(device, type, baseVertex, minIndex,
+                                                  numVertices, startIndex, primitiveCount);
+    EndFFP(device, ffp, ffpTex, ffpVS, ffpPS);
+    g_worldFresh = false;    // consumed; the next draw must supply its own objTM
+    EndAlbedoFix(device, previous);
+    EndScreenSpaceDraw(device, screenSpace);
+    if (restoreVS) {
+        g_publishing = true;
+        g_origSetVertexShader(device, restoreVS);
+        g_publishing = false;
+    }
+    return hr;
+}
+
+// Only here to answer the diagnostic question: does the game ever set FF transforms?
+HRESULT WINAPI Hook_SetTransform(IDirect3DDevice9* device, D3DTRANSFORMSTATETYPE state,
+                                 const D3DMATRIX* matrix) {
+    if (!g_publishing) ++g_gameSetTransformCalls;
+    return g_origSetTransform(device, state, matrix);
+}
+
+HRESULT WINAPI Hook_Present(IDirect3DDevice9* device, const RECT* src, const RECT* dst,
+                            HWND window, const RGNDATA* dirty) {
+    ++g_frames;
+    if (g_candidatesThisFrame > g_maxCandidatesPerFrame)
+        g_maxCandidatesPerFrame = g_candidatesThisFrame;
+    if (g_frames == 60 || g_frames % 600 == 0) {
+        Log("frame %u | published=%u (%.2f/frame) rejected=%u candidates=%u/%u | "
+            "light shaders=%u lights emitted=%u (%.1f/frame) | game SetTransform=%u",
+            g_frames, g_publishCount, static_cast<double>(g_publishCount) / g_frames,
+            g_rejectedPasses, g_candidatesThisFrame, g_maxCandidatesPerFrame,
+            g_lightShadersSeen, g_lightsEmitted,
+            static_cast<double>(g_lightsEmitted) / g_frames, g_gameSetTransformCalls);
+        Log("    camera at %.1f %.1f %.1f | albedo fixes=%.1f/frame | "
+            "demoted-to-UI draws=%.1f/frame (%u shaders, %u of them skinned)",
+            g_camX, g_camY, g_camZ,
+            static_cast<double>(g_albedoFixes) / g_frames,
+            static_cast<double>(g_screenSpaceDraws) / g_frames,
+            static_cast<unsigned>(g_screenSpaceVS.size()), g_skinnedShaders);
+        Log("    light-volume draws kept out of the world: %.1f/frame | "
+            "composite passes skipped entirely: %.1f/frame | "
+            "draws dropped by class: %.1f/frame | blank quads collapsed: %.1f/frame | "
+            "FFP converted: %.1f/frame (albedo blanked %.1f/frame)",
+            static_cast<double>(g_lightVolumeDraws) / g_frames,
+            static_cast<double>(g_skippedComposites) / g_frames,
+            static_cast<double>(g_skippedByClass) / g_frames,
+            static_cast<double>(g_culledBlankQuads) / g_frames,
+            static_cast<double>(g_ffpConverted) / g_frames,
+            static_cast<double>(g_albedoBlanked) / g_frames);
+        // Which engine region submits the geometry, per frame. Answers whether the
+        // fixed-function renderers carry real world geometry or only UI/video.
+        for (int r = 0; r < kRegions; ++r) {
+            const unsigned* d = g_drawsByRegion[r];
+            if (!(d[0] | d[1] | d[2] | d[3])) continue;
+            Log("    draws from %-22s indexed=%.1f prim=%.1f indexedUP=%.1f UP=%.1f /frame",
+                kRegionName[r],
+                static_cast<double>(d[0]) / g_frames, static_cast<double>(d[1]) / g_frames,
+                static_cast<double>(d[2]) / g_frames, static_cast<double>(d[3]) / g_frames);
+        }
+        for (int t = 0; t < g_targetCount; ++t) {
+            if (!g_targets[t].draws) continue;
+            Log("    target #%d %ux%u fmt=%d : %.1f draws/frame%s", t, g_targets[t].width,
+                g_targets[t].height, static_cast<int>(g_targets[t].format),
+                static_cast<double>(g_targets[t].draws) / g_frames,
+                (t == g_settings.collapseTarget) ? "  <-- COLLAPSED" : "");
+        }
+        Log("    draws using a camera OTHER than the published one: %u of %u (%.1f%%)",
+            g_mismatchedDraws, g_totalDraws,
+            g_totalDraws ? 100.0 * g_mismatchedDraws / g_totalDraws : 0.0);
+    }
+    g_publishedThisFrame = false;
+    g_candidatesThisFrame = 0;
+    return g_origPresent(device, src, dst, window, dirty);
+}
+
+void HookDevice(void* device, const char* origin, const D3DPRESENT_PARAMETERS* params) {
+    static bool hooked = false;
+    if (hooked || !device) return;
+    hooked = true;
+    if (params && params->BackBufferHeight) {
+        g_targetAspect = static_cast<float>(params->BackBufferWidth) /
+                         static_cast<float>(params->BackBufferHeight);
+        g_backWidth = params->BackBufferWidth;
+        g_backHeight = params->BackBufferHeight;
+    }
+    Log("%s -> hooking device vtable (backbuffer %ux%u, aspect %.3f)", origin,
+        params ? params->BackBufferWidth : 0, params ? params->BackBufferHeight : 0,
+        g_targetAspect);
+    PatchVTable(device, kSlotSetVertexShaderConstantF,
+                &Hook_SetVertexShaderConstantF, reinterpret_cast<void**>(&g_origSetVSConstF));
+    PatchVTable(device, kSlotSetTransform,
+                &Hook_SetTransform, reinterpret_cast<void**>(&g_origSetTransform));
+    PatchVTable(device, kSlotPresent,
+                &Hook_Present, reinterpret_cast<void**>(&g_origPresent));
+    PatchVTable(device, kSlotSetLight, nullptr, reinterpret_cast<void**>(&g_origSetLight));
+    PatchVTable(device, kSlotLightEnable, nullptr,
+                reinterpret_cast<void**>(&g_origLightEnable));
+    PatchVTable(device, kSlotCreatePixelShader, &Hook_CreatePixelShader,
+                reinterpret_cast<void**>(&g_origCreatePixelShader));
+    PatchVTable(device, kSlotSetPixelShader, &Hook_SetPixelShader,
+                reinterpret_cast<void**>(&g_origSetPixelShader));
+    PatchVTable(device, kSlotSetPixelShaderConstantF, &Hook_SetPixelShaderConstantF,
+                reinterpret_cast<void**>(&g_origSetPSConstF));
+    PatchVTable(device, kSlotSetTexture, &Hook_SetTexture,
+                reinterpret_cast<void**>(&g_origSetTexture));
+    PatchVTable(device, kSlotCreateVertexShader, &Hook_CreateVertexShader,
+                reinterpret_cast<void**>(&g_origCreateVertexShader));
+    PatchVTable(device, kSlotSetVertexShader, &Hook_SetVertexShader,
+                reinterpret_cast<void**>(&g_origSetVertexShader));
+    PatchVTable(device, kSlotDrawPrimitive, &Hook_DrawPrimitive,
+                reinterpret_cast<void**>(&g_origDrawPrimitive));
+    PatchVTable(device, kSlotDrawIndexedPrimitive, &Hook_DrawIndexedPrimitive,
+                reinterpret_cast<void**>(&g_origDrawIndexedPrimitive));
+    // Geometry interception. DrawIndexedPrimitiveUP is only captured, never replaced: it is
+    // the call the re-submission path will use to hand Remix its own triangles.
+    PatchVTable(device, kSlotSetVertexDeclaration, &Hook_SetVertexDeclaration,
+                reinterpret_cast<void**>(&g_origSetVertexDeclaration));
+    PatchVTable(device, kSlotSetStreamSource, &Hook_SetStreamSource,
+                reinterpret_cast<void**>(&g_origSetStreamSource));
+    PatchVTable(device, kSlotSetIndices, &Hook_SetIndices,
+                reinterpret_cast<void**>(&g_origSetIndices));
+    PatchVTable(device, kSlotDrawIndexedPrimitiveUP, &Hook_DrawIndexedPrimitiveUP,
+                reinterpret_cast<void**>(&g_origDrawIndexedPrimitiveUP));
+    PatchVTable(device, kSlotDrawPrimitiveUP, &Hook_DrawPrimitiveUP,
+                reinterpret_cast<void**>(&g_origDrawPrimitiveUP));
+    PatchVTable(device, kSlotSetRenderTarget, &Hook_SetRenderTarget,
+                reinterpret_cast<void**>(&g_origSetRenderTarget));
+    PatchVTable(device, kSlotSetTextureStageState, nullptr,
+                reinterpret_cast<void**>(&g_origSetTextureStageState));
+    PatchVTable(device, kSlotSetRenderState, nullptr,
+                reinterpret_cast<void**>(&g_origSetRenderState));
+}
+
+HRESULT WINAPI Hook_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type,
+                                 HWND focus, DWORD flags,
+                                 D3DPRESENT_PARAMETERS* params,
+                                 IDirect3DDevice9** returned) {
+    const HRESULT hr = g_origCreateDevice(self, adapter, type, focus, flags, params, returned);
+    if (SUCCEEDED(hr) && returned && *returned) HookDevice(*returned, "CreateDevice", params);
+    else Log("CreateDevice FAILED hr=0x%08lX", hr);
+    return hr;
+}
+
+HRESULT WINAPI Hook_CreateDeviceEx(IDirect3D9Ex* self, UINT adapter, D3DDEVTYPE type,
+                                   HWND focus, DWORD flags,
+                                   D3DPRESENT_PARAMETERS* params,
+                                   D3DDISPLAYMODEEX* mode,
+                                   IDirect3DDevice9Ex** returned) {
+    const HRESULT hr =
+        g_origCreateDeviceEx(self, adapter, type, focus, flags, params, mode, returned);
+    if (SUCCEEDED(hr) && returned && *returned) HookDevice(*returned, "CreateDeviceEx", params);
+    else Log("CreateDeviceEx FAILED hr=0x%08lX", hr);
+    return hr;
+}
+
+// ---------------------------------------------------------------- startup
+
+DWORD WINAPI Init(LPVOID) {
+    // Shared access so the log can be tailed while the game runs.
+    g_log = _fsopen("sr3-rtx.log", "w", _SH_DENYNO);
+    LoadSettings();
+    Log("sr3-rtx loaded (pid %lu)", GetCurrentProcessId());
+    Log("mode: %s", g_settings.mode == kModeEngine ? "ENGINE (binary patching)"
+                                                   : "INTERPOSE (d3d9 heuristics)");
+    if (g_settings.mode == kModeEngine) VerifyEngineMap();
+    Log("settings: publishWorld=%d oneCameraPerFrame=%d aspectFilter=%d",
+        g_settings.publishWorld, g_settings.oneCameraPerFrame, g_settings.aspectFilter);
+
+    // d3d9.dll here is the Remix bridge client. Wait for it if the game hasn't loaded it yet.
+    HMODULE d3d9 = nullptr;
+    for (int attempt = 0; attempt < 200 && !d3d9; ++attempt) {
+        d3d9 = GetModuleHandleA("d3d9.dll");
+        if (!d3d9) Sleep(50);
+    }
+    if (!d3d9) {
+        Log("d3d9.dll never appeared - giving up");
+        return 0;
+    }
+
+    // Our probe object shares its vtable with whatever the game creates, so patching the
+    // vtable here installs the hook for the game's instance too. Both the plain and the Ex
+    // factory are covered because we cannot tell in advance which the game uses.
+    // Nothing is released: dropping the last reference before the game creates its own
+    // could tear down the Remix bridge underneath us.
+    auto create = reinterpret_cast<IDirect3D9*(WINAPI*)(UINT)>(
+        GetProcAddress(d3d9, "Direct3DCreate9"));
+    if (create) {
+        if (IDirect3D9* probe = create(D3D_SDK_VERSION)) {
+            const bool ok = PatchVTable(probe, kSlotCreateDevice, &Hook_CreateDevice,
+                                        reinterpret_cast<void**>(&g_origCreateDevice));
+            Log(ok ? "CreateDevice hook installed" : "failed to patch IDirect3D9 vtable");
+        } else {
+            Log("Direct3DCreate9 returned null");
+        }
+    } else {
+        Log("Direct3DCreate9 not exported");
+    }
+
+    auto createEx = reinterpret_cast<HRESULT(WINAPI*)(UINT, IDirect3D9Ex**)>(
+        GetProcAddress(d3d9, "Direct3DCreate9Ex"));
+    if (createEx) {
+        IDirect3D9Ex* probeEx = nullptr;
+        if (SUCCEEDED(createEx(D3D_SDK_VERSION, &probeEx)) && probeEx) {
+            const bool ok = PatchVTable(probeEx, kSlotCreateDeviceEx, &Hook_CreateDeviceEx,
+                                        reinterpret_cast<void**>(&g_origCreateDeviceEx));
+            Log(ok ? "CreateDeviceEx hook installed" : "failed to patch IDirect3D9Ex vtable");
+        } else {
+            Log("Direct3DCreate9Ex failed");
+        }
+    } else {
+        Log("Direct3DCreate9Ex not exported");
+    }
+    return 0;
+}
+
+}  // namespace
+
+BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
+    if (reason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(module);
+        CreateThread(nullptr, 0, Init, nullptr, 0, nullptr);
+    }
+    return TRUE;
+}

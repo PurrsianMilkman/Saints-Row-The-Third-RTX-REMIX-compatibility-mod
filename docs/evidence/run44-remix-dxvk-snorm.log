@@ -1,0 +1,414 @@
+[00:25:03.546] info:  Game: SaintsRowTheThird.exe
+[00:25:03.546] info:  DXVK_Remix: remix-1.5.2+68edea01
+[00:25:03.546] info:  System Information Report:
+[00:25:03.546] info:    CPU: (AuthenticAMD) AMD Ryzen 7 9800X3D 8-Core Processor           
+[00:25:03.546] info:    Memory: 17.60 GiB / 61.66 GiB physical, 20.11 GiB / 61.66 GiB committed, 4.91 GiB / 128.00 TiB virtual (current process)
+[00:25:03.546] info:    OS: Windows 10.0 Build 26100
+[00:25:03.546] info:  Initializing RtxOptions...
+[00:25:03.546] info:  Initializing RtxOption system layers...
+[00:25:03.546] info:  Attempting to parse option layer: dxvk.conf...
+[00:25:03.546] info:  No config file found at: dxvk.conf
+[00:25:03.550] info:  Did not find app config for executable: D:\SR3RTXREMIXCOMP\Saints Row 3\SaintsRowTheThird.exe
+[00:25:03.550] info:  Attempting to parse option layer: rtx.conf...
+[00:25:03.550] info:  Found config file: rtx.conf
+[00:25:03.550] info:  Parsed config file.
+[00:25:03.551] info:  Effective Combined Config for DXVK Options configuration:
+[00:25:03.551] info:    rtx.worldSpaceUiBackgroundTextures = -0x196FBE2CAB23CB16, -0x3AE04A318AA2ABB1, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0xAEFF15798CCD7C0E
+[00:25:03.551] info:    rtx.worldSpaceUiTextures = -0x196FBE2CAB23CB16, -0x4E866A84552FD39A, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0xA7CBBE4B23C16C44, -0xF1A42F0E82DC4604
+[00:25:03.551] info:    rtx.fallbackLightRadiance = 100, 100, 100
+[00:25:03.551] info:    rtx.ignoreLastTextureStage = False
+[00:25:03.551] info:    rtx.lightConversionMaxIntensity = 1e+06
+[00:25:03.551] info:    rtx.allowCubemaps = False
+[00:25:03.551] info:    rtx.graph.enable = True
+[00:25:03.551] info:    rtx.enableLegacyRectLightConeShaping = False
+[00:25:03.551] info:    rtx.raytracedRenderTarget.enable = True
+[00:25:03.551] info:    rtx.useVertexCapture = True
+[00:25:03.551] info:    rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = False
+[00:25:03.551] info:    rtx.fallbackLightMode = 0
+[00:25:03.551] info:    rtx.enableDirectLighting = True
+[00:25:03.551] info:    rtx.opacityMicromap.showAdvancedOptions = False
+[00:25:03.551] info:    rtx.enableProbabilisticUnorderedResolveInIndirectRays = True
+[00:25:03.551] info:    rtx.vertexColorIsBakedLighting = True
+[00:25:03.551] info:    rtx.ignoreGameDirectionalLights = False
+[00:25:03.551] info:    rtx.camera.freeCameraPosition = -2.30478, 1.02876, 3.97308
+[00:25:03.551] info:    rtx.particles.enable = True
+[00:25:03.551] info:    rtx.fallbackLightType = 0
+[00:25:03.551] info:    rtx.freeCameraSpeed = 15.7
+[00:25:03.551] info:    rtx.bloom.enable = False
+[00:25:03.551] info:    rtx.opacityMicromap.enable = True
+[00:25:03.551] info:    rtx.camera.freeCameraPitch = 0
+[00:25:03.551] info:    rtx.playerModel.enablePrimaryShadows = True
+[00:25:03.551] info:    rtx.ignoreTextures = 0x645CF1DD53FF6357, 0x978271113F293CE4, 0xE36A6560E0C77FD1, -0x196FBE2CAB23CB16, -0x345AB54DAB08D132, -0x3869FE5976C427DA, -0x4B17F5ECBA4D9E4D, -0x4FAE8190C113287B, -0x5DD44DFBED334A45, -0x6AC1CFA187D094AA, -0x98E491E6E58092DE, -0xA22BB20412CCB5BB, -0xA8C25F3663FBB3FE, -0xB47ED05C13408F82, -0xC75ABEE33CC2F1EF, -0xCB3B4D13CF8165EE
+[00:25:03.551] info:    rtx.enableAlwaysCalculateAABB = False
+[00:25:03.551] info:    rtx.autoExposure.evMaxValue = 13.01
+[00:25:03.551] info:    rtx.defaultToAdvancedUI = True
+[00:25:03.551] info:    rtx.camera.freeCameraYaw = 0
+[00:25:03.551] info:    rtx.autoExposure.evMinValue = -80
+[00:25:03.551] info:    rtx.particleTextures = -0x0AB9F87BFA6F8D28, -0x196FBE2CAB23CB16, -0x735E25575F1EAC7C, -0xA808F9F82BE29ABC, -0xD0E0D57A3AB84F1D, -0xEA0A8CC4E7F589A7
+[00:25:03.551] info:    rtx.captureInstances = True
+[00:25:03.551] info:    rtx.lightConversionDistantLightFixedIntensity = 2.21
+[00:25:03.551] info:    rtx.leftHandedCoordinateSystem = False
+[00:25:03.551] info:    rtx.captureOverwriteExistingCapture = False
+[00:25:03.551] info:    rtx.ignoreGameSpotLights = False
+[00:25:03.551] info:    rtx.enableCullingInSecondaryRays = False
+[00:25:03.551] info:    rtx.opacityMicromap.building.splitBillboardGeometry = True
+[00:25:03.551] info:    rtx.opacityMicromap.enableBinding = True
+[00:25:03.551] info:    rtx.autoExposure.enabled = True
+[00:25:03.551] info:    rtx.enableShaderExecutionReorderingInPathtracerIntegrateIndirect = True
+[00:25:03.551] info:    rtx.skyBoxTextures = 0x4822C3D374F8E5ED, 0xA23FA925AC35598D, 0xFBC6C5FFCC8AD259, -0x18B606E2E3F7E0DC, -0x645CF1DD53FF6357
+[00:25:03.551] info:    rtx.enableSecondaryBounces = True
+[00:25:03.551] info:    rtx.fallbackLightDirection = -0.2, -1, 0.4
+[00:25:03.551] info:    rtx.enableCulling = True
+[00:25:03.551] info:    rtx.enableRectLightConeShapingRatioScaling = False
+[00:25:03.551] info:    rtx.enableRussianRoulette = True
+[00:25:03.551] info:    rtx.camera.lockFreeCamera = False
+[00:25:03.551] info:    rtx.orthographicIsUI = False
+[00:25:03.551] info:    rtx.capture.correctBakedTransforms = False
+[00:25:03.551] info:    rtx.useVertexCapturedNormals = True
+[00:25:03.551] info:    rtx.captureShowMenuOnHotkey = True
+[00:25:03.551] info:    rtx.zUp = False
+[00:25:03.551] info:    rtx.suppressLightKeeping = False
+[00:25:03.551] info:    rtx.ignoreLights = -0x645CF1DD53FF6357
+[00:25:03.551] info:    rtx.viewModel.enable = False
+[00:25:03.551] info:    rtx.opacityMicromap.enableResetEveryFrame = False
+[00:25:03.551] info:    rtx.useHighlightLegacyMode = False
+[00:25:03.551] info:    rtx.ignoreGamePointLights = False
+[00:25:03.551] info:    rtx.camera.enableFreeCamera = False
+[00:25:03.551] info:    rtx.lightConversionSphereLightFixedRadius = 0.18
+[00:25:03.551] info:    rtx.skyAutoDetect = 0
+[00:25:03.551] info:    rtx.useHighlightUnsafeAnchorMode = False
+[00:25:03.551] info:    rtx.lightConversionDistantLightFixedAngle = 0.0349
+[00:25:03.551] info:    rtx.enableRaytracing = True
+[00:25:03.551] info:    rtx.fogIgnoreSky = False
+[00:25:03.551] info:    rtx.useWorldMatricesForShaders = True
+[00:25:03.551] info:    rtx.localtonemap.finalizeWithACES = True
+[00:25:03.551] info:    rtx.fallbackLightAngle = 5
+[00:25:03.551] info:    rtx.enableMultiStageTextureFactorBlending = True
+[00:25:03.551] info:  Attempting to parse option layer: user.conf...
+[00:25:03.551] info:  Found config file: user.conf
+[00:25:03.551] info:  Parsed config file.
+[00:25:03.551] info:  RtxOption system layer initialization complete.
+[00:25:03.551] info:  Geometry generation hash rule:
+[00:25:03.551] info:  	positions
+[00:25:03.551] info:  	indices
+[00:25:03.551] info:  	texcoords
+[00:25:03.551] info:  	geometrydescriptor
+[00:25:03.551] info:  	vertexlayout
+[00:25:03.551] info:  	vertexshader
+[00:25:03.551] info:  [RTX Neural Radiance Cache] Selected Medium preset mode.
+[00:25:03.551] info:  Geometry asset hash rule:
+[00:25:03.551] info:  	positions
+[00:25:03.552] info:  	indices
+[00:25:03.552] info:  	geometrydescriptor
+[00:25:03.552] info:  Effective RtxOption values (after all config layers and migrations):
+[00:25:03.552] info:    rtx.enableFirstBounceLobeProbabilityDithering = False
+[00:25:03.552] info:    rtx.worldSpaceUiTextures = -0x196FBE2CAB23CB16, -0x4E866A84552FD39A, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0xA7CBBE4B23C16C44, -0xF1A42F0E82DC4604
+[00:25:03.552] info:    rtx.dlfg.enable = False
+[00:25:03.552] info:    rtx.di.enableRayTracedBiasCorrection = False
+[00:25:03.552] info:    rtx.dlssPreset = 2
+[00:25:03.552] info:    rtx.russianRouletteMaxContinueProbability = 0.7
+[00:25:03.552] info:    rtx.worldSpaceUiBackgroundTextures = -0x196FBE2CAB23CB16, -0x3AE04A318AA2ABB1, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0xAEFF15798CCD7C0E
+[00:25:03.552] info:    rtx.minOpaqueSpecularLobeSamplingProbability = 0.05
+[00:25:03.552] info:    rtx.russianRoulette1stBounceMinContinueProbability = 0.4
+[00:25:03.552] info:    rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = False
+[00:25:03.552] info:    rtx.neuralRadianceCache.qualityPreset = 0
+[00:25:03.552] info:    rtx.di.stealBoundaryPixelSamplesWhenOutsideOfScreen = False
+[00:25:03.552] info:    rtx.fallbackLightMode = 0
+[00:25:03.552] info:    rtx.neuralRadianceCache.trainingMaxPathBounces = 6
+[00:25:03.552] info:    rtx.enableUnorderedResolveInIndirectRays = False
+[00:25:03.552] info:    rtx.camera.freeCameraPosition = -2.30478, 1.02876, 3.97308
+[00:25:03.552] info:    rtx.di.initialSampleCount = 3
+[00:25:03.552] info:    rtx.freeCameraSpeed = 15.7
+[00:25:03.552] info:    rtx.pathMaxBounces = 2
+[00:25:03.552] info:    rtx.bloom.enable = False
+[00:25:03.552] info:    rtx.neuralRadianceCache.terminationHeuristicThreshold = 0.001
+[00:25:03.552] info:    rtx.neuralRadianceCache.smallestResolvableFeatureSizeMeters = 0.06
+[00:25:03.552] info:    rtx.ignoreTextures = 0x645CF1DD53FF6357, 0x978271113F293CE4, 0xE36A6560E0C77FD1, -0x196FBE2CAB23CB16, -0x345AB54DAB08D132, -0x3869FE5976C427DA, -0x4B17F5ECBA4D9E4D, -0x4FAE8190C113287B, -0x5DD44DFBED334A45, -0x6AC1CFA187D094AA, -0x98E491E6E58092DE, -0xA22BB20412CCB5BB, -0xA8C25F3663FBB3FE, -0xB47ED05C13408F82, -0xC75ABEE33CC2F1EF, -0xCB3B4D13CF8165EE
+[00:25:03.552] info:    rtx.restirGI.biasCorrectionMode = 1
+[00:25:03.552] info:    rtx.defaultToAdvancedUI = True
+[00:25:03.552] info:    rtx.denoiseDirectAndIndirectLightingSeparately = False
+[00:25:03.552] info:    rtx.autoExposure.evMinValue = -80
+[00:25:03.552] info:    rtx.lightConversionDistantLightFixedIntensity = 2.21
+[00:25:03.552] info:    rtx.volumetrics.froxelGridResolutionScale = 16
+[00:25:03.552] info:    rtx.di.enableDenoiserConfidence = False
+[00:25:03.552] info:    rtx.skyBoxTextures = 0x4822C3D374F8E5ED, 0xA23FA925AC35598D, 0xFBC6C5FFCC8AD259, -0x18B606E2E3F7E0DC, -0x645CF1DD53FF6357
+[00:25:03.552] info:    rtx.di.disocclusionSamples = 2
+[00:25:03.552] info:    rtx.di.permutationSamplingNthFrame = 1
+[00:25:03.552] info:    rtx.particleTextures = -0x0AB9F87BFA6F8D28, -0x196FBE2CAB23CB16, -0x735E25575F1EAC7C, -0xA808F9F82BE29ABC, -0xD0E0D57A3AB84F1D, -0xEA0A8CC4E7F589A7
+[00:25:03.552] info:    rtx.neuralRadianceCache.targetNumTrainingIterations = 2
+[00:25:03.552] info:    rtx.qualityDLSS = 3
+[00:25:03.552] info:    rtx.orthographicIsUI = False
+[00:25:03.552] info:    rtx.gui.textureGridThumbnailScale = 2.5
+[00:25:03.552] info:    rtx.di.enableBestLightSampling = False
+[00:25:03.552] info:    rtx.enableReplacementAssets = False
+[00:25:03.552] info:    rtx.ignoreLights = -0x645CF1DD53FF6357
+[00:25:03.552] info:    rtx.gui.legacyTextureGuiShowAssignedOnly = True
+[00:25:03.552] info:    rtx.demodulate.enableDirectLightBoilingFilter = False
+[00:25:03.552] info:    rtx.graphicsPreset = 4
+[00:25:03.552] info:    rtx.restirGI.useReflectionReprojection = False
+[00:25:03.552] info:    rtx.postFilterThreshold = 10
+[00:25:03.552] info:    rtx.postfx.enable = False
+[00:25:03.552] info:    rtx.russianRouletteMode = 1
+[00:25:03.552] info:    rtx.di.enableSampleStealing = False
+[00:25:03.552] info:    rtx.minOpaqueDiffuseLobeSamplingProbability = 0.05
+[00:25:03.552] info:    rtx.neeCache.enableModeAfterFirstBounce = 2
+[00:25:03.552] info:    rtx.pathMinBounces = 0
+[00:25:03.552] info:    rtx.enableTransmissionApproximationInIndirectRays = True
+[00:25:03.552] info:    rtx.autoExposure.evMaxValue = 13.01
+[00:25:03.552] info:    rtx.enableStochasticAlphaBlend = False
+[00:25:03.552] info:    rtx.usePostFilter = False
+[00:25:03.552] info:    rtx.lightConversionSphereLightFixedRadius = 0.18
+[00:25:03.552] info:    rtx.fallbackLightRadiance = 100, 100, 100
+[00:25:03.552] info:    rtx.lightConversionMaxIntensity = 1e+06
+[00:25:03.552] info:    rtx.gui.showLegacyTextureGui = True
+[00:25:03.552] info:    rtx.volumetrics.enable = False
+[00:25:03.552] info:    rtx.volumetrics.froxelDepthSlices = 48
+[00:25:03.552] info:  Built-in extension providers:
+[00:25:03.552] info:    Win32 WSI
+[00:25:03.552] info:    OpenVR
+[00:25:03.552] info:    OpenXR
+[00:25:03.552] info:  OpenVR: could not open registry key, status 2
+[00:25:03.552] info:  OpenVR: Failed to locate module
+[00:25:03.626] info:  Enabled instance extensions:
+[00:25:03.626] info:    VK_KHR_external_memory_capabilities
+[00:25:03.626] info:    VK_KHR_external_semaphore_capabilities
+[00:25:03.626] info:    VK_KHR_get_physical_device_properties2
+[00:25:03.626] info:    VK_KHR_get_surface_capabilities2
+[00:25:03.626] info:    VK_KHR_surface
+[00:25:03.626] info:    VK_KHR_win32_surface
+[00:25:03.630] info:  Enabled Layer Names:
+[00:25:03.693] warn:  Skipping Integrated GPU adapter: AMD Radeon(TM) Graphics
+[00:25:03.693] info:  D3D9: VK_FORMAT_D16_UNORM_S8_UINT -> VK_FORMAT_D24_UNORM_S8_UINT
+[00:25:03.693] info:  NVIDIA GeForce RTX 3090:
+[00:25:03.693] info:    Driver: 610.88.0
+[00:25:03.693] info:    Vulkan: 1.4.341
+[00:25:03.693] info:    Memory Heap[0]: 
+[00:25:03.693] info:      Size: 24322 MiB
+[00:25:03.693] info:      Flags: 0x1
+[00:25:03.693] info:      Memory Type[1]: Property Flags = 0x1
+[00:25:03.693] info:      Memory Type[2]: Property Flags = 0x1
+[00:25:03.693] info:      Memory Type[5]: Property Flags = 0x7
+[00:25:03.693] info:    Memory Heap[1]: 
+[00:25:03.693] info:      Size: 31571 MiB
+[00:25:03.693] info:      Flags: 0x0
+[00:25:03.693] info:      Memory Type[0]: Property Flags = 0x0
+[00:25:03.693] info:      Memory Type[3]: Property Flags = 0x6
+[00:25:03.693] info:      Memory Type[4]: Property Flags = 0xe
+[00:25:03.693] info:  D3D9: VK_FORMAT_D16_UNORM_S8_UINT -> VK_FORMAT_D24_UNORM_S8_UINT
+[00:25:03.693] info:  NVIDIA GeForce RTX 3090:
+[00:25:03.693] info:    Driver: 610.88.0
+[00:25:03.693] info:    Vulkan: 1.4.341
+[00:25:03.693] info:    Memory Heap[0]: 
+[00:25:03.693] info:      Size: 24322 MiB
+[00:25:03.693] info:      Flags: 0x1
+[00:25:03.693] info:      Memory Type[1]: Property Flags = 0x1
+[00:25:03.693] info:      Memory Type[2]: Property Flags = 0x1
+[00:25:03.693] info:      Memory Type[5]: Property Flags = 0x7
+[00:25:03.693] info:    Memory Heap[1]: 
+[00:25:03.693] info:      Size: 31571 MiB
+[00:25:03.693] info:      Flags: 0x0
+[00:25:03.693] info:      Memory Type[0]: Property Flags = 0x0
+[00:25:03.693] info:      Memory Type[3]: Property Flags = 0x6
+[00:25:03.693] info:      Memory Type[4]: Property Flags = 0xe
+[00:25:03.694] info:  Process set as DPI aware
+[00:25:04.105] info:  Device properties:
+[00:25:04.105] info:    Device name:     : NVIDIA GeForce RTX 3090
+[00:25:04.105] info:    Vendor name:     : NVIDIA
+[00:25:04.105] info:    Device ID:       : 0x2204
+[00:25:04.105] info:    Vendor ID:       : 0x10de
+[00:25:04.105] info:    Driver version   : 610.88.0
+[00:25:04.105] info:  Enabled device extensions:
+[00:25:04.105] info:    VK_EXT_4444_formats
+[00:25:04.105] info:    VK_EXT_calibrated_timestamps
+[00:25:04.105] info:    VK_EXT_conservative_rasterization
+[00:25:04.105] info:    VK_EXT_custom_border_color
+[00:25:04.105] info:    VK_EXT_depth_clip_enable
+[00:25:04.105] info:    VK_EXT_extended_dynamic_state
+[00:25:04.105] info:    VK_EXT_full_screen_exclusive
+[00:25:04.105] info:    VK_EXT_memory_priority
+[00:25:04.105] info:    VK_EXT_opacity_micromap
+[00:25:04.105] info:    VK_EXT_robustness2
+[00:25:04.105] info:    VK_EXT_shader_atomic_float
+[00:25:04.105] info:    VK_EXT_shader_demote_to_helper_invocation
+[00:25:04.105] info:    VK_EXT_shader_viewport_index_layer
+[00:25:04.105] info:    VK_EXT_transform_feedback
+[00:25:04.105] info:    VK_EXT_vertex_attribute_divisor
+[00:25:04.105] info:    VK_KHR_acceleration_structure
+[00:25:04.105] info:    VK_KHR_buffer_device_address
+[00:25:04.105] info:    VK_KHR_create_renderpass2
+[00:25:04.105] info:    VK_KHR_deferred_host_operations
+[00:25:04.105] info:    VK_KHR_depth_stencil_resolve
+[00:25:04.105] info:    VK_KHR_draw_indirect_count
+[00:25:04.105] info:    VK_KHR_driver_properties
+[00:25:04.105] info:    VK_KHR_external_memory
+[00:25:04.105] info:    VK_KHR_external_memory_win32
+[00:25:04.105] info:    VK_KHR_external_semaphore
+[00:25:04.105] info:    VK_KHR_external_semaphore_win32
+[00:25:04.105] info:    VK_KHR_image_format_list
+[00:25:04.105] info:    VK_KHR_maintenance4
+[00:25:04.105] info:    VK_KHR_pipeline_library
+[00:25:04.105] info:    VK_KHR_push_descriptor
+[00:25:04.105] info:    VK_KHR_ray_query
+[00:25:04.105] info:    VK_KHR_ray_tracing_pipeline
+[00:25:04.105] info:    VK_KHR_sampler_mirror_clamp_to_edge
+[00:25:04.105] info:    VK_KHR_shader_float16_int8
+[00:25:04.105] info:    VK_KHR_shader_float_controls
+[00:25:04.105] info:    VK_KHR_swapchain
+[00:25:04.105] info:    VK_KHR_synchronization2
+[00:25:04.105] info:    VK_NVX_binary_import
+[00:25:04.105] info:    VK_NVX_image_view_handle
+[00:25:04.105] info:    VK_NV_low_latency
+[00:25:04.105] info:    VK_NV_present_metering
+[00:25:04.105] info:    VK_NV_ray_tracing_invocation_reorder
+[00:25:04.106] info:  Device features:
+[00:25:04.106] info:    robustBufferAccess                     : 1
+[00:25:04.106] info:    fullDrawIndexUint32                    : 1
+[00:25:04.106] info:    imageCubeArray                         : 1
+[00:25:04.106] info:    independentBlend                       : 1
+[00:25:04.106] info:    geometryShader                         : 1
+[00:25:04.106] info:    tessellationShader                     : 0
+[00:25:04.106] info:    sampleRateShading                      : 1
+[00:25:04.106] info:    dualSrcBlend                           : 0
+[00:25:04.106] info:    logicOp                                : 0
+[00:25:04.106] info:    multiDrawIndirect                      : 0
+[00:25:04.106] info:    drawIndirectFirstInstance              : 0
+[00:25:04.106] info:    depthClamp                             : 1
+[00:25:04.106] info:    depthBiasClamp                         : 1
+[00:25:04.106] info:    fillModeNonSolid                       : 1
+[00:25:04.106] info:    depthBounds                            : 1
+[00:25:04.106] info:    multiViewport                          : 1
+[00:25:04.106] info:    samplerAnisotropy                      : 1
+[00:25:04.106] info:    textureCompressionBC                   : 1
+[00:25:04.106] info:    occlusionQueryPrecise                  : 1
+[00:25:04.106] info:    pipelineStatisticsQuery                : 1
+[00:25:04.106] info:    vertexPipelineStoresAndAtomics         : 1
+[00:25:04.106] info:    fragmentStoresAndAtomics               : 0
+[00:25:04.106] info:    shaderImageGatherExtended              : 0
+[00:25:04.106] info:    shaderStorageImageExtendedFormats      : 0
+[00:25:04.106] info:    shaderStorageImageReadWithoutFormat    : 0
+[00:25:04.106] info:    shaderStorageImageWriteWithoutFormat   : 1
+[00:25:04.106] info:    shaderClipDistance                     : 1
+[00:25:04.106] info:    shaderCullDistance                     : 1
+[00:25:04.106] info:    shaderFloat64                          : 0
+[00:25:04.106] info:    shaderInt64                            : 0
+[00:25:04.106] info:    variableMultisampleRate                : 0
+[00:25:04.106] info:    hostQueryReset                         : 1
+[00:25:04.106] info:    scalarBlockLayout                      : 1
+[00:25:04.106] info:    uniformBufferStandardLayout            : 1
+[00:25:04.106] info:  VK_EXT_4444_formats
+[00:25:04.106] info:    formatA4R4G4B4                         : 1
+[00:25:04.106] info:    formatA4B4G4R4                         : 1
+[00:25:04.106] info:  VK_EXT_custom_border_color
+[00:25:04.106] info:    customBorderColors                     : 1
+[00:25:04.106] info:    customBorderColorWithoutFormat         : 1
+[00:25:04.106] info:  VK_EXT_depth_clip_enable
+[00:25:04.106] info:    depthClipEnable                        : 1
+[00:25:04.106] info:  VK_EXT_extended_dynamic_state
+[00:25:04.106] info:    extendedDynamicState                   : 1
+[00:25:04.106] info:  VK_EXT_memory_priority
+[00:25:04.106] info:    memoryPriority                         : 1
+[00:25:04.106] info:  VK_EXT_robustness2
+[00:25:04.106] info:    robustBufferAccess2                    : 1
+[00:25:04.106] info:    robustImageAccess2                     : 0
+[00:25:04.106] info:    nullDescriptor                         : 1
+[00:25:04.106] info:  VK_EXT_shader_demote_to_helper_invocation
+[00:25:04.106] info:    shaderDemoteToHelperInvocation         : 1
+[00:25:04.106] info:  VK_EXT_transform_feedback
+[00:25:04.106] info:    transformFeedback                      : 1
+[00:25:04.106] info:    geometryStreams                        : 0
+[00:25:04.106] info:  VK_EXT_vertex_attribute_divisor
+[00:25:04.106] info:    vertexAttributeInstanceRateDivisor     : 1
+[00:25:04.106] info:    vertexAttributeInstanceRateZeroDivisor : 1
+[00:25:04.106] info:  VK_KHR_buffer_device_address
+[00:25:04.106] info:    bufferDeviceAddress                    : 1
+[00:25:04.106] info:  Queue families:
+[00:25:04.106] info:    Graphics : 0
+[00:25:04.106] info:    Transfer : 1
+[00:25:04.106] info:    Async Compute : 2
+[00:25:04.106] info:    Present : 2
+[00:25:04.317] info:  DXVK: Read 23944 valid state cache entries
+[00:25:04.317] info:  DXVK: Using 10 compiler threads
+[00:25:04.327] info:  USD plugin, Remix loaded!
+[00:25:04.327] info:  [RTX info] Neural Radiance Cache: supported
+[00:25:05.598] info:  NVIDIA DLSS Frame Generation not available on this hardware/platform: (code: 0x00000001, info: NVSDK_NGX_Result_Success)
+[00:25:05.600] info:  Reflex initialized successfully.
+[00:25:05.606] info:  Automatic Raytrace Mode Preset in use (Set rtx.raytraceModePreset to something other than Auto use a non-automatic preset)
+[00:25:05.606] info:  NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)
+[00:25:05.678] info:  [RTX info] Opacity Micromap: supported
+[00:25:05.678] info:  [RTX info] Shader Execution Reordering: not supported
+[00:25:05.678] info:  [RTX info] Shader Execution Reordering: disabled
+[00:25:05.678] info:  CPU supports SIMD: AVX2
+[00:25:05.682] info:  Adding asset search path: d:\sr3rtxremixcomp\saints row 3\rtx-remix\mods\sr3rtx\
+[00:25:05.682] info:  D3D9DeviceEx::ResetSwapChain:
+[00:25:05.682] info:    Requested Presentation Parameters
+[00:25:05.682] info:      - Width:              1280
+[00:25:05.682] info:      - Height:             720
+[00:25:05.682] info:      - Format:             D3D9Format::X8R8G8B8
+[00:25:05.682] info:      - Auto Depth Stencil: true
+[00:25:05.682] info:                  ^ Format: D3D9Format::D24S8
+[00:25:05.682] info:      - Windowed:           true
+[00:25:05.682] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Ice.usd
+[00:25:05.682] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Lens.usd
+[00:25:05.682] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeCamera_A01_01.usd
+[00:25:05.682] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeDigital_A02_01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeIsogrid_A01_01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeIsogrid_A02_01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeIsogrid_A03_01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_RTX_CompanionCube_A1_01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_RollCage.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Healthpack.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Space.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Pillow_A.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Ceramic.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Wood.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeDigital_A01_01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_SteamPunk_A01.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_ArtsAndCrafts.usd
+[00:25:05.683] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Cubus.usd
+[00:25:05.706] info:  Presenter: Actual swap chain properties:
+[00:25:05.706] info:    Format:       VK_FORMAT_R8G8B8A8_UNORM
+[00:25:05.706] info:    Present mode: VK_PRESENT_MODE_IMMEDIATE_KHR
+[00:25:05.706] info:    Buffer size:  1280x720
+[00:25:05.706] info:    Image count:  3
+[00:25:05.706] info:    Exclusive FS: 2
+[00:25:05.890] info:  Presenter: Actual swap chain properties:
+[00:25:05.890] info:    Format:       VK_FORMAT_R8G8B8A8_UNORM
+[00:25:05.890] info:    Present mode: VK_PRESENT_MODE_FIFO_KHR
+[00:25:05.890] info:    Buffer size:  1280x720
+[00:25:05.890] info:    Image count:  3
+[00:25:05.890] info:    Exclusive FS: 2
+[00:25:05.928] info:  No winproc detected, initiating bridge message channel for: 0000000015CF09A6
+[00:25:05.935] warn:  ConvertFormat: Unknown format encountered: 1396921934
+[00:25:06.995] info:  Presenter: Actual swap chain properties:
+[00:25:06.995] info:    Format:       VK_FORMAT_R8G8B8A8_UNORM
+[00:25:06.995] info:    Present mode: VK_PRESENT_MODE_FIFO_KHR
+[00:25:06.995] info:    Buffer size:  1280x720
+[00:25:06.995] info:    Image count:  3
+[00:25:06.995] info:    Exclusive FS: 2
+[00:25:07.033] info:  [RTX-Compatibility-Info] Trying to raytrace but not detecting a valid camera.
+[00:25:07.063] info:  Message channel UWM_REMIX_BRIDGE_REGISTER_THREADPROC_MSG established.
+[00:25:25.527] warn:  Found a null sampler. Fallback to linear-repeat
+[00:25:30.157] info:  [RTX-Compatibility-Info] Skipped drawcall, colour write disabled.
+[00:25:53.779] warn:  D3D9Texture2D::QueryInterface: Unknown interface query
+[00:25:53.779] warn:  794950f2-adfc-458a-905e-10a10b0b503b
+[00:25:53.780] info:  [RTX-Compatibility-Info] Found a draw call to a non-primary, non-raytraced render target. Falling back to rasterization
+[00:25:54.424] warn:  [rtx-interleaver] Unsupported texcoord buffer format (78), skipping texcoord
+[00:25:54.425] info:  [RTX-Compatibility-Info] Trying to raytrace an occlusion query. Ignoring.
+[00:25:54.427] warn:  D3D9DeviceEx::SetRenderState: Unhandled render state D3DRS_MULTISAMPLEANTIALIAS
+[00:25:54.427] info:  [RTX-Compatibility-Info] Trying to raytrace an unsupported primitive topology [1]. Ignoring.
+[00:25:54.457] warn:  Sky may not appear correct: sky intermediate format has been forced to HDR while the original sky is LDR and no HDR sky replacement has been found!
+[00:25:54.459] warn:  [rtx-interleaver] Unsupported color0 buffer format (109), skipping color0
+[00:25:54.576] info:  [RTX] Opacity Micromap: enabled
+[00:25:54.582] info:  RenderPass GBuffer Raytrace Mode: Ray Query (CS)
+[00:25:54.582] info:  RenderPass Integrate Direct Raytrace Mode: Ray Query (CS)
+[00:25:54.582] info:  RenderPass Integrate Indirect Raytrace Mode: Trace Ray (RGS)
+[00:25:54.594] info:  [RTX Neural Radiance Cache] NRC SDK: Loading the default network config data.
+[00:25:54.602] info:  [RTX Neural Radiance Cache] NRC v0.13 (22 January 2025) Context successfully initialized. 
+[00:25:54.652] info:  [RTX] Integrate Indirect Mode: Neural Radiance Cache - activated
+[00:25:54.743] info:  [RTX-Compatibility-Info] Trying to bind a texture to a mesh without UVs.  Was this intended?
+[00:25:54.919] info:  [RTX Opacity Micromap] Instance has non triangle list topology. This is only partially supported. Falling back to a conservative max value for estimated numTexelsPerMicroTriangle instead.
+[00:25:55.114] warn:  [RTX Opacity Micromap] Texcoord data is unavailable for calculateNumTexelsPerMicroTriangle(). Falling back to a conservative max value for estimated numTexelsPerMicroTriangle instead.
+[00:26:51.087] info:  [RTX Opacity Micromap] Instance does not have compatible texture coordinates. Ignoring the Opacity Micromap request.
+[00:26:52.043] warn:  [RTX] CameraManager: FOV of a camera changed between frames
+[00:29:00.532] info:  [RTX Opacity Micromap] Out of memory budget. Requested: 14366540 bytes. Free: 9874974 bytes, Budget: 1610612736 bytes
+[00:29:04.214] err:   [41] common device objects were not disposed of.

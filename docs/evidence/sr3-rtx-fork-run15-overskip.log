@@ -1,0 +1,185 @@
+sr3-rtx loaded (pid 27588) - FFP conversion, ported from sr2-rtx-remix-proxy
+settings: ffp=1 convertSkinned=0 perspectiveOnly=1 skipDepthOnly=1 finiteFar=1(far=5000) rankAlbedo=1 excludeRTAlbedo=1 injectLights=1 uvScale=0.00098
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device (backbuffer 1280x720, aspect 1.778)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+vertex layout #1: elems=3 pos=float4@0(stream 0) uv=float2 normal=0 color=1 skinned=0 positionT=0
+frame 60 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 snapshots/frame, 0.0 invalidations/frame)
+    SKIPPED entirely 0/frame (mode 2) | demoted to UI overlay 0/frame | OUTLIER converted (|world| > 20000): 0.0/frame
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+frame 600 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 snapshots/frame, 0.0 invalidations/frame)
+    SKIPPED entirely 0/frame (mode 2) | demoted to UI overlay 0/frame | OUTLIER converted (|world| > 20000): 0.0/frame
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+vertex layout #2: elems=2 pos=float4@0(stream 0) uv=float2 normal=0 color=0 skinned=0 positionT=0
+stream freq #1: stream=0 setting=0x00000001 -> plain count=1
+stream freq #2: stream=0 setting=0x00000001 -> plain count=1
+frame 1200 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 snapshots/frame, 0.0 invalidations/frame)
+    SKIPPED entirely 0/frame (mode 2) | demoted to UI overlay 0/frame | OUTLIER converted (|world| > 20000): 0.0/frame
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+stream freq #3: stream=0 setting=0x00000001 -> plain count=1
+stream freq #4: stream=0 setting=0x00000001 -> plain count=1
+stream freq #5: stream=0 setting=0x00000001 -> plain count=1
+stream freq #6: stream=0 setting=0x00000001 -> plain count=1
+stream freq #7: stream=0 setting=0x00000001 -> plain count=1
+stream freq #8: stream=0 setting=0x00000001 -> plain count=1
+vertex layout #3: elems=12 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+stream freq #9: stream=4 setting=0x80000001 -> INSTANCEDATA count=1
+stream freq #10: stream=0 setting=0x40000001 -> INDEXEDDATA count=1
+stream freq #11: stream=4 setting=0x80000001 -> INSTANCEDATA count=1
+stream freq #12: stream=0 setting=0x40000001 -> INDEXEDDATA count=1
+vertex layout #4: elems=12 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+view handedness baseline: determinant 1.000 (positive)
+camera: pos 96.3 147.7 36.1 | proj _11=1.6085 _22=2.8594 _33=1.00001 _43=-0.15 (aspect 1.778)
+vertex layout #5: elems=13 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #6: elems=11 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #7: elems=7 pos=float3@0(stream 0) uv=short2 normal=0 color=0 skinned=0 positionT=0
+short2 UV range #1: u -27..1025  v 60..1612  (verts=28 stride=16 off=12)
+vertex layout #8: elems=8 pos=float3@0(stream 0) uv=? normal=1 color=1 skinned=0 positionT=0
+short2 UV range #2: u -32020..8449  v -32368..32567  (verts=1879 stride=20 off=16)
+short2 UV range #3: u -31765..6295  v -32223..31364  (verts=2750 stride=20 off=16)
+vertex layout #9: elems=10 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #10: elems=13 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+short2 UV range #4: u 341..1477  v -9115..10482  (verts=792 stride=28 off=16)
+short2 UV range #5: u -19968..30722  v -7927..8985  (verts=1426 stride=20 off=16)
+short2 UV range #6: u -19968..30722  v -7927..8985  (verts=1426 stride=20 off=16)
+short2 UV range #7: u -21704..22605  v -6330..7354  (verts=1272 stride=20 off=16)
+short2 UV range #8: u -21704..22605  v -6330..7354  (verts=1272 stride=20 off=16)
+short2 UV range #9: u -21704..22605  v -6330..7354  (verts=1272 stride=20 off=16)
+short2 UV range #10: u -21704..22605  v -6330..7354  (verts=1272 stride=20 off=16)
+short2 UV range #11: u -21704..22605  v -6330..7354  (verts=1272 stride=20 off=16)
+short2 UV range #12: u -21704..22605  v -6330..7354  (verts=1272 stride=20 off=16)
+PROBE verts=74 prims=117 converted=0 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D87A30
+vertex layout #11: elems=6 pos=float3@0(stream 0) uv=short2 normal=1 color=1 skinned=0 positionT=0
+  depth-disabled draw #1082: verts=52    prims=26    zwrite=0 tex0=44F12B90 objTM=0 lightVolume=no ps='' size=39.8x33.4x26.2 centre=(53.2 52.6 -260.2) distFromCam=314.2
+PROBE verts=52 prims=26 converted=0 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D87A30
+  depth-disabled draw #1083: verts=40    prims=20    zwrite=0 tex0=44F11CB0 objTM=0 lightVolume=no ps='Diffuse_MapSampler' size=39.0x2.5x26.2 centre=(52.9 14.2 -260.2) distFromCam=328.0
+  depth-disabled draw #1084: verts=384   prims=192   zwrite=0 tex0=44F11A10 objTM=0 lightVolume=no ps='Diffuse_MapSampler' size=531.2x30.7x695.5 centre=(-189.4 28.4 -594.4) distFromCam=702.4
+  depth-disabled draw #1085: verts=144   prims=72    zwrite=0 tex0=44F11BD0 objTM=0 lightVolume=no ps='Diffuse_MapSampler' size=43.8x46.1x27.1 centre=(54.5 43.2 -260.2) distFromCam=317.0
+  depth-disabled draw #1086: verts=176   prims=88    zwrite=0 tex0=44F130D0 objTM=0 lightVolume=no ps='' size=41.1x160.1x153.1 centre=(50.5 192.5 -153.2) distFromCam=199.9
+  depth-disabled draw #1087: verts=1164  prims=582   zwrite=0 tex0=44F19B90 objTM=0 lightVolume=no ps='' size=139.2x254.3x559.8 centre=(101.1 141.4 -351.3) distFromCam=387.5
+  depth-disabled draw #1088: verts=1124  prims=562   zwrite=0 tex0=44F12650 objTM=0 lightVolume=no ps='' size=44.5x28.7x136.1 centre=(348.2 31.1 -288.1) distFromCam=426.8
+  depth-disabled draw #1089: verts=116   prims=58    zwrite=0 tex0=44F12F10 objTM=0 lightVolume=no ps='' size=32.1x3.5x20.9 centre=(52.0 10.0 -260.2) distFromCam=329.8
+vertex layout #12: elems=2 pos=float4@0(stream 0) uv=float4 normal=0 color=0 skinned=0 positionT=0
+vertex layout #13: elems=15 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #14: elems=14 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #15: elems=6 pos=float3@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+  depth-disabled draw #1145: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1146: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1147: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1148: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1149: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1150: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1151: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1152: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1153: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1154: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1155: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1156: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1157: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1158: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1159: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1160: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1161: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1162: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1163: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1164: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1165: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1166: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1167: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1168: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1169: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1170: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1171: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1172: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1173: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1174: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1175: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1176: verts=8     prims=12    zwrite=0 tex0=4A3A8A38 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+vertex layout #16: elems=3 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #17: elems=3 pos=float3@0(stream 0) uv=float2 normal=0 color=1 skinned=0 positionT=0
+vertex layout #18: elems=1 pos=float3@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #19: elems=1 pos=short4n@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #20: elems=2 pos=short4n@0(stream 0) uv=short2n normal=0 color=0 skinned=0 positionT=0
+vertex layout #21: elems=3 pos=float4@0(stream 0) uv=float4 normal=0 color=0 skinned=0 positionT=0
+vertex layout #22: elems=11 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+PROBE verts=74 prims=117 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Decal_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D8CDE8
+OUTLIER draw #1: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=26 converted=1 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=SRCALPHA dst=INVSRCALPHA | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Diffuse_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D8CDE8
+vertex layout #23: elems=14 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+call-order trace (V/v=SetVertexShader with/without objTM, P=projTM c28, O=objTM c32, W=view c48, D=draw converted, x=draw skipped):
+  Dvxvxvxvxxxvxvxvxvxvxxvxvxvxvxxvxxvxxvxvxxxxxxxxvxvxxxxvxxxxxxxxxxxxvxvxvxvxxvxxxxxxxxvxvxxvxxvxxvxv
+  xxvxvxxxxxxxxxxxxxvxxvxxvxvxvxvxvxxvxxvxxxxxxxvxxvxxxxxvxxvxvxxvxvxxvxxxxxvxxxxxxvDvxxxxvxxvxvxvxxxx
+  xxxxxxxvDDvxxxxxxxxxxvxxxxxxvxxxxxxxvxxxxxvxxxxvxxxxxxxxvxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxvxxxvxxx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxvxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+frame dump written to sr3-rtx-frame.log (3572 draws)
+sky probe: 40 depth-disabled draws in a frame of 3572
+PROBE verts=74 prims=117 converted=0 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D87A30
+PROBE verts=52 prims=26 converted=0 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D87A30
+PROBE verts=74 prims=117 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Decal_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D8CDE8
+OUTLIER draw #2: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=26 converted=1 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=SRCALPHA dst=INVSRCALPHA | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Diffuse_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D8CDE8
+PROBE verts=74 prims=117 converted=0 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D87A30
+PROBE verts=52 prims=26 converted=0 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D87A30
+PROBE verts=74 prims=117 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Decal_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D8CDE8
+OUTLIER draw #3: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=26 converted=1 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=SRCALPHA dst=INVSRCALPHA | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Diffuse_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D8CDE8
+PROBE verts=74 prims=117 converted=0 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D87A30
+PROBE verts=52 prims=26 converted=0 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D87A30
+PROBE verts=74 prims=117 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Decal_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D8CDE8
+OUTLIER draw #4: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=43 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Blend_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=14CFED28 target=14D8CDE8
+PROBE verts=52 prims=26 converted=1 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=SRCALPHA dst=INVSRCALPHA | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Diffuse_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D8CDE8
+vertex layout #24: elems=7 pos=float3@0(stream 0) uv=float3 normal=0 color=1 skinned=0 positionT=0
+PROBE verts=74 prims=117 converted=0 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D87A30
+PROBE verts=52 prims=26 converted=0 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D87A30
+PROBE verts=74 prims=117 converted=1 | zwrite=1 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Decal_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=1 | tex0=44F0FD30 target=14D8CDE8
+OUTLIER draw #5: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+PROBE verts=52 prims=26 converted=1 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=SRCALPHA dst=INVSRCALPHA | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Diffuse_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D8CDE8
+PROBE verts=52 prims=26 converted=0 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=ONE dst=ZERO | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='' albedoRank=0 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D87A30
+PROBE verts=52 prims=26 converted=1 | zwrite=0 ztest=1 zfunc=4 | alphablend=1 src=SRCALPHA dst=INVSRCALPHA | alphatest=0 ref=0 | colorwrite=0xf cull=3 | fog=0 | ps='Diffuse_MapSampler' albedoRank=100 | projTM=1 objTM=0 instanced=0 | tex0=44F12B90 target=14D8CDE8
+frame 1800 | draws 532/frame | FFP converted 30/frame (5.7%) | far substitutions 0/frame
+    not converted: screen-space 11  skinned 50  depth-only 0  ortho 0  vertex-format 3  untextured 434  instanced 0  mirrored 0  other-camera 1  no camera 0  other 4 (per frame)
+    instancing: 25 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.3 snapshots/frame, 0.3 invalidations/frame)
+    SKIPPED entirely 435/frame (mode 2) | demoted to UI overlay 17/frame | OUTLIER converted (|world| > 20000): 0.0/frame
+    albedo: moved off stage 0 18/frame, blanked 0/frame, restored from mesh cache 14/frame (476 meshes cached) | RT textures known 55 | lights 3.7/frame (24 shaders)
+    camera 96.1 147.7 35.1 | distinct cameras this frame 1 (max 1) | transform writes 14/frame | redundant state calls dropped 599/frame
+    world matrix changes 14/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)
+frame 2400 | draws 811/frame | FFP converted 44/frame (5.5%) | far substitutions 0/frame
+    not converted: screen-space 17  skinned 76  depth-only 0  ortho 0  vertex-format 4  untextured 663  instanced 0  mirrored 0  other-camera 2  no camera 0  other 5 (per frame)
+    instancing: 37 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.5 snapshots/frame, 0.5 invalidations/frame)
+    SKIPPED entirely 665/frame (mode 2) | demoted to UI overlay 25/frame | OUTLIER converted (|world| > 20000): 0.0/frame
+    albedo: moved off stage 0 27/frame, blanked 0/frame, restored from mesh cache 21/frame (477 meshes cached) | RT textures known 55 | lights 4.8/frame (24 shaders)
+    camera 96.1 147.7 35.1 | distinct cameras this frame 1 (max 1) | transform writes 20/frame | redundant state calls dropped 880/frame
+    world matrix changes 19/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)
+frame 3000 | draws 978/frame | FFP converted 53/frame (5.4%) | far substitutions 0/frame
+    not converted: screen-space 20  skinned 92  depth-only 0  ortho 0  vertex-format 5  untextured 801  instanced 0  mirrored 0  other-camera 2  no camera 0  other 5 (per frame)
+    instancing: 44 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.6 snapshots/frame, 0.6 invalidations/frame)
+    SKIPPED entirely 803/frame (mode 2) | demoted to UI overlay 30/frame | OUTLIER converted (|world| > 20000): 0.0/frame
+    albedo: moved off stage 0 33/frame, blanked 0/frame, restored from mesh cache 25/frame (477 meshes cached) | RT textures known 55 | lights 5.4/frame (24 shaders)
+    camera 96.1 147.7 35.1 | distinct cameras this frame 1 (max 1) | transform writes 24/frame | redundant state calls dropped 1048/frame
+    world matrix changes 23/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)

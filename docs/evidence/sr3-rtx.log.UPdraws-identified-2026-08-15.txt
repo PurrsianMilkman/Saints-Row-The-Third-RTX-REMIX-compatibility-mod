@@ -1,0 +1,239 @@
+sr3-rtx loaded (pid 24612)
+mode: ENGINE (binary patching)
+engine map: module base 0x00400000 (expected 0x00400000)
+engine map: 12/12 sites verified - map is valid for this build
+settings: publishWorld=0 oneCameraPerFrame=1 aspectFilter=1
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device vtable (backbuffer 1280x720, aspect 1.778)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: point (pos=c0 dir=c2 color=c4 info=c5 spot=c-1)
+light shader found: point (pos=c0 dir=c2 color=c4 info=c5 spot=c-1)
+UP #1 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #2 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #3 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #4 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #5 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #6 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #7 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #8 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #9 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #10 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #11 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #12 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #13 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #14 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #15 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #16 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #17 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #18 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #19 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #20 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #21 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #22 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #23 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #24 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #25 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #26 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #27 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #28 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #29 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #30 DrawPrimitiveUP prims=2 stride=28 vs=14E87F00 tex0=15E6F730 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+frame 60 | published=0 (0.00/frame) rejected=0 candidates=0/0 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 0.0 0.0 0.0 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=0.0 prim=0.0 indexedUP=0.0 UP=0.9 /frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+frame 600 | published=0 (0.00/frame) rejected=935 candidates=0/0 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 0.0 0.0 0.0 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=0.0 prim=0.0 indexedUP=0.0 UP=29.7 /frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+first camera published:
+  camera pos = 1223.30 14.11 1053.24
+  projection _11=1.2991 _22=2.3095 _33=1.0000 _43=-0.15  aspect=1.778 (target 1.778)
+frame 1200 | published=2 (0.00/frame) rejected=3228 candidates=1/1 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 96.3 147.7 1060.1 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=0.0 prim=0.0 indexedUP=0.0 UP=29.6 /frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+geom #1: verts=121 prims=179 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902EC58 ib=491BF5F0 diffuseStage=-1
+geom #2: verts=180 prims=266 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D780 ib=491BEFD0 diffuseStage=-1
+geom #3: verts=4 prims=2 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=3CDB20E8 ib=3CD98140 diffuseStage=-1
+geom #4: verts=4 prims=2 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=3CDB20E8 ib=3CD98140 diffuseStage=-1
+geom #5: verts=3931 prims=6076 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902E090 ib=491C03F0 diffuseStage=-1
+geom #6: verts=17601 prims=494 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=0
+geom #7: verts=17601 prims=572 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #8: verts=17601 prims=92 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #9: verts=17601 prims=75 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #10: verts=17601 prims=73 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #11: verts=17601 prims=308 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #12: verts=17601 prims=947 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #13: verts=17601 prims=323 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #14: verts=17601 prims=38 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #15: verts=17601 prims=52 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #16: verts=17601 prims=319 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #17: verts=35877 prims=108 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902F908 ib=491C1730 diffuseStage=-1
+geom #18: verts=1369 prims=30 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902CE70 ib=491BF190 diffuseStage=-1
+geom #19: verts=17601 prims=20 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #20: verts=17601 prims=36 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #21: verts=17601 prims=1022 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #22: verts=770 prims=71 stride=28 elems=13 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902E9A0 ib=491C1730 diffuseStage=-1
+geom #23: verts=317 prims=68 stride=28 elems=13 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D950 ib=491BF190 diffuseStage=-1
+geom #24: verts=17601 prims=1000 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #25: verts=17601 prims=4768 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #26: verts=17601 prims=35 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #27: verts=17601 prims=1492 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #28: verts=38907 prims=46118 stride=20 elems=11 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902E8B8 ib=491C1730 diffuseStage=-1
+geom #29: verts=17601 prims=1051 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+geom #30: verts=17601 prims=319 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4902D4C8 ib=491C04D0 diffuseStage=-1
+frame 1800 | published=45 (0.03/frame) rejected=5546 candidates=68/68 | light shaders=24 lights emitted=8958 (5.0/frame) | game SetTransform=0
+    camera at 96.1 147.7 35.3 | albedo fixes=3.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=73.0 prim=11.1 indexedUP=0.0 UP=26.9 /frame
+    draws using a camera OTHER than the published one: 29307 of 151343 (19.4%)
+frame 2400 | published=325 (0.14/frame) rejected=14546 candidates=88/88 | light shaders=24 lights emitted=53915 (22.5/frame) | game SetTransform=0
+    camera at 105.2 -21.2 52.4 | albedo fixes=21.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=413.9 prim=58.3 indexedUP=0.0 UP=64.0 /frame
+    draws using a camera OTHER than the published one: 195039 of 1133349 (17.2%)
+frame 3000 | published=817 (0.27/frame) rejected=23548 candidates=68/88 | light shaders=24 lights emitted=81352 (27.1/frame) | game SetTransform=0
+    camera at 119.8 7.8 252.7 | albedo fixes=37.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=758.8 prim=72.2 indexedUP=0.0 UP=84.7 /frame
+    draws using a camera OTHER than the published one: 525846 of 2493192 (21.1%)
+frame 3600 | published=1417 (0.39/frame) rejected=32548 candidates=68/88 | light shaders=24 lights emitted=134261 (37.3/frame) | game SetTransform=0
+    camera at 100.7 10.8 217.2 | albedo fixes=55.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1061.9 prim=100.4 indexedUP=0.0 UP=99.1 /frame
+    draws using a camera OTHER than the published one: 548046 of 4184332 (13.1%)
+frame 4200 | published=1551 (0.37/frame) rejected=41548 candidates=68/88 | light shaders=24 lights emitted=175920 (41.9/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=64.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1174.6 prim=111.0 indexedUP=0.0 UP=106.2 /frame
+    draws using a camera OTHER than the published one: 570246 of 5399692 (10.6%)
+frame 4800 | published=1660 (0.35/frame) rejected=50548 candidates=68/88 | light shaders=24 lights emitted=217941 (45.4/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=70.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1259.2 prim=119.2 indexedUP=0.0 UP=111.6 /frame
+    draws using a camera OTHER than the published one: 592994 of 6616259 (9.0%)
+frame 5400 | published=1660 (0.31/frame) rejected=59548 candidates=68/88 | light shaders=24 lights emitted=260460 (48.2/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=75.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1318.5 prim=125.5 indexedUP=0.0 UP=116.2 /frame
+    draws using a camera OTHER than the published one: 615194 of 7797576 (7.9%)
+frame 6000 | published=1660 (0.28/frame) rejected=68548 candidates=68/88 | light shaders=24 lights emitted=302800 (50.5/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=79.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1363.8 prim=130.6 indexedUP=0.0 UP=119.7 /frame
+    draws using a camera OTHER than the published one: 637394 of 8966008 (7.1%)
+frame 6600 | published=1660 (0.25/frame) rejected=77548 candidates=68/88 | light shaders=24 lights emitted=345271 (52.3/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=82.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1401.6 prim=134.7 indexedUP=0.0 UP=122.5 /frame
+    draws using a camera OTHER than the published one: 659594 of 10139853 (6.5%)
+frame 7200 | published=1660 (0.23/frame) rejected=86548 candidates=68/88 | light shaders=24 lights emitted=387271 (53.8/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=84.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1428.2 prim=138.1 indexedUP=0.0 UP=124.9 /frame
+    draws using a camera OTHER than the published one: 681794 of 11277126 (6.0%)
+frame 7800 | published=1660 (0.21/frame) rejected=95548 candidates=68/88 | light shaders=24 lights emitted=430657 (55.2/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=86.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1460.4 prim=141.2 indexedUP=0.0 UP=127.1 /frame
+    draws using a camera OTHER than the published one: 703994 of 12492740 (5.6%)
+frame 8400 | published=1785 (0.21/frame) rejected=104548 candidates=68/88 | light shaders=24 lights emitted=472084 (56.2/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=88.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1485.7 prim=143.6 indexedUP=0.0 UP=128.6 /frame
+    draws using a camera OTHER than the published one: 726194 of 13685720 (5.3%)
+frame 9000 | published=1786 (0.20/frame) rejected=113548 candidates=68/88 | light shaders=24 lights emitted=511929 (56.9/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=90.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1504.3 prim=145.5 indexedUP=0.0 UP=128.8 /frame
+    draws using a camera OTHER than the published one: 748394 of 14848079 (5.0%)
+frame 9600 | published=1786 (0.19/frame) rejected=122548 candidates=68/88 | light shaders=24 lights emitted=552084 (57.5/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=91.9/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1523.0 prim=147.1 indexedUP=0.0 UP=129.1 /frame
+    draws using a camera OTHER than the published one: 770594 of 16033341 (4.8%)
+frame 10200 | published=1857 (0.18/frame) rejected=131548 candidates=68/88 | light shaders=24 lights emitted=592047 (58.0/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=93.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1542.0 prim=148.6 indexedUP=0.0 UP=129.9 /frame
+    draws using a camera OTHER than the published one: 792794 of 17244152 (4.6%)
+frame 10800 | published=1857 (0.17/frame) rejected=140548 candidates=68/88 | light shaders=24 lights emitted=630880 (58.4/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=94.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1554.1 prim=149.8 indexedUP=0.0 UP=130.0 /frame
+    draws using a camera OTHER than the published one: 814994 of 18401599 (4.4%)
+frame 11400 | published=1857 (0.16/frame) rejected=149548 candidates=68/88 | light shaders=24 lights emitted=669534 (58.7/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=95.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1564.0 prim=150.8 indexedUP=0.0 UP=130.0 /frame
+    draws using a camera OTHER than the published one: 837194 of 19549108 (4.3%)
+frame 12000 | published=1857 (0.15/frame) rejected=158548 candidates=68/88 | light shaders=24 lights emitted=707959 (59.0/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=95.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1571.6 prim=151.7 indexedUP=0.0 UP=130.0 /frame
+    draws using a camera OTHER than the published one: 859394 of 20679605 (4.2%)
+frame 12600 | published=1857 (0.15/frame) rejected=167548 candidates=68/88 | light shaders=24 lights emitted=746572 (59.3/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=96.5/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1580.2 prim=152.6 indexedUP=0.0 UP=130.0 /frame
+    draws using a camera OTHER than the published one: 881594 of 21833064 (4.0%)
+frame 13200 | published=1857 (0.14/frame) rejected=176548 candidates=68/88 | light shaders=24 lights emitted=785493 (59.5/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=97.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1587.0 prim=153.4 indexedUP=0.0 UP=130.1 /frame
+    draws using a camera OTHER than the published one: 903794 of 22973615 (3.9%)
+frame 13800 | published=1857 (0.13/frame) rejected=185548 candidates=68/88 | light shaders=24 lights emitted=824357 (59.7/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=97.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1594.0 prim=154.1 indexedUP=0.0 UP=130.1 /frame
+    draws using a camera OTHER than the published one: 925994 of 24124275 (3.8%)
+frame 14400 | published=1857 (0.13/frame) rejected=194548 candidates=68/88 | light shaders=24 lights emitted=862757 (59.9/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=98.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1599.5 prim=154.7 indexedUP=0.0 UP=130.2 /frame
+    draws using a camera OTHER than the published one: 948194 of 25260936 (3.8%)
+frame 15000 | published=1857 (0.12/frame) rejected=203548 candidates=68/88 | light shaders=24 lights emitted=901356 (60.1/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=98.9/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1604.5 prim=155.3 indexedUP=0.0 UP=130.2 /frame
+    draws using a camera OTHER than the published one: 970394 of 26397967 (3.7%)
+frame 15600 | published=1857 (0.12/frame) rejected=212548 candidates=68/88 | light shaders=24 lights emitted=939756 (60.2/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=99.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1608.6 prim=155.9 indexedUP=0.0 UP=130.2 /frame
+    draws using a camera OTHER than the published one: 992594 of 27525929 (3.6%)
+frame 16200 | published=1857 (0.11/frame) rejected=221548 candidates=68/88 | light shaders=24 lights emitted=978222 (60.4/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=99.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1612.9 prim=156.4 indexedUP=0.0 UP=130.2 /frame
+    draws using a camera OTHER than the published one: 1014794 of 28661898 (3.5%)
+frame 16800 | published=1857 (0.11/frame) rejected=230548 candidates=68/88 | light shaders=24 lights emitted=1017201 (60.5/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=100.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1617.7 prim=156.9 indexedUP=0.0 UP=130.2 /frame
+    draws using a camera OTHER than the published one: 1036994 of 29812979 (3.5%)
+frame 17400 | published=1857 (0.11/frame) rejected=239548 candidates=68/88 | light shaders=24 lights emitted=1055859 (60.7/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=100.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1621.8 prim=157.3 indexedUP=0.0 UP=130.2 /frame
+    draws using a camera OTHER than the published one: 1059194 of 30957032 (3.4%)
+frame 18000 | published=1857 (0.10/frame) rejected=248548 candidates=68/88 | light shaders=24 lights emitted=1094363 (60.8/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=101.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1625.2 prim=157.7 indexedUP=0.0 UP=130.3 /frame
+    draws using a camera OTHER than the published one: 1081394 of 32091944 (3.4%)
+frame 18600 | published=1865 (0.10/frame) rejected=257548 candidates=68/88 | light shaders=24 lights emitted=1133427 (60.9/frame) | game SetTransform=0
+    camera at 101.3 11.8 217.3 | albedo fixes=101.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame
+    draws from wrapper 0x49cxxx       indexed=1629.7 prim=158.1 indexedUP=0.0 UP=130.4 /frame
+    draws using a camera OTHER than the published one: 1103594 of 33254093 (3.3%)

@@ -1,0 +1,277 @@
+sr3-rtx loaded (pid 31276) - FFP conversion, ported from sr2-rtx-remix-proxy
+settings: ffp=1 convertSkinned=0 perspectiveOnly=1 skipDepthOnly=1 finiteFar=1(far=5000) rankAlbedo=1 excludeRTAlbedo=1 injectLights=1 uvScale=0.00098
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device (backbuffer 1280x720, aspect 1.778)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+vertex layout #1: elems=3 pos=float4@0(stream 0) uv=float2 normal=0 color=1 skinned=0 positionT=0
+frame 60 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  vertex-format 0  no-objTM 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 snapshots/frame, 0.0 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.0/frame, 0 total
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+frame 600 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  vertex-format 0  no-objTM 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 snapshots/frame, 0.0 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.0/frame, 0 total
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+frame 1200 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  vertex-format 0  no-objTM 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 snapshots/frame, 0.0 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.0/frame, 0 total
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+vertex layout #2: elems=2 pos=float4@0(stream 0) uv=float2 normal=0 color=0 skinned=0 positionT=0
+stream freq #1: stream=0 setting=0x00000001 -> plain count=1
+stream freq #2: stream=0 setting=0x00000001 -> plain count=1
+stream freq #3: stream=0 setting=0x00000001 -> plain count=1
+stream freq #4: stream=0 setting=0x00000001 -> plain count=1
+stream freq #5: stream=0 setting=0x00000001 -> plain count=1
+stream freq #6: stream=0 setting=0x00000001 -> plain count=1
+stream freq #7: stream=0 setting=0x00000001 -> plain count=1
+stream freq #8: stream=0 setting=0x00000001 -> plain count=1
+vertex layout #3: elems=12 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+stream freq #9: stream=4 setting=0x80000001 -> INSTANCEDATA count=1
+stream freq #10: stream=0 setting=0x40000001 -> INDEXEDDATA count=1
+view handedness baseline: determinant 1.000 (positive)
+camera: pos 96.3 147.7 36.1 | proj _11=1.6085 _22=2.8594 _33=1.00001 _43=-0.15 (aspect 1.778)
+short2 UV range #1: u 0..0  v 1024..1024  (verts=121 stride=24 off=16)
+stream freq #11: stream=4 setting=0x80000001 -> INSTANCEDATA count=1
+stream freq #12: stream=0 setting=0x40000001 -> INDEXEDDATA count=1
+  draw #2: verts=180   prims=266   zwrite=1 ztest=1 tex0=3F239930 
+short2 UV range #2: u 0..0  v 1024..1024  (verts=180 stride=24 off=16)
+  draw #3: verts=4     prims=2     zwrite=1 ztest=1 tex0=166B24B8 
+short2 UV range #3: u 0..1023  v 0..1023  (verts=4 stride=24 off=16)
+  draw #4: verts=4     prims=2     zwrite=1 ztest=1 tex0=166B24B8 
+short2 UV range #4: u 0..1023  v 0..1023  (verts=4 stride=24 off=16)
+vertex layout #4: elems=12 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+  draw #5: verts=3931  prims=6076  zwrite=1 ztest=1 tex0=47D96F10 
+short2 UV range #5: u -701..1695  v -90..1991  (verts=3931 stride=24 off=20)
+  draw #6: verts=17601 prims=494   zwrite=1 ztest=1 tex0=3F23E010 
+  draw #7: verts=17601 prims=572   zwrite=1 ztest=1 tex0=41B9C720 
+  draw #8: verts=17601 prims=92    zwrite=1 ztest=1 tex0=41B9D1A0 
+  draw #9: verts=17601 prims=75    zwrite=1 ztest=1 tex0=47D97990 
+  draw #10: verts=17601 prims=73    zwrite=1 ztest=1 tex0=47D96490 
+  draw #11: verts=17601 prims=308   zwrite=1 ztest=1 tex0=44ED77E8 
+  draw #12: verts=17601 prims=947   zwrite=1 ztest=1 tex0=44ED77E8 
+  draw #13: verts=17601 prims=323   zwrite=1 ztest=1 tex0=47D96810 
+  draw #14: verts=17601 prims=38    zwrite=1 ztest=1 tex0=44EC7DA8 
+  draw #15: verts=17601 prims=52    zwrite=1 ztest=1 tex0=47D976F0 
+  draw #16: verts=17601 prims=319   zwrite=1 ztest=1 tex0=47D97610 
+  draw #17: verts=35877 prims=108   zwrite=1 ztest=1 tex0=44EC6B48 
+  draw #18: verts=1369  prims=30    zwrite=1 ztest=1 tex0=44EC6B48 
+short2 UV range #6: u -13822..14846  v -13823..14847  (verts=1369 stride=24 off=20)
+  draw #19: verts=17601 prims=20    zwrite=1 ztest=1 tex0=47D96B90 
+  draw #20: verts=17601 prims=36    zwrite=1 ztest=1 tex0=41B9CE20 
+  draw #21: verts=17601 prims=1022  zwrite=1 ztest=1 tex0=41B9E860 
+vertex layout #5: elems=13 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+  draw #22: verts=770   prims=71    zwrite=1 ztest=1 tex0=41B9BCA0 
+short2 UV range #7: u -6681..7705  v -6655..7679  (verts=770 stride=28 off=20)
+  draw #23: verts=317   prims=68    zwrite=1 ztest=1 tex0=41B9BCA0 
+  (set rtx.skyDrawcallIdThreshold just above the last SKY CANDIDATE index)
+short2 UV range #8: u -28192..29216  v -28192..29216  (verts=317 stride=28 off=20)
+vertex layout #6: elems=11 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+short2 UV range #9: u -13822..14846  v -13823..14847  (verts=1369 stride=24 off=20)
+short2 UV range #10: u -13822..14846  v -13823..14847  (verts=1369 stride=24 off=20)
+short2 UV range #11: u -6859..8736  v 6..1021  (verts=315 stride=20 off=16)
+short2 UV range #12: u 6..1014  v 5..1016  (verts=261 stride=20 off=16)
+vertex layout #7: elems=7 pos=float3@0(stream 0) uv=short2 normal=0 color=0 skinned=0 positionT=0
+vertex layout #8: elems=8 pos=float3@0(stream 0) uv=? normal=1 color=1 skinned=0 positionT=0
+vertex layout #9: elems=10 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #10: elems=13 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #11: elems=6 pos=float3@0(stream 0) uv=short2 normal=1 color=1 skinned=0 positionT=0
+vertex layout #12: elems=2 pos=float4@0(stream 0) uv=float4 normal=0 color=0 skinned=0 positionT=0
+vertex layout #13: elems=15 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #14: elems=14 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #15: elems=6 pos=float3@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #16: elems=3 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #17: elems=3 pos=float3@0(stream 0) uv=float2 normal=0 color=1 skinned=0 positionT=0
+vertex layout #18: elems=1 pos=float3@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #19: elems=11 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+OUTLIER draw #1: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+vertex layout #20: elems=14 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+call-order trace (V/v=SetVertexShader with/without objTM, P=projTM c28, O=objTM c32, W=view c48, D=draw converted, x=draw skipped):
+  DDDDvDvDvDvDvDvDDDvDvDvDvDvDDvDvDvDvDDvDDvDDvDvDDDDDDDDvDvDDDDvDDDDDDDDDDDDvDvDvDvDDvDDDDDDDDvDvDDvD
+  DvDDvDvDDvDvDDDDDDDDDDDDDvDDvDDvDvDvDvDvDDvDDvDDDDDDDvDDvDDDDDvDDvDvDDvDvDDvDDDDDvDDDDDDvDvDDDDvDDvD
+  vDvDDDDDDDDDDDvDDvDDDDDDDDDDvDDDDDDvDDDDDDDvDDDDDvDDDDvDDDDDDDDvDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDv
+  DDDvDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDvDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD
+OUTLIER draw #2: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #3: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #4: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+vertex layout #21: elems=7 pos=float3@0(stream 0) uv=float3 normal=0 color=1 skinned=0 positionT=0
+OUTLIER draw #5: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #6: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #7: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #8: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #9: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #10: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #11: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #12: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #13: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #14: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #15: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #16: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #17: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #18: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #19: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+OUTLIER draw #20: max |world| = 50232 | verts=173 stride=20 elems=11 pos=float3@0 uv=? objTM=0 worldWritten=1
+camera: pos 96.2 147.7 35.2 | proj _11=1.5970 _22=2.8390 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.5725 _22=2.7955 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.5340 _22=2.7271 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.4777 _22=2.6270 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.4076 _22=2.5023 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.3559 _22=2.4105 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.3218 _22=2.3499 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 96.2 147.7 35.2 | proj _11=1.3032 _22=2.3167 _33=1.00001 _43=-0.15 (aspect 1.778)
+frame 1800 | draws 1187/frame | FFP converted 672/frame (56.6%) | far substitutions 0/frame
+    not converted: screen-space 10  skinned 53  depth-only 280  ortho 0  vertex-format 0  no-objTM 0  instanced 0  mirrored 0  other-camera 168  no camera 0  other 5 (per frame)
+    instancing: 806 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.3 snapshots/frame, 0.3 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.3/frame, 505 total
+    albedo: moved off stage 0 63/frame, blanked 392/frame, restored from mesh cache 376/frame (344 meshes cached) | RT textures known 55 | lights 5.3/frame (24 shaders)
+    camera 96.2 147.7 35.2 | distinct cameras this frame 1 (max 1) | transform writes 483/frame | redundant state calls dropped 13426/frame
+    world matrix changes 482/frame | objTM used without a fresh upload 0/frame | uv matrix writes 3/frame (last scale 0.00098, 0.00098)
+frame 2400 | draws 930/frame | FFP converted 526/frame (56.6%) | far substitutions 0/frame
+    not converted: screen-space 7  skinned 41  depth-only 219  ortho 0  vertex-format 0  no-objTM 0  instanced 0  mirrored 0  other-camera 132  no camera 0  other 4 (per frame)
+    instancing: 631 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.2 snapshots/frame, 0.2 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.2/frame, 527 total
+    albedo: moved off stage 0 49/frame, blanked 307/frame, restored from mesh cache 294/frame (344 meshes cached) | RT textures known 55 | lights 4.2/frame (24 shaders)
+    camera 96.2 147.7 35.2 | distinct cameras this frame 0 (max 1) | transform writes 378/frame | redundant state calls dropped 10514/frame
+    world matrix changes 378/frame | objTM used without a fresh upload 0/frame | uv matrix writes 2/frame (last scale 0.00098, 0.00098)
+camera: pos 243.3 32.7 115.7 | proj _11=1.6085 _22=2.8594 _33=1.00001 _43=-0.15 (aspect 1.778)
+vertex layout #22: elems=15 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #23: elems=1 pos=short4n@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #24: elems=2 pos=short4n@0(stream 0) uv=short2n normal=0 color=0 skinned=0 positionT=0
+frame 3000 | draws 959/frame | FFP converted 523/frame (54.5%) | far substitutions 0/frame
+    not converted: screen-space 11  skinned 35  depth-only 272  ortho 0  vertex-format 1  no-objTM 0  instanced 0  mirrored 0  other-camera 107  no camera 0  other 9 (per frame)
+    instancing: 604 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.3 snapshots/frame, 0.3 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.2/frame, 527 total
+    albedo: moved off stage 0 44/frame, blanked 296/frame, restored from mesh cache 293/frame (544 meshes cached) | RT textures known 55 | lights 9.3/frame (24 shaders)
+    camera 241.5 32.8 115.6 | distinct cameras this frame 1 (max 1) | transform writes 394/frame | redundant state calls dropped 10448/frame
+    world matrix changes 393/frame | objTM used without a fresh upload 0/frame | uv matrix writes 2/frame (last scale 0.00098, 0.00098)
+frame 3600 | draws 941/frame | FFP converted 501/frame (53.3%) | far substitutions 0/frame
+    not converted: screen-space 15  skinned 32  depth-only 286  ortho 0  vertex-format 3  no-objTM 0  instanced 0  mirrored 0  other-camera 92  no camera 0  other 13 (per frame)
+    instancing: 566 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.4 snapshots/frame, 0.4 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.1/frame, 527 total
+    albedo: moved off stage 0 41/frame, blanked 279/frame, restored from mesh cache 282/frame (580 meshes cached) | RT textures known 55 | lights 12.9/frame (24 shaders)
+    camera 245.1 33.5 107.6 | distinct cameras this frame 1 (max 1) | transform writes 384/frame | redundant state calls dropped 10015/frame
+    world matrix changes 384/frame | objTM used without a fresh upload 0/frame | uv matrix writes 2/frame (last scale 0.00098, 0.00098)
+frame 4200 | draws 896/frame | FFP converted 468/frame (52.2%) | far substitutions 0/frame
+    not converted: screen-space 18  skinned 30  depth-only 281  ortho 0  vertex-format 4  no-objTM 0  instanced 0  mirrored 0  other-camera 81  no camera 0  other 15 (per frame)
+    instancing: 522 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.5 snapshots/frame, 0.5 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.1/frame, 527 total
+    albedo: moved off stage 0 38/frame, blanked 258/frame, restored from mesh cache 265/frame (580 meshes cached) | RT textures known 55 | lights 15.2/frame (24 shaders)
+    camera 243.0 33.6 105.3 | distinct cameras this frame 1 (max 1) | transform writes 362/frame | redundant state calls dropped 9348/frame
+    world matrix changes 361/frame | objTM used without a fresh upload 0/frame | uv matrix writes 1/frame (last scale 0.00098, 0.00098)
+frame 4800 | draws 930/frame | FFP converted 474/frame (50.9%) | far substitutions 0/frame
+    not converted: screen-space 20  skinned 36  depth-only 286  ortho 0  vertex-format 5  no-objTM 0  instanced 0  mirrored 0  other-camera 91  no camera 0  other 18 (per frame)
+    instancing: 534 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.6 snapshots/frame, 0.6 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.2/frame, 1076 total
+    albedo: moved off stage 0 47/frame, blanked 256/frame, restored from mesh cache 279/frame (858 meshes cached) | RT textures known 55 | lights 17.6/frame (24 shaders)
+    camera 252.8 33.1 112.3 | distinct cameras this frame 1 (max 1) | transform writes 355/frame | redundant state calls dropped 9456/frame
+    world matrix changes 353/frame | objTM used without a fresh upload 0/frame | uv matrix writes 3/frame (last scale 0.00098, 0.00098)
+frame 5400 | draws 1023/frame | FFP converted 503/frame (49.2%) | far substitutions 0/frame
+    not converted: screen-space 21  skinned 37  depth-only 308  ortho 0  vertex-format 7  no-objTM 0  instanced 0  mirrored 0  other-camera 125  no camera 0  other 21 (per frame)
+    instancing: 592 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.6 snapshots/frame, 0.6 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.3/frame, 1525 total
+    albedo: moved off stage 0 55/frame, blanked 268/frame, restored from mesh cache 308/frame (1009 meshes cached) | RT textures known 55 | lights 21.4/frame (24 shaders)
+    camera 250.4 29.5 113.3 | distinct cameras this frame 1 (max 1) | transform writes 369/frame | redundant state calls dropped 10050/frame
+    world matrix changes 368/frame | objTM used without a fresh upload 0/frame | uv matrix writes 4/frame (last scale 0.00098, 0.00098)
+frame 6000 | draws 1257/frame | FFP converted 622/frame (49.4%) | far substitutions 0/frame
+    not converted: screen-space 23  skinned 62  depth-only 344  ortho 0  vertex-format 10  no-objTM 0  instanced 0  mirrored 0  other-camera 171  no camera 0  other 26 (per frame)
+    instancing: 735 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.4/frame, 2125 total
+    albedo: moved off stage 0 71/frame, blanked 325/frame, restored from mesh cache 404/frame (1466 meshes cached) | RT textures known 55 | lights 26.4/frame (24 shaders)
+    camera 0.3 31.1 129.0 | distinct cameras this frame 1 (max 1) | transform writes 451/frame | redundant state calls dropped 12409/frame
+    world matrix changes 450/frame | objTM used without a fresh upload 0/frame | uv matrix writes 6/frame (last scale 0.00098, 0.00098)
+frame 6600 | draws 1688/frame | FFP converted 852/frame (50.5%) | far substitutions 0/frame
+    not converted: screen-space 24  skinned 101  depth-only 415  ortho 0  vertex-format 12  no-objTM 0  instanced 0  mirrored 0  other-camera 246  no camera 0  other 38 (per frame)
+    instancing: 1004 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.4/frame, 2725 total
+    albedo: moved off stage 0 93/frame, blanked 444/frame, restored from mesh cache 577/frame (1554 meshes cached) | RT textures known 55 | lights 37.6/frame (24 shaders)
+    camera 4.1 30.6 129.7 | distinct cameras this frame 1 (max 1) | transform writes 618/frame | redundant state calls dropped 17023/frame
+    world matrix changes 617/frame | objTM used without a fresh upload 0/frame | uv matrix writes 9/frame (last scale 0.00098, 0.00098)
+camera: pos 257.2 29.6 129.4 | proj _11=1.5963 _22=2.8379 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 257.5 29.6 129.4 | proj _11=1.5843 _22=2.8165 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 257.9 29.6 129.4 | proj _11=1.5725 _22=2.7955 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 258.2 29.5 129.4 | proj _11=1.5608 _22=2.7747 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 258.6 29.5 129.3 | proj _11=1.5492 _22=2.7541 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 259.0 29.5 129.3 | proj _11=1.5378 _22=2.7338 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 259.3 29.5 129.3 | proj _11=1.5265 _22=2.7138 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 259.7 29.5 129.3 | proj _11=1.5154 _22=2.6939 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 260.0 29.5 129.3 | proj _11=1.5044 _22=2.6744 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 260.4 29.5 129.3 | proj _11=1.4935 _22=2.6550 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 260.8 29.4 129.2 | proj _11=1.4827 _22=2.6358 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 261.1 29.4 129.2 | proj _11=1.4720 _22=2.6169 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 261.5 29.4 129.2 | proj _11=1.4615 _22=2.5982 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 261.8 29.4 129.2 | proj _11=1.4511 _22=2.5797 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 262.2 29.4 129.2 | proj _11=1.4408 _22=2.5614 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 262.5 29.4 129.2 | proj _11=1.4306 _22=2.5433 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 262.9 29.4 129.2 | proj _11=1.4206 _22=2.5254 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 7.6 29.3 129.1 | proj _11=1.4008 _22=2.4902 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 8.3 29.3 129.0 | proj _11=1.3814 _22=2.4558 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 8.7 29.3 128.6 | proj _11=1.3624 _22=2.4221 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 8.8 29.2 127.9 | proj _11=1.3439 _22=2.3891 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 8.6 29.2 127.2 | proj _11=1.3257 _22=2.3567 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 8.1 29.1 126.7 | proj _11=1.3079 _22=2.3251 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.2 29.7 132.4 | proj _11=1.3257 _22=2.3567 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.2 29.7 132.4 | proj _11=1.3531 _22=2.4055 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.2 29.7 132.4 | proj _11=1.3814 _22=2.4558 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.3 29.7 132.4 | proj _11=1.4106 _22=2.5077 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.3 29.8 132.4 | proj _11=1.4408 _22=2.5614 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.4 29.8 132.4 | proj _11=1.4720 _22=2.6169 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.4 29.8 132.4 | proj _11=1.5044 _22=2.6744 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.5 29.8 132.4 | proj _11=1.5378 _22=2.7338 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.7 29.8 132.4 | proj _11=1.5725 _22=2.7955 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.8 29.8 132.4 | proj _11=1.6085 _22=2.8594 _33=1.00001 _43=-0.15 (aspect 1.778)
+frame 7200 | draws 2210/frame | FFP converted 1153/frame (52.1%) | far substitutions 0/frame
+    not converted: screen-space 25  skinned 119  depth-only 521  ortho 0  vertex-format 14  no-objTM 0  instanced 0  mirrored 0  other-camera 324  no camera 0  other 54 (per frame)
+    instancing: 1354 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.5/frame, 3325 total
+    albedo: moved off stage 0 119/frame, blanked 605/frame, restored from mesh cache 782/frame (1668 meshes cached) | RT textures known 55 | lights 54.0/frame (24 shaders)
+    camera 249.8 29.8 132.3 | distinct cameras this frame 1 (max 1) | transform writes 841/frame | redundant state calls dropped 23028/frame
+    world matrix changes 839/frame | objTM used without a fresh upload 0/frame | uv matrix writes 11/frame (last scale 0.00098, 0.00098)
+camera: pos 249.8 29.8 132.3 | proj _11=1.5832 _22=2.8145 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.8 29.8 132.3 | proj _11=1.5321 _22=2.7236 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.8 29.8 132.3 | proj _11=1.4471 _22=2.5725 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.8 29.8 132.3 | proj _11=1.3650 _22=2.4267 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.8 29.8 132.3 | proj _11=1.3162 _22=2.3399 _33=1.00001 _43=-0.15 (aspect 1.778)
+camera: pos 249.8 29.8 132.3 | proj _11=1.2992 _22=2.3096 _33=1.00001 _43=-0.15 (aspect 1.778)
+frame 7800 | draws 2690/frame | FFP converted 1418/frame (52.7%) | far substitutions 0/frame
+    not converted: screen-space 26  skinned 151  depth-only 622  ortho 0  vertex-format 16  no-objTM 0  instanced 0  mirrored 0  other-camera 389  no camera 0  other 69 (per frame)
+    instancing: 1650 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.5/frame, 3925 total
+    albedo: moved off stage 0 139/frame, blanked 750/frame, restored from mesh cache 960/frame (1676 meshes cached) | RT textures known 55 | lights 69.4/frame (24 shaders)
+    camera 249.8 29.8 132.3 | distinct cameras this frame 1 (max 1) | transform writes 1033/frame | redundant state calls dropped 28324/frame
+    world matrix changes 1032/frame | objTM used without a fresh upload 0/frame | uv matrix writes 13/frame (last scale 0.00098, 0.00098)
+frame 8400 | draws 2522/frame | FFP converted 1329/frame (52.7%) | far substitutions 0/frame
+    not converted: screen-space 24  skinned 142  depth-only 583  ortho 0  vertex-format 15  no-objTM 0  instanced 0  mirrored 0  other-camera 364  no camera 0  other 65 (per frame)
+    instancing: 1546 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.5/frame, 3951 total
+    albedo: moved off stage 0 130/frame, blanked 703/frame, restored from mesh cache 899/frame (1676 meshes cached) | RT textures known 55 | lights 65.3/frame (24 shaders)
+    camera 249.8 29.8 132.3 | distinct cameras this frame 0 (max 1) | transform writes 968/frame | redundant state calls dropped 26551/frame
+    world matrix changes 967/frame | objTM used without a fresh upload 0/frame | uv matrix writes 13/frame (last scale 0.00098, 0.00098)
+camera: pos 96.3 147.7 36.1 | proj _11=1.6085 _22=2.8594 _33=1.00001 _43=-0.15 (aspect 1.778)
+frame 9000 | draws 2514/frame | FFP converted 1332/frame (53.0%) | far substitutions 0/frame
+    not converted: screen-space 24  skinned 140  depth-only 581  ortho 0  vertex-format 14  no-objTM 0  instanced 0  mirrored 0  other-camera 362  no camera 0  other 62 (per frame)
+    instancing: 1553 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.5/frame, 4300 total
+    albedo: moved off stage 0 130/frame, blanked 709/frame, restored from mesh cache 892/frame (1973 meshes cached) | RT textures known 55 | lights 61.7/frame (24 shaders)
+    camera 96.1 147.7 35.1 | distinct cameras this frame 1 (max 1) | transform writes 969/frame | redundant state calls dropped 26608/frame
+    world matrix changes 968/frame | objTM used without a fresh upload 0/frame | uv matrix writes 12/frame (last scale 0.00098, 0.00098)
+frame 9600 | draws 2615/frame | FFP converted 1396/frame (53.4%) | far substitutions 0/frame
+    not converted: screen-space 24  skinned 144  depth-only 604  ortho 0  vertex-format 13  no-objTM 0  instanced 0  mirrored 0  other-camera 375  no camera 0  other 59 (per frame)
+    instancing: 1632 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.7 snapshots/frame, 0.7 invalidations/frame)
+    OUTLIER converted draws (|world| > 20000): 0.5/frame, 4900 total
+    albedo: moved off stage 0 135/frame, blanked 750/frame, restored from mesh cache 921/frame (1973 meshes cached) | RT textures known 55 | lights 59.0/frame (24 shaders)
+    camera 96.1 147.7 35.1 | distinct cameras this frame 1 (max 1) | transform writes 1014/frame | redundant state calls dropped 27888/frame
+    world matrix changes 1012/frame | objTM used without a fresh upload 0/frame | uv matrix writes 12/frame (last scale 0.00098, 0.00098)

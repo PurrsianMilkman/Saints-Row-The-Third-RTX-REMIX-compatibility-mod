@@ -1,0 +1,206 @@
+sr3-rtx shape probe - world-space bounds of every draw near the camera, one frame
+frame 1550, camera (96.3 147.7 36.1)
+flat = smallest axis relative to the largest; a dish, cap or ring is very flat
+
+ draw disp     verts  prims  size x/y/z             centre                    dist  flat  shader / why
+    6 MARK     3931   6076   26.9/12.3/38.1         96/140/-9                 45.7  0.32  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   19 MARK     1369   30     56.2/4.4/20.1          98/145/13                 23.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   23 MARK     770    71     56.1/10.0/44.1         99/151/45                 10.0  0.18  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   24 MARK     317    68     56.1/2.4/20.1          98/146/13                 23.0  0.04  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   38 MARK     1369   1279   56.2/4.4/20.1          98/145/13                 23.1  0.08  ps='' rank=0 | prepass: shader samples nothing
+   42 MARK     1369   20     56.2/4.4/20.1          98/145/13                 23.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   43 MARK     315    537    5.4/10.0/7.4           136/142/-78              121.3  0.53  ps='' rank=0 | prepass: shader samples nothing
+   44 MARK     145    384    0.6/0.5/0.6            102/145/19                18.8  0.85  ps='' rank=0 | prepass: shader samples nothing
+   45 MARK     145    384    0.6/0.5/0.6            105/145/19                19.6  0.85  ps='' rank=0 | prepass: shader samples nothing
+   46 MARK     145    384    0.6/0.5/0.6            90/145/19                 18.7  0.85  ps='' rank=0 | prepass: shader samples nothing
+   47 MARK     145    384    0.6/0.5/0.6            93/145/19                 18.1  0.85  ps='' rank=0 | prepass: shader samples nothing
+   48 MARK     145    384    0.6/0.5/0.6            96/145/19                 17.8  0.85  ps='' rank=0 | prepass: shader samples nothing
+   49 MARK     145    384    0.6/0.5/0.6            99/145/19                 18.1  0.85  ps='' rank=0 | prepass: shader samples nothing
+   50 MARK     145    384    0.6/0.5/0.6            87/145/19                 20.0  0.85  ps='' rank=0 | prepass: shader samples nothing
+   51 MARK     6278   116    41.7/7.7/33.2          104/150/50                16.3  0.18  ps='' rank=0 | prepass: shader samples nothing
+   52 MARK     6278   9376   41.7/7.7/33.2          104/150/50                16.3  0.18  ps='' rank=0 | prepass: shader samples nothing
+   53 MARK     6278   4139   41.7/7.7/33.2          104/150/50                16.3  0.18  ps='' rank=0 | prepass: shader samples nothing
+   54 MARK     3306   1263   55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   56 MARK     1924   587    51.9/7.2/29.6          97/149/48                 12.4  0.14  ps='' rank=0 | prepass: shader samples nothing
+   57 MARK     3306   13     55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   58 MARK     3306   189    55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   59 MARK     2974   83     47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   60 MARK     2974   8      47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   62 MARK     1369   744    56.2/4.4/20.1          98/145/13                 23.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   63 MARK     3306   141    55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   64 MARK     2974   12     47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   65 MARK     974    32     43.2/4.5/33.6          98/151/50                 14.9  0.10  ps='' rank=0 | prepass: shader samples nothing
+   66 MARK     3306   843    55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   67 MARK     2974   287    47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   68 MARK     3306   80     55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   69 MARK     2974   42     47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   70 MARK     3306   314    55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   71 MARK     2974   792    47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   72 MARK     206    427    1.2/4.1/0.7            103/148/28                10.9  0.17  ps='' rank=0 | prepass: shader samples nothing
+   73 MARK     3306   1076   55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   74 MARK     12     19     0.2/0.4/0.2            105/142/-5                42.3  0.62  ps='' rank=0 | prepass: shader samples nothing
+   75 MARK     12     19     0.2/0.4/0.2            86/142/-5                 42.5  0.62  ps='' rank=0 | prepass: shader samples nothing
+   76 MARK     12     19     0.2/0.4/0.2            105/142/-24               61.1  0.62  ps='' rank=0 | prepass: shader samples nothing
+   77 MARK     12     19     0.2/0.4/0.2            86/142/-24                61.3  0.62  ps='' rank=0 | prepass: shader samples nothing
+   78 MARK     202    321    0.9/0.2/0.2            98/146/3                  32.9  0.20  ps='' rank=0 | prepass: shader samples nothing
+   79 MARK     202    321    0.9/0.2/0.2            93/146/3                  33.0  0.20  ps='' rank=0 | prepass: shader samples nothing
+   80 MARK     202    321    0.9/0.2/0.2            101/149/23                13.7  0.21  ps='' rank=0 | prepass: shader samples nothing
+   81 MARK     202    321    0.9/0.2/0.2            106/146/23                16.5  0.20  ps='' rank=0 | prepass: shader samples nothing
+   82 MARK     202    321    0.9/0.2/0.2            92/149/23                 13.8  0.21  ps='' rank=0 | prepass: shader samples nothing
+   83 MARK     202    321    0.9/0.2/0.2            109/146/7                 32.0  0.20  ps='' rank=0 | prepass: shader samples nothing
+   84 MARK     202    321    0.9/0.2/0.2            105/146/7                 30.5  0.20  ps='' rank=0 | prepass: shader samples nothing
+   85 MARK     202    321    0.9/0.2/0.2            90/146/8                  29.2  0.20  ps='' rank=0 | prepass: shader samples nothing
+   86 MARK     202    321    0.9/0.2/0.2            85/146/8                  30.6  0.20  ps='' rank=0 | prepass: shader samples nothing
+   87 MARK     1924   20     51.9/7.2/29.6          97/149/48                 12.4  0.14  ps='' rank=0 | prepass: shader samples nothing
+   88 MARK     974    20     43.2/4.5/33.6          98/151/50                 14.9  0.10  ps='' rank=0 | prepass: shader samples nothing
+   89 MARK     830    242    56.1/3.8/40.0          99/148/47                 11.3  0.07  ps='' rank=0 | prepass: shader samples nothing
+   90 MARK     194    68     48.0/1.1/32.0          99/150/47                 11.6  0.02  ps='' rank=0 | prepass: shader samples nothing
+   91 MARK     6278   284    41.7/7.7/33.2          104/150/50                16.3  0.18  ps='' rank=0 | prepass: shader samples nothing
+   92 MARK     2974   2876   47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   93 MARK     222    315    52.9/22.3/49.1         98/8/32                  139.8  0.42  ps='' rank=0 | prepass: shader samples nothing
+   95 MARK     830    294    56.1/3.8/40.0          99/148/47                 11.3  0.07  ps='' rank=0 | prepass: shader samples nothing
+   96 MARK     194    82     48.0/1.1/32.0          99/150/47                 11.6  0.02  ps='' rank=0 | prepass: shader samples nothing
+   97 MARK     770    132    56.1/10.0/44.1         99/151/45                 10.0  0.18  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   98 MARK     317    169    56.1/2.4/20.1          98/146/13                 23.0  0.04  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+   99 MARK     770    356    56.1/10.0/44.1         99/151/45                 10.0  0.18  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  100 MARK     317    245    56.1/2.4/20.1          98/146/13                 23.0  0.04  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  101 MARK     517    455    54.3/8.6/40.0          100/149/47                11.7  0.16  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  102 MARK     324    322    46.6/5.1/40.0          100/152/47                12.4  0.11  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  103 MARK     770    611    56.1/10.0/44.1         99/151/45                 10.0  0.18  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  104 MARK     517    362    54.3/8.6/40.0          100/149/47                11.7  0.16  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  105 MARK     324    172    46.6/5.1/40.0          100/152/47                12.4  0.11  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  106 MARK     3306   981    55.9/7.2/39.9          99/149/47                 11.4  0.13  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  107 MARK     2974   377    47.6/4.0/35.5          99/152/49                 14.1  0.08  ps='Normal_MapSampler' rank=0 | prepass: only normal/stipple/depth samplers
+  581 MARK     312    440    52.6/7.6/28.5          98/150/42                  6.2  0.14  ps='' rank=0 | prepass: shader samples nothing
+  582 MARK     830    236    56.1/3.8/40.0          99/148/47                 11.3  0.07  ps='' rank=0 | prepass: shader samples nothing
+  583 MARK     194    31     48.0/1.1/32.0          99/150/47                 11.6  0.02  ps='' rank=0 | prepass: shader samples nothing
+  585 MARK     1924   2398   51.9/7.2/29.6          97/149/48                 12.4  0.14  ps='' rank=0 | prepass: shader samples nothing
+  586 MARK     974    1349   43.2/4.5/33.6          98/151/50                 14.9  0.10  ps='' rank=0 | prepass: shader samples nothing
+  684 MARK     3506   695    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+  686 MARK     2488   767    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+  709 MARK     3506   653    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+  710 MARK     2488   653    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+  728 MARK     3506   14     41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+  729 MARK     3506   308    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+  730 MARK     2488   308    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+  731 MARK     2488   14     44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+  772 MARK     1267   308    61.7/100.0/61.1        156/87/-83               146.6  0.61  ps='' rank=0 | prepass: shader samples nothing
+  773 MARK     1209   507    62.0/237.5/62.1        51/156/-83               128.1  0.26  ps='' rank=0 | prepass: shader samples nothing
+  848 MARK     1486   8      157.5/80.2/73.4        201/44/-178              260.2  0.47  ps='' rank=0 | prepass: shader samples nothing
+  851 MARK     1486   1728   157.5/80.2/73.4        201/44/-178              260.2  0.47  ps='' rank=0 | prepass: shader samples nothing
+  870 MARK     3506   524    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+  871 MARK     2488   20     44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+  882 MARK     138    232    6.3/10.6/7.2           174/142/-101             157.5  0.59  ps='' rank=0 | prepass: shader samples nothing
+  883 MARK     138    232    6.3/10.6/7.2           69/135/-224              261.9  0.59  ps='' rank=0 | prepass: shader samples nothing
+  885 MARK     3506   1161   41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+  886 MARK     2488   525    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+  887 MARK     1267   833    61.7/100.0/61.1        156/87/-83               146.6  0.61  ps='' rank=0 | prepass: shader samples nothing
+  888 MARK     1209   743    62.0/237.5/62.1        51/156/-83               128.1  0.26  ps='' rank=0 | prepass: shader samples nothing
+  893 MARK     148    44     39.6/61.4/39.6         51/140/-163              204.1  0.64  ps='' rank=0 | prepass: shader samples nothing
+  895 MARK     12     8      43.6/0.0/43.6          51/129/-210              250.8  0.00  ps='' rank=0 | prepass: shader samples nothing
+ 1006 MARK     1486   225    157.5/80.2/73.4        201/44/-178              260.2  0.47  ps='' rank=0 | prepass: shader samples nothing
+ 1041 MARK     1486   206    157.5/80.2/73.4        201/44/-178              260.2  0.47  ps='' rank=0 | prepass: shader samples nothing
+ 1043 MARK     3506   882    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+ 1045 MARK     2488   128    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1046 MARK     2488   270    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1047 MARK     1267   155    61.7/100.0/61.1        156/87/-83               146.6  0.61  ps='' rank=0 | prepass: shader samples nothing
+ 1048 MARK     1209   100    62.0/237.5/62.1        51/156/-83               128.1  0.26  ps='' rank=0 | prepass: shader samples nothing
+ 1049 MARK     1209   158    62.0/237.5/62.1        51/156/-83               128.1  0.26  ps='' rank=0 | prepass: shader samples nothing
+ 1050 MARK     1486   308    157.5/80.2/73.4        201/44/-178              260.2  0.47  ps='' rank=0 | prepass: shader samples nothing
+ 1051 MARK     3506   244    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+ 1052 MARK     3506   620    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+ 1054 MARK     2488   236    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1055 MARK     2488   244    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1056 MARK     1267   644    61.7/100.0/61.1        156/87/-83               146.6  0.61  ps='' rank=0 | prepass: shader samples nothing
+ 1057 MARK     1209   332    62.0/237.5/62.1        51/156/-83               128.1  0.26  ps='' rank=0 | prepass: shader samples nothing
+ 1059 MARK     74     117    155.4/24.0/71.7        201/71/-179              250.8  0.15  ps='' rank=0 | prepass: shader samples nothing
+ 1060 MARK     148    236    39.6/61.4/39.6         51/140/-163              204.1  0.64  ps='' rank=0 | prepass: shader samples nothing
+ 1062 MARK     12     2      43.6/0.0/43.6          51/129/-210              250.8  0.00  ps='' rank=0 | prepass: shader samples nothing
+ 1063 MARK     7      7      60.4/0.0/59.7          156/137/-83              133.9  0.00  ps='' rank=0 | prepass: shader samples nothing
+ 1064 MARK     19     31     60.1/65.9/60.1         51/241/-83               158.4  0.91  ps='' rank=0 | prepass: shader samples nothing
+ 1066 MARK     3506   22     41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+ 1067 MARK     3506   261    41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+ 1068 MARK     3506   44     41.5/164.7/41.6        52/88/-163               212.3  0.25  ps='' rank=0 | prepass: shader samples nothing
+ 1070 MARK     2488   428    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1071 MARK     2488   22     44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1072 MARK     2488   261    44.6/122.9/44.6        51/68/-210               262.4  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1085 MARK     261    492    1.3/1.0/1.1            105/150/24                15.2  0.74  ps='' rank=0 | prepass: shader samples nothing
+ 1086 MARK     261    492    1.3/1.0/1.1            102/150/24                13.5  0.74  ps='' rank=0 | prepass: shader samples nothing
+ 1087 MARK     261    492    1.3/1.0/1.1            92/150/24                 13.0  0.74  ps='' rank=0 | prepass: shader samples nothing
+ 1088 MARK     640    1003   1.3/0.5/0.5            103/150/24                14.3  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1089 MARK     640    1003   1.3/0.5/0.5            90/150/24                 13.7  0.36  ps='' rank=0 | prepass: shader samples nothing
+ 1090 PASS     990    1905   0.4/0.3/0.3            97/146/30                  6.8  0.63  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1091 PASS     990    472    0.4/0.3/0.3            97/146/30                  6.8  0.63  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1092 PASS     130    313    0.2/0.1/0.1            97/148/30                  6.5  0.46  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1093 PASS     764    1694   0.2/0.3/0.3            97/147/30                  6.4  0.54  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1094 PASS     7977   739    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1095 PASS     7977   3408   1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1096 PASS     7977   427    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1097 PASS     7977   677    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1098 PASS     7977   315    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1099 PASS     7977   284    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1100 PASS     7977   222    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1101 PASS     7977   383    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1102 PASS     7977   154    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1103 PASS     7977   250    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1104 PASS     7977   628    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1105 PASS     7977   851    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1106 PASS     7977   168    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1107 PASS     7977   245    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1108 PASS     7977   131    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1109 PASS     7977   183    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1110 PASS     7977   498    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1111 PASS     7977   1457   1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1112 PASS     7977   250    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1113 PASS     7977   143    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1114 PASS     7977   175    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1115 PASS     7977   570    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1116 PASS     7977   1416   1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1117 PASS     7977   539    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1118 PASS     7977   723    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1119 PASS     7977   198    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1120 PASS     7977   86     1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1121 PASS     7977   188    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1122 PASS     7977   386    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1123 PASS     7977   1318   1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1124 PASS     7977   170    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1125 PASS     7977   84     1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1126 PASS     7977   195    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1127 PASS     7977   647    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1128 PASS     7977   740    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1129 PASS     7977   309    1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Diffuse_MapSampler' rank=100 | skinned (c52 bone palette), awaiting the skinning port
+ 1130 PASS     7977   2972   1.2/1.8/0.3            97/147/30                  6.6  0.18  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1131 PASS     1128   2886   0.3/0.4/0.3            97/147/30                  6.5  0.70  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1132 PASS     3      1      0.0/0.0/0.0            97/147/30                  6.6  0.06  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1133 PASS     1080   499    0.1/0.1/0.1            96/147/30                  6.6  0.90  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1134 PASS     1080   500    0.1/0.1/0.1            96/147/30                  6.6  0.90  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1135 PASS     1080   501    0.1/0.1/0.1            96/147/30                  6.6  0.90  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1136 PASS     1080   499    0.2/0.1/0.1            97/147/30                  6.5  0.81  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1137 PASS     1080   499    0.2/0.1/0.1            97/147/30                  6.5  0.81  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1138 PASS     1080   499    0.2/0.1/0.1            97/147/30                  6.5  0.81  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1139 PASS     536    892    0.1/0.0/0.1            97/147/30                  6.4  0.41  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1140 PASS     536    243    0.1/0.0/0.1            97/147/30                  6.4  0.41  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1141 PASS     416    964    0.2/0.1/0.0            97/147/30                  6.5  0.20  ps='Normal_MapSampler' rank=0 | skinned (c52 bone palette), awaiting the skinning port
+ 1142 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1143 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1144 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1145 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1146 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1147 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1148 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1149 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1150 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1151 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1152 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1153 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1154 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1155 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1156 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1157 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1158 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1159 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1160 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1161 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1162 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+ 1163 MARK     8      12     1.0/1.0/1.0            0/0/0                    180.0  1.00  ps='' rank=0 | prepass: shader samples nothing
+200

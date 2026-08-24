@@ -1,0 +1,3019 @@
+sr3-rtx loaded (pid 28368)
+mode: ENGINE (binary patching)
+engine map: module base 0x00400000 (expected 0x00400000)
+engine map: 12/12 sites verified - map is valid for this build
+settings: publishWorld=0 oneCameraPerFrame=1 aspectFilter=1
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device vtable (backbuffer 1280x720, aspect 1.778)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: point (pos=c0 dir=c2 color=c4 info=c5 spot=c-1)
+light shader found: point (pos=c0 dir=c2 color=c4 info=c5 spot=c-1)
+render target #0: 1280x720 format=22
+UP #1 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+quad footprint #1: x 0..1280  y 0..720  (1280x720) kept
+UP #2 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #3 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #4 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #5 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #6 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #7 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #8 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #9 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #10 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #11 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #12 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #13 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #14 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #15 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #16 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #17 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #18 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #19 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #20 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #21 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #22 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #23 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #24 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #25 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #26 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #27 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #28 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #29 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+UP #30 DrawPrimitiveUP prims=2 stride=28 vs=14EABD50 tex0=14E7AE80 ra=0049D60A | (1280.00 0.00 0.00) (1280.00 720.00 0.00) (0.00 0.00 0.00) (0.00 720.00 0.00) 
+frame 60 | published=0 (0.00/frame) rejected=0 candidates=0/0 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 0.0 0.0 0.0 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 0.0/frame (albedo blanked 0.0/frame)
+    draws from wrapper 0x49cxxx       indexed=0.0 prim=0.0 indexedUP=0.0 UP=1.0 /frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+quad footprint #2: x 40..1240  y 0..720  (1200x720) kept
+quad footprint #3: x 640..1142  y -359..1245  (502x1604) kept
+quad footprint #4: x 139..640  y -359..1245  (501x1604) kept
+quad footprint #5: x 406..1688  y 0..1156  (1282x1156) kept
+quad footprint #6: x -566..1878  y 340..849  (2444x509) kept
+quad footprint #7: x -469..762  y 4..1103  (1231x1099) kept
+quad footprint #8: x -289..877  y -482..581  (1166x1063) kept
+quad footprint #9: x 492..1741  y -435..684  (1249x1119) kept
+quad footprint #10: x -900..-500  y -58..742  (400x800) kept
+quad footprint #11: x -100..1399  y -76..791  (1499x867) kept
+quad footprint #12: x 573..835  y 344..384  (262x40) kept
+quad footprint #13: x 581..611  y 347..382  (30x35) kept
+quad footprint #14: x 579..609  y 346..381  (30x35) kept
+quad footprint #15: x 0..0  y 0..721  (0x721) kept
+quad footprint #16: x 1280..1281  y 0..721  (1x721) kept
+quad footprint #17: x 580..613  y 346..383  (33x37) kept
+quad footprint #18: x 578..611  y 345..382  (33x37) kept
+quad footprint #19: x 578..614  y 344..385  (36x41) kept
+quad footprint #20: x 576..612  y 343..384  (36x41) kept
+quad footprint #21: x 577..615  y 343..386  (38x43) kept
+quad footprint #22: x 575..613  y 342..385  (38x43) kept
+quad footprint #23: x 576..616  y 343..386  (40x43) kept
+quad footprint #24: x 574..614  y 342..385  (40x43) kept
+frame 600 | published=0 (0.00/frame) rejected=811 candidates=0/0 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 0.0 0.0 0.0 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 0.0/frame (albedo blanked 0.0/frame)
+    draws from wrapper 0x49cxxx       indexed=0.0 prim=0.0 indexedUP=0.0 UP=25.4 /frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+first camera published:
+  camera pos = 1223.30 14.11 1053.24
+  projection _11=1.2991 _22=2.3095 _33=1.0000 _43=-0.15  aspect=1.778 (target 1.778)
+frame 1200 | published=2 (0.00/frame) rejected=2828 candidates=1/1 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 96.3 147.7 1060.1 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 0.0/frame (albedo blanked 0.0/frame)
+    draws from wrapper 0x49cxxx       indexed=0.0 prim=0.0 indexedUP=0.0 UP=17.9 /frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+render target #1: 1024x512 format=21
+render target #2: 512x256 format=21
+render target #3: 256x128 format=21
+render target #4: 128x64 format=21
+render target #5: 64x32 format=21
+render target #6: 32x16 format=21
+render target #7: 16x8 format=21
+render target #8: 8x4 format=21
+render target #9: 2048x1024 format=21
+render target #10: 1024x512 format=21
+render target #11: 512x256 format=21
+render target #12: 256x128 format=21
+render target #13: 128x64 format=21
+render target #14: 64x32 format=21
+render target #15: 32x16 format=21
+render target #16: 16x8 format=21
+render target #17: 8x4 format=21
+render target #18: 256x256 format=21
+render target #19: 128x128 format=21
+render target #20: 64x64 format=21
+render target #21: 32x32 format=21
+render target #22: 1280x720 format=34
+geom #1: verts=121 prims=179 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A249390 ib=4A579818 diffuseStage=-1
+geom #2: verts=180 prims=266 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A248998 ib=4A578F58 diffuseStage=-1
+geom #3: verts=4 prims=2 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=3CA07CA0 ib=3C98E890 diffuseStage=-1
+small VB draw #1: prims=2 verts=4 stride=24 vs=14E92C40 screenSpace=0 tex0=34CBC630 | (-1.5 0.0 1.1) (1.5 0.0 1.1) (-1.5 0.0 -1.1) (1.5 0.0 -1.1) 
+geom #4: verts=4 prims=2 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=3CA07CA0 ib=3C98E890 diffuseStage=-1
+small VB draw #2: prims=2 verts=4 stride=24 vs=14E92C40 screenSpace=0 tex0=34CBC630 | (-1.5 0.0 1.1) (1.5 0.0 1.1) (-1.5 0.0 -1.1) (1.5 0.0 -1.1) 
+geom #5: verts=3931 prims=6076 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A245C48 ib=4A578778 diffuseStage=-1
+geom #6: verts=17601 prims=494 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=0
+geom #7: verts=17601 prims=572 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #8: verts=17601 prims=92 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #9: verts=17601 prims=75 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #10: verts=17601 prims=73 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #11: verts=17601 prims=308 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #12: verts=17601 prims=947 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #13: verts=17601 prims=323 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #14: verts=17601 prims=38 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #15: verts=17601 prims=52 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #16: verts=17601 prims=319 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #17: verts=35877 prims=108 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A247860 ib=4A5799D8 diffuseStage=-1
+geom #18: verts=1369 prims=30 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246388 ib=4A577F98 diffuseStage=-1
+geom #19: verts=17601 prims=20 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #20: verts=17601 prims=36 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #21: verts=17601 prims=1022 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #22: verts=770 prims=71 stride=28 elems=13 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A247948 ib=4A5799D8 diffuseStage=-1
+geom #23: verts=317 prims=68 stride=28 elems=13 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A247120 ib=4A577F98 diffuseStage=-1
+geom #24: verts=17601 prims=1000 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #25: verts=17601 prims=4768 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #26: verts=17601 prims=35 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #27: verts=17601 prims=1492 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #28: verts=38907 prims=46118 stride=20 elems=11 | pos@0(float3) normal@12(ubyte4n) uv@16(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A248D38 ib=4A5799D8 diffuseStage=-1
+geom #29: verts=17601 prims=1051 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+geom #30: verts=17601 prims=319 stride=24 elems=12 | pos@0(float3) normal@12(ubyte4n) uv@20(short2) bw@-1(?) bi@-1(?) | skinned=0 vb=4A246470 ib=4A578BD8 diffuseStage=-1
+small VB draw #3: prims=2 verts=20 stride=24 vs=14E92C40 screenSpace=0 tex0=3F5D2C18 | (45.1 7.4 -81.5) (62.0 7.4 -82.1) (36.9 7.4 -99.1) (71.1 7.4 -95.2) 
+small VB draw #4: prims=2 verts=2750 stride=20 vs=14E92C40 screenSpace=0 tex0=453EE970 | (-159.9 2.8 141.6) (-153.8 2.9 136.8) (-162.0 2.9 135.8) (-150.0 3.0 142.5) 
+small VB draw #5: prims=1 verts=2750 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DA078 | (-159.9 2.8 141.6) (-153.8 2.9 136.8) (-162.0 2.9 135.8) (-150.0 3.0 142.5) 
+small VB draw #6: prims=2 verts=2750 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DE678 | (-159.9 2.8 141.6) (-153.8 2.9 136.8) (-162.0 2.9 135.8) (-150.0 3.0 142.5) 
+small VB draw #7: prims=1 verts=2595 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DCC38 | (-168.8 -9.7 -128.5) (-133.3 -9.6 -127.4) (-148.5 -11.3 -152.5) (-110.7 -11.6 -153.6) 
+small VB draw #8: prims=1 verts=3 stride=16 vs=14E92C40 screenSpace=0 tex0=3F5DCC38 | (52.1 20.2 -140.0) (52.2 20.2 -140.0) (52.2 20.3 -140.0) (0.0 -0.0 0.0) 
+small VB draw #9: prims=1 verts=4171 stride=20 vs=14E92C40 screenSpace=0 tex0=453E2B90 | (67.2 -13.4 93.9) (65.2 -9.3 101.5) (62.7 -9.3 100.3) (71.4 -13.3 82.6) 
+small VB draw #10: prims=1 verts=1907 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DE218 | (41.7 21.6 -140.1) (41.7 21.6 -140.0) (42.3 21.6 -139.8) (41.7 23.1 -140.1) 
+small VB draw #11: prims=1 verts=1907 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DA158 | (41.7 21.6 -140.1) (41.7 21.6 -140.0) (42.3 21.6 -139.8) (41.7 23.1 -140.1) 
+small VB draw #12: prims=2 verts=222 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5C1F78 | (-7.1 3.3 30.3) (-7.1 3.3 30.5) (-7.3 3.3 30.3) (-7.3 3.3 30.5) 
+small VB draw #13: prims=2 verts=222 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5C1F78 | (-7.1 3.3 30.3) (-7.1 3.3 30.5) (-7.3 3.3 30.3) (-7.3 3.3 30.5) 
+small VB draw #14: prims=2 verts=222 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5C1F78 | (-7.1 3.3 30.3) (-7.1 3.3 30.5) (-7.3 3.3 30.3) (-7.3 3.3 30.5) 
+small VB draw #15: prims=2 verts=4 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5D5618 | (12.0 -49.5 0.5) (12.0 49.5 0.5) (-12.0 -49.5 0.5) (-12.0 49.5 0.5) 
+small VB draw #16: prims=2 verts=56 stride=24 vs=15D2F1F8 screenSpace=0 tex0=3F5D88D8 | (-100.1 -382.6 50.4) (-110.0 -382.6 60.3) (-103.9 -381.2 54.2) (-109.2 -380.1 59.4) 
+small VB draw #17: prims=2 verts=28 stride=24 vs=15D2F1F8 screenSpace=0 tex0=3F5D88D8 | (103.5 -289.0 103.6) (103.4 -281.3 103.6) (103.4 -289.0 119.2) (103.5 -281.3 119.2) 
+small VB draw #18: prims=2 verts=28 stride=24 vs=15D2F1F8 screenSpace=0 tex0=3F5D82B8 | (103.5 -289.0 103.6) (103.4 -281.3 103.6) (103.4 -289.0 119.2) (103.5 -281.3 119.2) 
+small VB draw #19: prims=2 verts=8 stride=24 vs=15D2F1F8 screenSpace=0 tex0=3F5D6178 | (106.2 -80.1 -49.0) (106.2 -68.1 -49.0) (123.9 -80.1 -31.4) (123.9 -68.1 -31.4) 
+small VB draw #20: prims=2 verts=8 stride=24 vs=15D2F1F8 screenSpace=0 tex0=3F5D5998 | (106.2 -80.1 -49.0) (106.2 -68.1 -49.0) (123.9 -80.1 -31.4) (123.9 -68.1 -31.4) 
+small VB draw #21: prims=2 verts=1589 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DFA98 | (145.0 12.1 -132.5) (140.1 12.1 -132.6) (140.1 12.1 -129.6) (41.3 12.3 -140.1) 
+small VB draw #22: prims=1 verts=1589 stride=20 vs=14E92C40 screenSpace=0 tex0=3F5DBC78 | (145.0 12.1 -132.5) (140.1 12.1 -132.6) (140.1 12.1 -129.6) (41.3 12.3 -140.1) 
+small VB draw #23: prims=1 verts=31 stride=24 vs=14E8A348 screenSpace=0 tex0=3B4046A0 | (-4.9 -458.5 93.1) (-4.9 -446.5 93.1) (-29.9 -458.5 93.1) (-29.9 -446.5 93.1) 
+small VB draw #24: prims=2 verts=27 stride=24 vs=14E92C40 screenSpace=0 tex0=3F5DF018 | (-111.6 0.2 -22.6) (-107.0 0.2 -27.3) (-123.2 0.2 -34.2) (-118.6 0.2 -38.9) 
+render target #23: 1280x720 format=21
+render target #24: 1280x720 format=21
+render target #25: 1280x720 format=113
+render target #26: 512x288 format=113
+render target #27: 400x288 format=113
+render target #28: 400x288 format=113
+render target #29: 400x288 format=113
+render target #30: 512x512 format=113
+render target #31: 1280x720 format=113
+render target #32: 1280x720 format=113
+render target #33: 1280x720 format=21
+render target #34: 320x180 format=113
+render target #35: 64x64 format=114
+render target #36: 16x16 format=114
+render target #37: 4x4 format=114
+render target #38: 1x1 format=114
+render target #39: 1x1 format=114
+render target #40: 256x128 format=21
+render target #41: 320x180 format=21
+render target #42: 320x180 format=21
+frame 1800 | published=204 (0.11/frame) rejected=8950 candidates=68/68 | light shaders=24 lights emitted=7189 (4.0/frame) | game SetTransform=0
+    camera at 98.6 147.9 27.5 | albedo fixes=15.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 275.3/frame (albedo blanked 251.6/frame)
+    draws from wrapper 0x49cxxx       indexed=309.8 prim=14.4 indexedUP=0.0 UP=28.8 /frame
+    target #0 1280x720 fmt=22 : 0.4 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.2 draws/frame
+    target #20 64x64 fmt=21 : 0.2 draws/frame
+    target #21 32x32 fmt=21 : 0.2 draws/frame
+    target #22 1280x720 fmt=34 : 245.7 draws/frame
+    target #25 1280x720 fmt=113 : 7.3 draws/frame
+    target #26 512x288 fmt=113 : 0.3 draws/frame
+    target #27 400x288 fmt=113 : 1.4 draws/frame
+    target #28 400x288 fmt=113 : 1.4 draws/frame
+    target #29 400x288 fmt=113 : 1.4 draws/frame
+    target #30 512x512 fmt=113 : 2.2 draws/frame
+    target #31 1280x720 fmt=113 : 60.8 draws/frame
+    target #32 1280x720 fmt=113 : 0.9 draws/frame
+    target #34 320x180 fmt=113 : 0.2 draws/frame
+    target #35 64x64 fmt=114 : 0.2 draws/frame
+    target #36 16x16 fmt=114 : 0.2 draws/frame
+    target #37 4x4 fmt=114 : 0.2 draws/frame
+    target #38 1x1 fmt=114 : 0.2 draws/frame
+    target #39 1x1 fmt=114 : 0.2 draws/frame
+    target #40 256x128 fmt=21 : 0.2 draws/frame
+    target #41 320x180 fmt=21 : 0.2 draws/frame
+    target #42 320x180 fmt=21 : 0.2 draws/frame
+    draws using a camera OTHER than the published one: 11616 of 583574 (2.0%)
+frame 2400 | published=628 (0.26/frame) rejected=17950 candidates=68/68 | light shaders=24 lights emitted=19405 (8.1/frame) | game SetTransform=0
+    camera at 96.4 147.3 27.5 | albedo fixes=28.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 424.7/frame (albedo blanked 378.5/frame)
+    draws from wrapper 0x49cxxx       indexed=494.8 prim=29.6 indexedUP=0.0 UP=38.9 /frame
+    target #0 1280x720 fmt=22 : 0.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.4 draws/frame
+    target #20 64x64 fmt=21 : 0.4 draws/frame
+    target #21 32x32 fmt=21 : 0.4 draws/frame
+    target #22 1280x720 fmt=34 : 367.7 draws/frame
+    target #25 1280x720 fmt=113 : 15.3 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 2.8 draws/frame
+    target #28 400x288 fmt=113 : 2.8 draws/frame
+    target #29 400x288 fmt=113 : 2.8 draws/frame
+    target #30 512x512 fmt=113 : 4.4 draws/frame
+    target #31 1280x720 fmt=113 : 120.0 draws/frame
+    target #32 1280x720 fmt=113 : 2.7 draws/frame
+    target #33 1280x720 fmt=21 : 0.0 draws/frame
+    target #34 320x180 fmt=113 : 0.4 draws/frame
+    target #35 64x64 fmt=114 : 0.4 draws/frame
+    target #36 16x16 fmt=114 : 0.4 draws/frame
+    target #37 4x4 fmt=114 : 0.4 draws/frame
+    target #38 1x1 fmt=114 : 0.4 draws/frame
+    target #39 1x1 fmt=114 : 0.4 draws/frame
+    target #40 256x128 fmt=21 : 0.4 draws/frame
+    target #41 320x180 fmt=21 : 0.4 draws/frame
+    target #42 320x180 fmt=21 : 0.4 draws/frame
+    draws using a camera OTHER than the published one: 30222 of 1258484 (2.4%)
+frame 3000 | published=1186 (0.40/frame) rejected=26950 candidates=68/68 | light shaders=24 lights emitted=37642 (12.5/frame) | game SetTransform=0
+    camera at 91.7 148.8 28.8 | albedo fixes=40.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 573.7/frame (albedo blanked 505.8/frame)
+    draws from wrapper 0x49cxxx       indexed=666.1 prim=42.4 indexedUP=0.0 UP=45.2 /frame
+    target #0 1280x720 fmt=22 : 1.0 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.5 draws/frame
+    target #20 64x64 fmt=21 : 0.5 draws/frame
+    target #21 32x32 fmt=21 : 0.5 draws/frame
+    target #22 1280x720 fmt=34 : 488.3 draws/frame
+    target #25 1280x720 fmt=113 : 23.4 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 3.6 draws/frame
+    target #28 400x288 fmt=113 : 3.6 draws/frame
+    target #29 400x288 fmt=113 : 3.6 draws/frame
+    target #30 512x512 fmt=113 : 5.7 draws/frame
+    target #31 1280x720 fmt=113 : 168.5 draws/frame
+    target #32 1280x720 fmt=113 : 3.9 draws/frame
+    target #33 1280x720 fmt=21 : 0.2 draws/frame
+    target #34 320x180 fmt=113 : 0.5 draws/frame
+    target #35 64x64 fmt=114 : 0.5 draws/frame
+    target #36 16x16 fmt=114 : 0.5 draws/frame
+    target #37 4x4 fmt=114 : 0.5 draws/frame
+    target #38 1x1 fmt=114 : 0.5 draws/frame
+    target #39 1x1 fmt=114 : 0.5 draws/frame
+    target #40 256x128 fmt=21 : 0.5 draws/frame
+    target #41 320x180 fmt=21 : 0.5 draws/frame
+    target #42 320x180 fmt=21 : 0.5 draws/frame
+    draws using a camera OTHER than the published one: 48822 of 2125632 (2.3%)
+frame 3600 | published=1774 (0.49/frame) rejected=35950 candidates=68/68 | light shaders=24 lights emitted=52408 (14.6/frame) | game SetTransform=0
+    camera at 95.8 146.2 5.8 | albedo fixes=46.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 708.8/frame (albedo blanked 629.8/frame)
+    draws from wrapper 0x49cxxx       indexed=815.2 prim=50.0 indexedUP=0.0 UP=49.4 /frame
+    target #0 1280x720 fmt=22 : 1.2 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.6 draws/frame
+    target #20 64x64 fmt=21 : 0.6 draws/frame
+    target #21 32x32 fmt=21 : 0.6 draws/frame
+    target #22 1280x720 fmt=34 : 612.5 draws/frame
+    target #25 1280x720 fmt=113 : 27.5 draws/frame
+    target #26 512x288 fmt=113 : 0.4 draws/frame
+    target #27 400x288 fmt=113 : 4.2 draws/frame
+    target #28 400x288 fmt=113 : 4.2 draws/frame
+    target #29 400x288 fmt=113 : 4.2 draws/frame
+    target #30 512x512 fmt=113 : 6.6 draws/frame
+    target #31 1280x720 fmt=113 : 192.4 draws/frame
+    target #32 1280x720 fmt=113 : 4.3 draws/frame
+    target #33 1280x720 fmt=21 : 0.5 draws/frame
+    target #34 320x180 fmt=113 : 0.6 draws/frame
+    target #35 64x64 fmt=114 : 0.6 draws/frame
+    target #36 16x16 fmt=114 : 0.6 draws/frame
+    target #37 4x4 fmt=114 : 0.6 draws/frame
+    target #38 1x1 fmt=114 : 0.6 draws/frame
+    target #39 1x1 fmt=114 : 0.6 draws/frame
+    target #40 256x128 fmt=21 : 0.6 draws/frame
+    target #41 320x180 fmt=21 : 0.6 draws/frame
+    target #42 320x180 fmt=21 : 0.6 draws/frame
+    draws using a camera OTHER than the published one: 67428 of 3114512 (2.2%)
+frame 4200 | published=2129 (0.51/frame) rejected=44952 candidates=68/68 | light shaders=24 lights emitted=63830 (15.2/frame) | game SetTransform=0
+    camera at 96.0 147.0 249.7 | albedo fixes=46.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 721.9/frame (albedo blanked 642.8/frame)
+    draws from wrapper 0x49cxxx       indexed=839.0 prim=53.8 indexedUP=0.0 UP=52.0 /frame
+    target #0 1280x720 fmt=22 : 1.3 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.7 draws/frame
+    target #20 64x64 fmt=21 : 0.7 draws/frame
+    target #21 32x32 fmt=21 : 0.7 draws/frame
+    target #22 1280x720 fmt=34 : 632.2 draws/frame
+    target #25 1280x720 fmt=113 : 28.6 draws/frame
+    target #26 512x288 fmt=113 : 0.3 draws/frame
+    target #27 400x288 fmt=113 : 4.6 draws/frame
+    target #28 400x288 fmt=113 : 4.6 draws/frame
+    target #29 400x288 fmt=113 : 4.6 draws/frame
+    target #30 512x512 fmt=113 : 7.2 draws/frame
+    target #31 1280x720 fmt=113 : 196.2 draws/frame
+    target #32 1280x720 fmt=113 : 4.8 draws/frame
+    target #33 1280x720 fmt=21 : 0.4 draws/frame
+    target #34 320x180 fmt=113 : 0.7 draws/frame
+    target #35 64x64 fmt=114 : 0.7 draws/frame
+    target #36 16x16 fmt=114 : 0.7 draws/frame
+    target #37 4x4 fmt=114 : 0.7 draws/frame
+    target #38 1x1 fmt=114 : 0.7 draws/frame
+    target #39 1x1 fmt=114 : 0.7 draws/frame
+    target #40 256x128 fmt=21 : 0.7 draws/frame
+    target #41 320x180 fmt=21 : 0.7 draws/frame
+    target #42 320x180 fmt=21 : 0.7 draws/frame
+    draws using a camera OTHER than the published one: 86290 of 3749636 (2.3%)
+frame 4800 | published=2253 (0.47/frame) rejected=53954 candidates=68/68 | light shaders=24 lights emitted=70865 (14.8/frame) | game SetTransform=0
+    camera at 97.3 148.8 3.5 | albedo fixes=44.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 697.3/frame (albedo blanked 622.0/frame)
+    draws from wrapper 0x49cxxx       indexed=821.4 prim=55.3 indexedUP=0.0 UP=53.2 /frame
+    target #0 1280x720 fmt=22 : 1.4 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.7 draws/frame
+    target #20 64x64 fmt=21 : 0.7 draws/frame
+    target #21 32x32 fmt=21 : 0.7 draws/frame
+    target #22 1280x720 fmt=34 : 617.9 draws/frame
+    target #25 1280x720 fmt=113 : 28.1 draws/frame
+    target #26 512x288 fmt=113 : 0.3 draws/frame
+    target #27 400x288 fmt=113 : 4.9 draws/frame
+    target #28 400x288 fmt=113 : 4.9 draws/frame
+    target #29 400x288 fmt=113 : 4.9 draws/frame
+    target #30 512x512 fmt=113 : 7.7 draws/frame
+    target #31 1280x720 fmt=113 : 192.7 draws/frame
+    target #32 1280x720 fmt=113 : 5.1 draws/frame
+    target #33 1280x720 fmt=21 : 0.4 draws/frame
+    target #34 320x180 fmt=113 : 0.7 draws/frame
+    target #35 64x64 fmt=114 : 0.7 draws/frame
+    target #36 16x16 fmt=114 : 0.7 draws/frame
+    target #37 4x4 fmt=114 : 0.7 draws/frame
+    target #38 1x1 fmt=114 : 0.7 draws/frame
+    target #39 1x1 fmt=114 : 0.7 draws/frame
+    target #40 256x128 fmt=21 : 0.7 draws/frame
+    target #41 320x180 fmt=21 : 0.7 draws/frame
+    target #42 320x180 fmt=21 : 0.7 draws/frame
+    draws using a camera OTHER than the published one: 105172 of 4208209 (2.5%)
+frame 5400 | published=2826 (0.52/frame) rejected=62958 candidates=68/68 | light shaders=24 lights emitted=79794 (14.8/frame) | game SetTransform=0
+    camera at 98.1 148.0 21.4 | albedo fixes=45.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 733.1/frame (albedo blanked 655.6/frame)
+    draws from wrapper 0x49cxxx       indexed=863.3 prim=56.9 indexedUP=0.0 UP=55.0 /frame
+    target #0 1280x720 fmt=22 : 1.5 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.7 draws/frame
+    target #20 64x64 fmt=21 : 0.7 draws/frame
+    target #21 32x32 fmt=21 : 0.7 draws/frame
+    target #22 1280x720 fmt=34 : 654.2 draws/frame
+    target #25 1280x720 fmt=113 : 28.1 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.1 draws/frame
+    target #28 400x288 fmt=113 : 5.1 draws/frame
+    target #29 400x288 fmt=113 : 5.1 draws/frame
+    target #30 512x512 fmt=113 : 8.1 draws/frame
+    target #31 1280x720 fmt=113 : 197.6 draws/frame
+    target #32 1280x720 fmt=113 : 5.7 draws/frame
+    target #33 1280x720 fmt=21 : 0.5 draws/frame
+    target #34 320x180 fmt=113 : 0.7 draws/frame
+    target #35 64x64 fmt=114 : 0.7 draws/frame
+    target #36 16x16 fmt=114 : 0.7 draws/frame
+    target #37 4x4 fmt=114 : 0.7 draws/frame
+    target #38 1x1 fmt=114 : 0.7 draws/frame
+    target #39 1x1 fmt=114 : 0.7 draws/frame
+    target #40 256x128 fmt=21 : 0.7 draws/frame
+    target #41 320x180 fmt=21 : 0.7 draws/frame
+    target #42 320x180 fmt=21 : 0.7 draws/frame
+    draws using a camera OTHER than the published one: 124230 of 4968662 (2.5%)
+frame 6000 | published=3131 (0.52/frame) rejected=71958 candidates=68/68 | light shaders=24 lights emitted=89453 (14.9/frame) | game SetTransform=0
+    camera at 96.4 148.3 21.2 | albedo fixes=47.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 757.2/frame (albedo blanked 677.2/frame)
+    draws from wrapper 0x49cxxx       indexed=891.9 prim=58.3 indexedUP=0.0 UP=56.4 /frame
+    target #0 1280x720 fmt=22 : 1.5 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 674.9 draws/frame
+    target #25 1280x720 fmt=113 : 28.4 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.3 draws/frame
+    target #28 400x288 fmt=113 : 5.3 draws/frame
+    target #29 400x288 fmt=113 : 5.3 draws/frame
+    target #30 512x512 fmt=113 : 8.4 draws/frame
+    target #31 1280x720 fmt=113 : 205.4 draws/frame
+    target #32 1280x720 fmt=113 : 5.9 draws/frame
+    target #33 1280x720 fmt=21 : 0.5 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 142836 of 5701548 (2.5%)
+frame 6600 | published=3131 (0.47/frame) rejected=80958 candidates=68/68 | light shaders=24 lights emitted=95453 (14.5/frame) | game SetTransform=0
+    camera at 96.4 148.3 21.2 | albedo fixes=49.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 774.4/frame (albedo blanked 694.1/frame)
+    draws from wrapper 0x49cxxx       indexed=912.6 prim=58.7 indexedUP=0.0 UP=56.3 /frame
+    target #0 1280x720 fmt=22 : 1.6 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 692.1 draws/frame
+    target #25 1280x720 fmt=113 : 27.7 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.5 draws/frame
+    target #28 400x288 fmt=113 : 5.5 draws/frame
+    target #29 400x288 fmt=113 : 5.5 draws/frame
+    target #30 512x512 fmt=113 : 8.6 draws/frame
+    target #31 1280x720 fmt=113 : 208.8 draws/frame
+    target #32 1280x720 fmt=113 : 6.1 draws/frame
+    target #33 1280x720 fmt=21 : 0.4 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 161436 of 6410179 (2.5%)
+frame 7200 | published=3131 (0.43/frame) rejected=89958 candidates=68/68 | light shaders=24 lights emitted=101453 (14.1/frame) | game SetTransform=0
+    camera at 96.4 148.3 21.2 | albedo fixes=50.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 788.6/frame (albedo blanked 708.1/frame)
+    draws from wrapper 0x49cxxx       indexed=929.7 prim=58.9 indexedUP=0.0 UP=56.1 /frame
+    target #0 1280x720 fmt=22 : 1.6 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 706.3 draws/frame
+    target #25 1280x720 fmt=113 : 27.1 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.6 draws/frame
+    target #28 400x288 fmt=113 : 5.6 draws/frame
+    target #29 400x288 fmt=113 : 5.6 draws/frame
+    target #30 512x512 fmt=113 : 8.8 draws/frame
+    target #31 1280x720 fmt=113 : 211.6 draws/frame
+    target #32 1280x720 fmt=113 : 6.2 draws/frame
+    target #33 1280x720 fmt=21 : 0.4 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 180036 of 7117959 (2.5%)
+frame 7800 | published=3351 (0.43/frame) rejected=98958 candidates=68/68 | light shaders=24 lights emitted=112194 (14.4/frame) | game SetTransform=0
+    camera at 89.8 147.9 25.4 | albedo fixes=52.5/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 812.3/frame (albedo blanked 729.9/frame)
+    draws from wrapper 0x49cxxx       indexed=956.1 prim=60.2 indexedUP=0.0 UP=56.2 /frame
+    target #0 1280x720 fmt=22 : 1.6 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 727.2 draws/frame
+    target #25 1280x720 fmt=113 : 27.7 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.7 draws/frame
+    target #28 400x288 fmt=113 : 5.7 draws/frame
+    target #29 400x288 fmt=113 : 5.7 draws/frame
+    target #30 512x512 fmt=113 : 9.0 draws/frame
+    target #31 1280x720 fmt=113 : 216.9 draws/frame
+    target #32 1280x720 fmt=113 : 6.3 draws/frame
+    target #33 1280x720 fmt=21 : 0.4 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 198636 of 7926770 (2.5%)
+frame 8400 | published=3397 (0.40/frame) rejected=107958 candidates=68/68 | light shaders=24 lights emitted=120159 (14.3/frame) | game SetTransform=0
+    camera at 90.2 148.2 25.9 | albedo fixes=53.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 838.8/frame (albedo blanked 756.8/frame)
+    draws from wrapper 0x49cxxx       indexed=984.5 prim=60.9 indexedUP=0.0 UP=56.4 /frame
+    target #0 1280x720 fmt=22 : 1.7 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 754.7 draws/frame
+    target #25 1280x720 fmt=113 : 27.9 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.8 draws/frame
+    target #28 400x288 fmt=113 : 5.8 draws/frame
+    target #29 400x288 fmt=113 : 5.8 draws/frame
+    target #30 512x512 fmt=113 : 9.1 draws/frame
+    target #31 1280x720 fmt=113 : 217.8 draws/frame
+    target #32 1280x720 fmt=113 : 6.4 draws/frame
+    target #33 1280x720 fmt=21 : 0.3 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 217236 of 8781171 (2.5%)
+frame 9000 | published=3397 (0.38/frame) rejected=116958 candidates=68/68 | light shaders=24 lights emitted=127959 (14.2/frame) | game SetTransform=0
+    camera at 90.2 148.2 25.9 | albedo fixes=53.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 861.6/frame (albedo blanked 780.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1009.0 prim=61.5 indexedUP=0.0 UP=56.0 /frame
+    target #0 1280x720 fmt=22 : 1.7 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 778.7 draws/frame
+    target #25 1280x720 fmt=113 : 28.0 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 5.9 draws/frame
+    target #28 400x288 fmt=113 : 5.9 draws/frame
+    target #29 400x288 fmt=113 : 5.9 draws/frame
+    target #30 512x512 fmt=113 : 9.2 draws/frame
+    target #31 1280x720 fmt=113 : 218.3 draws/frame
+    target #32 1280x720 fmt=113 : 6.4 draws/frame
+    target #33 1280x720 fmt=21 : 0.3 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 235836 of 9634640 (2.4%)
+frame 9600 | published=3412 (0.36/frame) rejected=125958 candidates=68/68 | light shaders=24 lights emitted=136782 (14.2/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=54.5/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 877.0/frame (albedo blanked 794.9/frame)
+    draws from wrapper 0x49cxxx       indexed=1026.1 prim=62.2 indexedUP=0.0 UP=56.3 /frame
+    target #0 1280x720 fmt=22 : 1.7 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.8 draws/frame
+    target #20 64x64 fmt=21 : 0.8 draws/frame
+    target #21 32x32 fmt=21 : 0.8 draws/frame
+    target #22 1280x720 fmt=34 : 792.9 draws/frame
+    target #25 1280x720 fmt=113 : 28.3 draws/frame
+    target #26 512x288 fmt=113 : 0.2 draws/frame
+    target #27 400x288 fmt=113 : 6.0 draws/frame
+    target #28 400x288 fmt=113 : 6.0 draws/frame
+    target #29 400x288 fmt=113 : 6.0 draws/frame
+    target #30 512x512 fmt=113 : 9.3 draws/frame
+    target #31 1280x720 fmt=113 : 220.8 draws/frame
+    target #32 1280x720 fmt=113 : 6.6 draws/frame
+    target #33 1280x720 fmt=21 : 0.3 draws/frame
+    target #34 320x180 fmt=113 : 0.8 draws/frame
+    target #35 64x64 fmt=114 : 0.8 draws/frame
+    target #36 16x16 fmt=114 : 0.8 draws/frame
+    target #37 4x4 fmt=114 : 0.8 draws/frame
+    target #38 1x1 fmt=114 : 0.8 draws/frame
+    target #39 1x1 fmt=114 : 0.8 draws/frame
+    target #40 256x128 fmt=21 : 0.8 draws/frame
+    target #41 320x180 fmt=21 : 0.8 draws/frame
+    target #42 320x180 fmt=21 : 0.8 draws/frame
+    draws using a camera OTHER than the published one: 254436 of 10447066 (2.4%)
+frame 10200 | published=3412 (0.33/frame) rejected=134958 candidates=68/68 | light shaders=24 lights emitted=146382 (14.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=56.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 884.6/frame (albedo blanked 800.9/frame)
+    draws from wrapper 0x49cxxx       indexed=1035.5 prim=62.8 indexedUP=0.0 UP=56.8 /frame
+    target #0 1280x720 fmt=22 : 1.7 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 797.0 draws/frame
+    target #25 1280x720 fmt=113 : 28.6 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.0 draws/frame
+    target #28 400x288 fmt=113 : 6.0 draws/frame
+    target #29 400x288 fmt=113 : 6.0 draws/frame
+    target #30 512x512 fmt=113 : 9.4 draws/frame
+    target #31 1280x720 fmt=113 : 225.6 draws/frame
+    target #32 1280x720 fmt=113 : 7.0 draws/frame
+    target #33 1280x720 fmt=21 : 0.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 273036 of 11202191 (2.4%)
+frame 10800 | published=3412 (0.32/frame) rejected=143958 candidates=68/68 | light shaders=24 lights emitted=155982 (14.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=58.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 891.5/frame (albedo blanked 806.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1043.9 prim=63.4 indexedUP=0.0 UP=57.1 /frame
+    target #0 1280x720 fmt=22 : 1.7 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 800.7 draws/frame
+    target #25 1280x720 fmt=113 : 28.9 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.1 draws/frame
+    target #28 400x288 fmt=113 : 6.1 draws/frame
+    target #29 400x288 fmt=113 : 6.1 draws/frame
+    target #30 512x512 fmt=113 : 9.5 draws/frame
+    target #31 1280x720 fmt=113 : 229.7 draws/frame
+    target #32 1280x720 fmt=113 : 7.3 draws/frame
+    target #33 1280x720 fmt=21 : 0.5 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 291636 of 11958134 (2.4%)
+frame 11400 | published=3412 (0.30/frame) rejected=152958 candidates=68/68 | light shaders=24 lights emitted=165582 (14.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=59.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 897.5/frame (albedo blanked 811.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1051.3 prim=63.9 indexedUP=0.0 UP=57.3 /frame
+    target #0 1280x720 fmt=22 : 1.7 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 803.9 draws/frame
+    target #25 1280x720 fmt=113 : 29.2 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.1 draws/frame
+    target #28 400x288 fmt=113 : 6.1 draws/frame
+    target #29 400x288 fmt=113 : 6.1 draws/frame
+    target #30 512x512 fmt=113 : 9.6 draws/frame
+    target #31 1280x720 fmt=113 : 233.5 draws/frame
+    target #32 1280x720 fmt=113 : 7.6 draws/frame
+    target #33 1280x720 fmt=21 : 0.6 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 310236 of 12713517 (2.4%)
+frame 12000 | published=3412 (0.28/frame) rejected=161958 candidates=68/68 | light shaders=24 lights emitted=175182 (14.6/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=61.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 903.0/frame (albedo blanked 815.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1058.0 prim=64.3 indexedUP=0.0 UP=57.6 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 806.9 draws/frame
+    target #25 1280x720 fmt=113 : 29.5 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.2 draws/frame
+    target #28 400x288 fmt=113 : 6.2 draws/frame
+    target #29 400x288 fmt=113 : 6.2 draws/frame
+    target #30 512x512 fmt=113 : 9.7 draws/frame
+    target #31 1280x720 fmt=113 : 236.9 draws/frame
+    target #32 1280x720 fmt=113 : 7.9 draws/frame
+    target #33 1280x720 fmt=21 : 0.7 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 328836 of 13468493 (2.4%)
+frame 12600 | published=3412 (0.27/frame) rejected=170958 candidates=68/68 | light shaders=24 lights emitted=184782 (14.7/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=62.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 907.9/frame (albedo blanked 819.2/frame)
+    draws from wrapper 0x49cxxx       indexed=1064.1 prim=64.7 indexedUP=0.0 UP=57.8 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 809.5 draws/frame
+    target #25 1280x720 fmt=113 : 29.7 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.2 draws/frame
+    target #28 400x288 fmt=113 : 6.2 draws/frame
+    target #29 400x288 fmt=113 : 6.2 draws/frame
+    target #30 512x512 fmt=113 : 9.7 draws/frame
+    target #31 1280x720 fmt=113 : 239.9 draws/frame
+    target #32 1280x720 fmt=113 : 8.1 draws/frame
+    target #33 1280x720 fmt=21 : 0.7 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 347436 of 14223270 (2.4%)
+frame 13200 | published=3412 (0.26/frame) rejected=179958 candidates=68/68 | light shaders=24 lights emitted=194382 (14.7/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=63.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 912.4/frame (albedo blanked 822.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1069.6 prim=65.1 indexedUP=0.0 UP=58.0 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 811.9 draws/frame
+    target #25 1280x720 fmt=113 : 29.9 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.2 draws/frame
+    target #28 400x288 fmt=113 : 6.2 draws/frame
+    target #29 400x288 fmt=113 : 6.2 draws/frame
+    target #30 512x512 fmt=113 : 9.8 draws/frame
+    target #31 1280x720 fmt=113 : 242.7 draws/frame
+    target #32 1280x720 fmt=113 : 8.4 draws/frame
+    target #33 1280x720 fmt=21 : 0.8 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 366036 of 14978395 (2.4%)
+frame 13800 | published=3412 (0.25/frame) rejected=188958 candidates=68/68 | light shaders=24 lights emitted=203982 (14.8/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=64.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 916.5/frame (albedo blanked 825.9/frame)
+    draws from wrapper 0x49cxxx       indexed=1074.7 prim=65.5 indexedUP=0.0 UP=58.1 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 814.1 draws/frame
+    target #25 1280x720 fmt=113 : 30.0 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.3 draws/frame
+    target #28 400x288 fmt=113 : 6.3 draws/frame
+    target #29 400x288 fmt=113 : 6.3 draws/frame
+    target #30 512x512 fmt=113 : 9.9 draws/frame
+    target #31 1280x720 fmt=113 : 245.3 draws/frame
+    target #32 1280x720 fmt=113 : 8.6 draws/frame
+    target #33 1280x720 fmt=21 : 0.8 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 384636 of 15733562 (2.4%)
+frame 14400 | published=3412 (0.24/frame) rejected=197958 candidates=68/68 | light shaders=24 lights emitted=213582 (14.8/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=65.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 920.3/frame (albedo blanked 828.9/frame)
+    draws from wrapper 0x49cxxx       indexed=1079.4 prim=65.8 indexedUP=0.0 UP=58.3 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 816.2 draws/frame
+    target #25 1280x720 fmt=113 : 30.2 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.3 draws/frame
+    target #28 400x288 fmt=113 : 6.3 draws/frame
+    target #29 400x288 fmt=113 : 6.3 draws/frame
+    target #30 512x512 fmt=113 : 9.9 draws/frame
+    target #31 1280x720 fmt=113 : 247.6 draws/frame
+    target #32 1280x720 fmt=113 : 8.8 draws/frame
+    target #33 1280x720 fmt=21 : 0.9 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 403236 of 16489850 (2.4%)
+frame 15000 | published=3412 (0.23/frame) rejected=206958 candidates=68/68 | light shaders=24 lights emitted=223182 (14.9/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=66.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 923.8/frame (albedo blanked 831.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1083.7 prim=66.1 indexedUP=0.0 UP=58.5 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 818.1 draws/frame
+    target #25 1280x720 fmt=113 : 30.4 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.3 draws/frame
+    target #28 400x288 fmt=113 : 6.3 draws/frame
+    target #29 400x288 fmt=113 : 6.3 draws/frame
+    target #30 512x512 fmt=113 : 9.9 draws/frame
+    target #31 1280x720 fmt=113 : 249.7 draws/frame
+    target #32 1280x720 fmt=113 : 8.9 draws/frame
+    target #33 1280x720 fmt=21 : 0.9 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 421836 of 17246377 (2.4%)
+frame 15600 | published=3412 (0.22/frame) rejected=215958 candidates=68/68 | light shaders=24 lights emitted=232782 (14.9/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=67.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 927.1/frame (albedo blanked 834.2/frame)
+    draws from wrapper 0x49cxxx       indexed=1087.7 prim=66.3 indexedUP=0.0 UP=58.6 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 819.9 draws/frame
+    target #25 1280x720 fmt=113 : 30.5 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.4 draws/frame
+    target #28 400x288 fmt=113 : 6.4 draws/frame
+    target #29 400x288 fmt=113 : 6.4 draws/frame
+    target #30 512x512 fmt=113 : 10.0 draws/frame
+    target #31 1280x720 fmt=113 : 251.7 draws/frame
+    target #32 1280x720 fmt=113 : 9.1 draws/frame
+    target #33 1280x720 fmt=21 : 1.0 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 440436 of 18002312 (2.4%)
+frame 16200 | published=3412 (0.21/frame) rejected=224958 candidates=68/68 | light shaders=24 lights emitted=242382 (15.0/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=67.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 930.1/frame (albedo blanked 836.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1091.4 prim=66.6 indexedUP=0.0 UP=58.7 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 821.6 draws/frame
+    target #25 1280x720 fmt=113 : 30.6 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.4 draws/frame
+    target #28 400x288 fmt=113 : 6.4 draws/frame
+    target #29 400x288 fmt=113 : 6.4 draws/frame
+    target #30 512x512 fmt=113 : 10.0 draws/frame
+    target #31 1280x720 fmt=113 : 253.5 draws/frame
+    target #32 1280x720 fmt=113 : 9.2 draws/frame
+    target #33 1280x720 fmt=21 : 1.0 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 459036 of 18759199 (2.4%)
+frame 16800 | published=3412 (0.20/frame) rejected=233958 candidates=68/68 | light shaders=24 lights emitted=251982 (15.0/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=68.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 932.9/frame (albedo blanked 838.8/frame)
+    draws from wrapper 0x49cxxx       indexed=1094.8 prim=66.8 indexedUP=0.0 UP=58.8 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 823.1 draws/frame
+    target #25 1280x720 fmt=113 : 30.8 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.4 draws/frame
+    target #28 400x288 fmt=113 : 6.4 draws/frame
+    target #29 400x288 fmt=113 : 6.4 draws/frame
+    target #30 512x512 fmt=113 : 10.1 draws/frame
+    target #31 1280x720 fmt=113 : 255.2 draws/frame
+    target #32 1280x720 fmt=113 : 9.4 draws/frame
+    target #33 1280x720 fmt=21 : 1.1 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 477636 of 19514674 (2.4%)
+frame 17400 | published=3412 (0.20/frame) rejected=242958 candidates=68/68 | light shaders=24 lights emitted=261582 (15.0/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=69.1/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 935.4/frame (albedo blanked 840.8/frame)
+    draws from wrapper 0x49cxxx       indexed=1097.9 prim=67.0 indexedUP=0.0 UP=58.9 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 824.4 draws/frame
+    target #25 1280x720 fmt=113 : 30.9 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.4 draws/frame
+    target #28 400x288 fmt=113 : 6.4 draws/frame
+    target #29 400x288 fmt=113 : 6.4 draws/frame
+    target #30 512x512 fmt=113 : 10.1 draws/frame
+    target #31 1280x720 fmt=113 : 256.8 draws/frame
+    target #32 1280x720 fmt=113 : 9.5 draws/frame
+    target #33 1280x720 fmt=21 : 1.1 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 496236 of 20269820 (2.4%)
+frame 18000 | published=3412 (0.19/frame) rejected=251958 candidates=68/68 | light shaders=24 lights emitted=271182 (15.1/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=69.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 937.8/frame (albedo blanked 842.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1100.9 prim=67.2 indexedUP=0.0 UP=59.0 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 825.7 draws/frame
+    target #25 1280x720 fmt=113 : 31.0 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.4 draws/frame
+    target #28 400x288 fmt=113 : 6.4 draws/frame
+    target #29 400x288 fmt=113 : 6.4 draws/frame
+    target #30 512x512 fmt=113 : 10.1 draws/frame
+    target #31 1280x720 fmt=113 : 258.3 draws/frame
+    target #32 1280x720 fmt=113 : 9.6 draws/frame
+    target #33 1280x720 fmt=21 : 1.1 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 514836 of 21025257 (2.4%)
+frame 18600 | published=3412 (0.18/frame) rejected=260958 candidates=68/68 | light shaders=24 lights emitted=280782 (15.1/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=70.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 940.0/frame (albedo blanked 844.4/frame)
+    draws from wrapper 0x49cxxx       indexed=1103.6 prim=67.4 indexedUP=0.0 UP=59.1 /frame
+    target #0 1280x720 fmt=22 : 1.8 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 826.9 draws/frame
+    target #25 1280x720 fmt=113 : 31.1 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.1 draws/frame
+    target #31 1280x720 fmt=113 : 259.7 draws/frame
+    target #32 1280x720 fmt=113 : 9.7 draws/frame
+    target #33 1280x720 fmt=21 : 1.1 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 533436 of 21780667 (2.4%)
+frame 19200 | published=3412 (0.18/frame) rejected=269958 candidates=68/68 | light shaders=24 lights emitted=290382 (15.1/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=70.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 942.1/frame (albedo blanked 846.0/frame)
+    draws from wrapper 0x49cxxx       indexed=1106.1 prim=67.6 indexedUP=0.0 UP=59.2 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 828.0 draws/frame
+    target #25 1280x720 fmt=113 : 31.2 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.2 draws/frame
+    target #31 1280x720 fmt=113 : 261.0 draws/frame
+    target #32 1280x720 fmt=113 : 9.8 draws/frame
+    target #33 1280x720 fmt=21 : 1.2 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 552036 of 22535364 (2.4%)
+frame 19800 | published=3412 (0.17/frame) rejected=278958 candidates=68/68 | light shaders=24 lights emitted=299982 (15.2/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=71.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 944.1/frame (albedo blanked 847.6/frame)
+    draws from wrapper 0x49cxxx       indexed=1108.6 prim=67.7 indexedUP=0.0 UP=59.3 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 829.1 draws/frame
+    target #25 1280x720 fmt=113 : 31.2 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.2 draws/frame
+    target #31 1280x720 fmt=113 : 262.2 draws/frame
+    target #32 1280x720 fmt=113 : 9.9 draws/frame
+    target #33 1280x720 fmt=21 : 1.2 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 570636 of 23290789 (2.5%)
+frame 20400 | published=3412 (0.17/frame) rejected=287958 candidates=68/68 | light shaders=24 lights emitted=309582 (15.2/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=71.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 945.9/frame (albedo blanked 849.0/frame)
+    draws from wrapper 0x49cxxx       indexed=1110.9 prim=67.9 indexedUP=0.0 UP=59.4 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 830.1 draws/frame
+    target #25 1280x720 fmt=113 : 31.3 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.2 draws/frame
+    target #31 1280x720 fmt=113 : 263.3 draws/frame
+    target #32 1280x720 fmt=113 : 10.0 draws/frame
+    target #33 1280x720 fmt=21 : 1.2 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 589236 of 24046616 (2.5%)
+frame 21000 | published=3412 (0.16/frame) rejected=296958 candidates=68/68 | light shaders=24 lights emitted=319182 (15.2/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=72.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 947.7/frame (albedo blanked 850.4/frame)
+    draws from wrapper 0x49cxxx       indexed=1113.0 prim=68.0 indexedUP=0.0 UP=59.5 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 831.0 draws/frame
+    target #25 1280x720 fmt=113 : 31.4 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.2 draws/frame
+    target #31 1280x720 fmt=113 : 264.4 draws/frame
+    target #32 1280x720 fmt=113 : 10.1 draws/frame
+    target #33 1280x720 fmt=21 : 1.2 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 607836 of 24802324 (2.5%)
+frame 21600 | published=3412 (0.16/frame) rejected=305958 candidates=68/68 | light shaders=24 lights emitted=328782 (15.2/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=72.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 949.4/frame (albedo blanked 851.8/frame)
+    draws from wrapper 0x49cxxx       indexed=1115.1 prim=68.2 indexedUP=0.0 UP=59.5 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 832.0 draws/frame
+    target #25 1280x720 fmt=113 : 31.5 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.3 draws/frame
+    target #31 1280x720 fmt=113 : 265.4 draws/frame
+    target #32 1280x720 fmt=113 : 10.2 draws/frame
+    target #33 1280x720 fmt=21 : 1.3 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 626436 of 25559047 (2.5%)
+frame 22200 | published=3412 (0.15/frame) rejected=314958 candidates=68/68 | light shaders=24 lights emitted=338382 (15.2/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=73.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 950.9/frame (albedo blanked 853.0/frame)
+    draws from wrapper 0x49cxxx       indexed=1117.0 prim=68.3 indexedUP=0.0 UP=59.6 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 832.8 draws/frame
+    target #25 1280x720 fmt=113 : 31.5 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.5 draws/frame
+    target #28 400x288 fmt=113 : 6.5 draws/frame
+    target #29 400x288 fmt=113 : 6.5 draws/frame
+    target #30 512x512 fmt=113 : 10.3 draws/frame
+    target #31 1280x720 fmt=113 : 266.4 draws/frame
+    target #32 1280x720 fmt=113 : 10.2 draws/frame
+    target #33 1280x720 fmt=21 : 1.3 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 645036 of 26314212 (2.5%)
+frame 22800 | published=3412 (0.15/frame) rejected=323958 candidates=68/68 | light shaders=24 lights emitted=347982 (15.3/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=73.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 952.5/frame (albedo blanked 854.2/frame)
+    draws from wrapper 0x49cxxx       indexed=1118.9 prim=68.4 indexedUP=0.0 UP=59.7 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 833.6 draws/frame
+    target #25 1280x720 fmt=113 : 31.6 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.3 draws/frame
+    target #31 1280x720 fmt=113 : 267.3 draws/frame
+    target #32 1280x720 fmt=113 : 10.3 draws/frame
+    target #33 1280x720 fmt=21 : 1.3 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 663636 of 27070939 (2.5%)
+frame 23400 | published=3412 (0.15/frame) rejected=332958 candidates=68/68 | light shaders=24 lights emitted=357582 (15.3/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=73.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 953.9/frame (albedo blanked 855.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1120.6 prim=68.6 indexedUP=0.0 UP=59.7 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 834.4 draws/frame
+    target #25 1280x720 fmt=113 : 31.7 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.3 draws/frame
+    target #31 1280x720 fmt=113 : 268.2 draws/frame
+    target #32 1280x720 fmt=113 : 10.4 draws/frame
+    target #33 1280x720 fmt=21 : 1.3 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 682236 of 27826726 (2.5%)
+frame 24000 | published=3412 (0.14/frame) rejected=341958 candidates=68/68 | light shaders=24 lights emitted=367182 (15.3/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=74.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 955.2/frame (albedo blanked 856.4/frame)
+    draws from wrapper 0x49cxxx       indexed=1122.3 prim=68.7 indexedUP=0.0 UP=59.8 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 835.1 draws/frame
+    target #25 1280x720 fmt=113 : 31.7 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.3 draws/frame
+    target #31 1280x720 fmt=113 : 269.0 draws/frame
+    target #32 1280x720 fmt=113 : 10.5 draws/frame
+    target #33 1280x720 fmt=21 : 1.3 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 700836 of 28582248 (2.5%)
+frame 24600 | published=3412 (0.14/frame) rejected=350958 candidates=68/68 | light shaders=24 lights emitted=376782 (15.3/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=74.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 956.6/frame (albedo blanked 857.4/frame)
+    draws from wrapper 0x49cxxx       indexed=1123.9 prim=68.8 indexedUP=0.0 UP=59.8 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 835.9 draws/frame
+    target #25 1280x720 fmt=113 : 31.8 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 269.8 draws/frame
+    target #32 1280x720 fmt=113 : 10.5 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 719436 of 29339368 (2.5%)
+frame 25200 | published=3412 (0.14/frame) rejected=359958 candidates=68/68 | light shaders=24 lights emitted=386382 (15.3/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=74.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 957.7/frame (albedo blanked 858.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1125.3 prim=68.9 indexedUP=0.0 UP=59.9 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 836.5 draws/frame
+    target #25 1280x720 fmt=113 : 31.8 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 270.5 draws/frame
+    target #32 1280x720 fmt=113 : 10.6 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 738036 of 30094303 (2.5%)
+frame 25800 | published=3412 (0.13/frame) rejected=368958 candidates=68/68 | light shaders=24 lights emitted=395982 (15.3/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=74.9/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 959.0/frame (albedo blanked 859.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1126.8 prim=69.0 indexedUP=0.0 UP=59.9 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 837.2 draws/frame
+    target #25 1280x720 fmt=113 : 31.9 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 271.2 draws/frame
+    target #32 1280x720 fmt=113 : 10.6 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 756636 of 30851644 (2.5%)
+frame 26400 | published=3412 (0.13/frame) rejected=377958 candidates=68/68 | light shaders=24 lights emitted=405582 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=75.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 960.1/frame (albedo blanked 860.2/frame)
+    draws from wrapper 0x49cxxx       indexed=1128.3 prim=69.1 indexedUP=0.0 UP=60.0 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 837.9 draws/frame
+    target #25 1280x720 fmt=113 : 31.9 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 271.9 draws/frame
+    target #32 1280x720 fmt=113 : 10.7 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 775236 of 31609123 (2.5%)
+frame 27000 | published=3412 (0.13/frame) rejected=386958 candidates=68/68 | light shaders=24 lights emitted=415182 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=75.5/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 961.2/frame (albedo blanked 861.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1129.6 prim=69.1 indexedUP=0.0 UP=60.0 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 838.4 draws/frame
+    target #25 1280x720 fmt=113 : 32.0 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 272.5 draws/frame
+    target #32 1280x720 fmt=113 : 10.7 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 793836 of 32364992 (2.5%)
+frame 27600 | published=3412 (0.12/frame) rejected=395958 candidates=68/68 | light shaders=24 lights emitted=424782 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=75.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 962.2/frame (albedo blanked 861.9/frame)
+    draws from wrapper 0x49cxxx       indexed=1130.8 prim=69.2 indexedUP=0.0 UP=60.1 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 839.0 draws/frame
+    target #25 1280x720 fmt=113 : 32.0 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 273.2 draws/frame
+    target #32 1280x720 fmt=113 : 10.8 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 812436 of 33121514 (2.5%)
+frame 28200 | published=3412 (0.12/frame) rejected=404958 candidates=68/68 | light shaders=24 lights emitted=434382 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=75.9/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 963.2/frame (albedo blanked 862.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1132.0 prim=69.3 indexedUP=0.0 UP=60.1 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 839.5 draws/frame
+    target #25 1280x720 fmt=113 : 32.1 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.6 draws/frame
+    target #28 400x288 fmt=113 : 6.6 draws/frame
+    target #29 400x288 fmt=113 : 6.6 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 273.8 draws/frame
+    target #32 1280x720 fmt=113 : 10.8 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 831036 of 33877221 (2.5%)
+frame 28800 | published=3412 (0.12/frame) rejected=413958 candidates=68/68 | light shaders=24 lights emitted=443982 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=76.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 964.1/frame (albedo blanked 863.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1133.1 prim=69.4 indexedUP=0.0 UP=60.2 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 0.9 draws/frame
+    target #20 64x64 fmt=21 : 0.9 draws/frame
+    target #21 32x32 fmt=21 : 0.9 draws/frame
+    target #22 1280x720 fmt=34 : 840.0 draws/frame
+    target #25 1280x720 fmt=113 : 32.1 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.4 draws/frame
+    target #31 1280x720 fmt=113 : 274.3 draws/frame
+    target #32 1280x720 fmt=113 : 10.9 draws/frame
+    target #33 1280x720 fmt=21 : 1.4 draws/frame
+    target #34 320x180 fmt=113 : 0.9 draws/frame
+    target #35 64x64 fmt=114 : 0.9 draws/frame
+    target #36 16x16 fmt=114 : 0.9 draws/frame
+    target #37 4x4 fmt=114 : 0.9 draws/frame
+    target #38 1x1 fmt=114 : 0.9 draws/frame
+    target #39 1x1 fmt=114 : 0.9 draws/frame
+    target #40 256x128 fmt=21 : 0.9 draws/frame
+    target #41 320x180 fmt=21 : 0.9 draws/frame
+    target #42 320x180 fmt=21 : 0.9 draws/frame
+    draws using a camera OTHER than the published one: 849636 of 34631594 (2.5%)
+frame 29400 | published=3412 (0.12/frame) rejected=422958 candidates=68/68 | light shaders=24 lights emitted=453582 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=76.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 965.0/frame (albedo blanked 864.0/frame)
+    draws from wrapper 0x49cxxx       indexed=1134.2 prim=69.5 indexedUP=0.0 UP=60.2 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 840.5 draws/frame
+    target #25 1280x720 fmt=113 : 32.1 draws/frame
+    target #26 512x288 fmt=113 : 0.1 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 274.9 draws/frame
+    target #32 1280x720 fmt=113 : 10.9 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 868236 of 35387260 (2.5%)
+frame 30000 | published=3412 (0.11/frame) rejected=431958 candidates=68/68 | light shaders=24 lights emitted=463182 (15.4/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=76.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 965.8/frame (albedo blanked 864.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1135.3 prim=69.5 indexedUP=0.0 UP=60.2 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 840.9 draws/frame
+    target #25 1280x720 fmt=113 : 32.2 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 275.4 draws/frame
+    target #32 1280x720 fmt=113 : 11.0 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 886836 of 36143529 (2.5%)
+frame 30600 | published=3412 (0.11/frame) rejected=440958 candidates=68/68 | light shaders=24 lights emitted=472782 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=76.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 966.7/frame (albedo blanked 865.4/frame)
+    draws from wrapper 0x49cxxx       indexed=1136.3 prim=69.6 indexedUP=0.0 UP=60.3 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 841.4 draws/frame
+    target #25 1280x720 fmt=113 : 32.2 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 275.9 draws/frame
+    target #32 1280x720 fmt=113 : 11.0 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 905436 of 36900150 (2.5%)
+frame 31200 | published=3412 (0.11/frame) rejected=449958 candidates=68/68 | light shaders=24 lights emitted=482382 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=77.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 967.4/frame (albedo blanked 866.0/frame)
+    draws from wrapper 0x49cxxx       indexed=1137.2 prim=69.7 indexedUP=0.0 UP=60.3 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 841.8 draws/frame
+    target #25 1280x720 fmt=113 : 32.3 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 276.4 draws/frame
+    target #32 1280x720 fmt=113 : 11.0 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 924036 of 37655166 (2.5%)
+frame 31800 | published=3412 (0.11/frame) rejected=458958 candidates=68/68 | light shaders=24 lights emitted=491982 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=77.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 968.2/frame (albedo blanked 866.5/frame)
+    draws from wrapper 0x49cxxx       indexed=1138.1 prim=69.7 indexedUP=0.0 UP=60.3 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 842.2 draws/frame
+    target #25 1280x720 fmt=113 : 32.3 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 276.9 draws/frame
+    target #32 1280x720 fmt=113 : 11.1 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 942636 of 38410174 (2.5%)
+frame 32400 | published=3412 (0.11/frame) rejected=467958 candidates=68/68 | light shaders=24 lights emitted=501582 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=77.4/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 968.9/frame (albedo blanked 867.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1139.0 prim=69.8 indexedUP=0.0 UP=60.4 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 842.6 draws/frame
+    target #25 1280x720 fmt=113 : 32.3 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 277.3 draws/frame
+    target #32 1280x720 fmt=113 : 11.1 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 961236 of 39165408 (2.5%)
+frame 33000 | published=3412 (0.10/frame) rejected=476958 candidates=68/68 | light shaders=24 lights emitted=511182 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=77.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 969.6/frame (albedo blanked 867.6/frame)
+    draws from wrapper 0x49cxxx       indexed=1139.9 prim=69.8 indexedUP=0.0 UP=60.4 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 842.9 draws/frame
+    target #25 1280x720 fmt=113 : 32.3 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 277.7 draws/frame
+    target #32 1280x720 fmt=113 : 11.1 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 979836 of 39920154 (2.5%)
+frame 33600 | published=3412 (0.10/frame) rejected=485958 candidates=68/68 | light shaders=24 lights emitted=520782 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=77.7/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 970.2/frame (albedo blanked 868.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1140.6 prim=69.9 indexedUP=0.0 UP=60.4 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 843.2 draws/frame
+    target #25 1280x720 fmt=113 : 32.4 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 278.2 draws/frame
+    target #32 1280x720 fmt=113 : 11.2 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 998436 of 40674529 (2.5%)
+frame 34200 | published=3412 (0.10/frame) rejected=494958 candidates=68/68 | light shaders=24 lights emitted=530382 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=77.9/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 970.9/frame (albedo blanked 868.6/frame)
+    draws from wrapper 0x49cxxx       indexed=1141.5 prim=70.0 indexedUP=0.0 UP=60.4 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 843.6 draws/frame
+    target #25 1280x720 fmt=113 : 32.4 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 278.6 draws/frame
+    target #32 1280x720 fmt=113 : 11.2 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1017036 of 41430541 (2.5%)
+frame 34800 | published=3412 (0.10/frame) rejected=503958 candidates=68/68 | light shaders=24 lights emitted=539982 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 971.5/frame (albedo blanked 869.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1142.2 prim=70.0 indexedUP=0.0 UP=60.5 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 843.9 draws/frame
+    target #25 1280x720 fmt=113 : 32.4 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.5 draws/frame
+    target #31 1280x720 fmt=113 : 278.9 draws/frame
+    target #32 1280x720 fmt=113 : 11.2 draws/frame
+    target #33 1280x720 fmt=21 : 1.5 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1035636 of 42185462 (2.5%)
+frame 35400 | published=3412 (0.10/frame) rejected=512958 candidates=68/68 | light shaders=24 lights emitted=549582 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.2/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 972.1/frame (albedo blanked 869.6/frame)
+    draws from wrapper 0x49cxxx       indexed=1143.0 prim=70.1 indexedUP=0.0 UP=60.5 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 844.2 draws/frame
+    target #25 1280x720 fmt=113 : 32.5 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 279.3 draws/frame
+    target #32 1280x720 fmt=113 : 11.3 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1054236 of 42940641 (2.5%)
+frame 36000 | published=3412 (0.09/frame) rejected=521958 candidates=68/68 | light shaders=24 lights emitted=559182 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.3/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 972.6/frame (albedo blanked 870.0/frame)
+    draws from wrapper 0x49cxxx       indexed=1143.6 prim=70.1 indexedUP=0.0 UP=60.5 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 844.5 draws/frame
+    target #25 1280x720 fmt=113 : 32.5 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 279.7 draws/frame
+    target #32 1280x720 fmt=113 : 11.3 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1072836 of 43694678 (2.5%)
+frame 36600 | published=3412 (0.09/frame) rejected=530958 candidates=68/68 | light shaders=24 lights emitted=568782 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.5/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 973.1/frame (albedo blanked 870.4/frame)
+    draws from wrapper 0x49cxxx       indexed=1144.3 prim=70.2 indexedUP=0.0 UP=60.5 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 844.8 draws/frame
+    target #25 1280x720 fmt=113 : 32.5 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 280.0 draws/frame
+    target #32 1280x720 fmt=113 : 11.3 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1091436 of 44449069 (2.5%)
+frame 37200 | published=3412 (0.09/frame) rejected=539958 candidates=68/68 | light shaders=24 lights emitted=578382 (15.5/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.6/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 973.7/frame (albedo blanked 870.9/frame)
+    draws from wrapper 0x49cxxx       indexed=1145.0 prim=70.2 indexedUP=0.0 UP=60.6 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 845.1 draws/frame
+    target #25 1280x720 fmt=113 : 32.5 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 280.4 draws/frame
+    target #32 1280x720 fmt=113 : 11.4 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1110036 of 45205586 (2.5%)
+frame 37800 | published=3412 (0.09/frame) rejected=548958 candidates=68/68 | light shaders=24 lights emitted=587982 (15.6/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.8/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 974.3/frame (albedo blanked 871.3/frame)
+    draws from wrapper 0x49cxxx       indexed=1145.7 prim=70.2 indexedUP=0.0 UP=60.6 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 845.4 draws/frame
+    target #25 1280x720 fmt=113 : 32.6 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 280.7 draws/frame
+    target #32 1280x720 fmt=113 : 11.4 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1128636 of 45961415 (2.5%)
+frame 38400 | published=3412 (0.09/frame) rejected=557958 candidates=68/68 | light shaders=24 lights emitted=597582 (15.6/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=78.9/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 974.8/frame (albedo blanked 871.7/frame)
+    draws from wrapper 0x49cxxx       indexed=1146.3 prim=70.3 indexedUP=0.0 UP=60.6 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 845.7 draws/frame
+    target #25 1280x720 fmt=113 : 32.6 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 281.0 draws/frame
+    target #32 1280x720 fmt=113 : 11.4 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1147236 of 46717681 (2.5%)
+frame 39000 | published=3412 (0.09/frame) rejected=566958 candidates=68/68 | light shaders=24 lights emitted=607182 (15.6/frame) | game SetTransform=0
+    camera at 89.5 147.8 24.6 | albedo fixes=79.0/frame | demoted-to-UI draws=0.0/frame (185 shaders, 5 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame | draws dropped by class: 0.0/frame | blank quads collapsed: 0.0/frame | FFP converted: 975.3/frame (albedo blanked 872.1/frame)
+    draws from wrapper 0x49cxxx       indexed=1147.0 prim=70.3 indexedUP=0.0 UP=60.6 /frame
+    target #0 1280x720 fmt=22 : 1.9 draws/frame
+    target #1 1024x512 fmt=21 : 0.0 draws/frame
+    target #2 512x256 fmt=21 : 0.0 draws/frame
+    target #3 256x128 fmt=21 : 0.0 draws/frame
+    target #4 128x64 fmt=21 : 0.0 draws/frame
+    target #5 64x32 fmt=21 : 0.0 draws/frame
+    target #6 32x16 fmt=21 : 0.0 draws/frame
+    target #7 16x8 fmt=21 : 0.0 draws/frame
+    target #8 8x4 fmt=21 : 0.0 draws/frame
+    target #9 2048x1024 fmt=21 : 0.0 draws/frame
+    target #10 1024x512 fmt=21 : 0.0 draws/frame
+    target #11 512x256 fmt=21 : 0.0 draws/frame
+    target #12 256x128 fmt=21 : 0.0 draws/frame
+    target #13 128x64 fmt=21 : 0.0 draws/frame
+    target #14 64x32 fmt=21 : 0.0 draws/frame
+    target #15 32x16 fmt=21 : 0.0 draws/frame
+    target #16 16x8 fmt=21 : 0.0 draws/frame
+    target #17 8x4 fmt=21 : 0.0 draws/frame
+    target #19 128x128 fmt=21 : 1.0 draws/frame
+    target #20 64x64 fmt=21 : 1.0 draws/frame
+    target #21 32x32 fmt=21 : 1.0 draws/frame
+    target #22 1280x720 fmt=34 : 846.0 draws/frame
+    target #25 1280x720 fmt=113 : 32.6 draws/frame
+    target #26 512x288 fmt=113 : 0.0 draws/frame
+    target #27 400x288 fmt=113 : 6.7 draws/frame
+    target #28 400x288 fmt=113 : 6.7 draws/frame
+    target #29 400x288 fmt=113 : 6.7 draws/frame
+    target #30 512x512 fmt=113 : 10.6 draws/frame
+    target #31 1280x720 fmt=113 : 281.3 draws/frame
+    target #32 1280x720 fmt=113 : 11.4 draws/frame
+    target #33 1280x720 fmt=21 : 1.6 draws/frame
+    target #34 320x180 fmt=113 : 1.0 draws/frame
+    target #35 64x64 fmt=114 : 1.0 draws/frame
+    target #36 16x16 fmt=114 : 1.0 draws/frame
+    target #37 4x4 fmt=114 : 1.0 draws/frame
+    target #38 1x1 fmt=114 : 1.0 draws/frame
+    target #39 1x1 fmt=114 : 1.0 draws/frame
+    target #40 256x128 fmt=21 : 1.0 draws/frame
+    target #41 320x180 fmt=21 : 1.0 draws/frame
+    target #42 320x180 fmt=21 : 1.0 draws/frame
+    draws using a camera OTHER than the published one: 1165836 of 47474407 (2.5%)

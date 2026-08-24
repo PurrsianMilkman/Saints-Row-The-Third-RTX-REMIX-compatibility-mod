@@ -1,0 +1,339 @@
+sr3-rtx loaded (pid 23600) - FFP conversion, ported from sr2-rtx-remix-proxy
+settings: ffp=1 convertSkinned=0 hiddenPassMode=3 skipUntextured=1 screenSpaceMode=2 hideLightVolumes=1 skipMirrored=1 dumpFrame=1800
+          rankAlbedo=1 excludeRTAlbedo=1 cacheMeshAlbedo=1 injectLights=1
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device (backbuffer 1280x720, aspect 1.778)
+marker texture created: 4x4 A8R8G8B8 magenta at 037702C8. Tag it in the Remix menu (Alt+X -> Game Setup) and put its hash in rtx.ignoreTextures.
+back buffer surface 0376FD10 (cleared once a frame; the composite no longer writes it)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+HITCH frame 2: 92.4 ms = present 92.3 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 0.1 | draws 0 | new shaders 0 textures 0
+vertex layout #1: elems=3 pos=float4@0(stream 0) uv=float2 normal=0 color=1 skinned=0 positionT=0
+HITCH frame 3: 261.6 ms = present 16.7 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 244.9 | draws 0 | new shaders 0 textures 4
+frame 60 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 21.8 ms avg (46 fps), worst 262 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 2 frames >=33 ms, 1 >=100 ms in this window of 60 | inside real Present 17.14 ms avg, worst 92.3 ms | our other hooks 0.00 ms avg
+HITCH frame 140: 73.5 ms = present 13.7 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 59.8 | draws 0 | new shaders 0 textures 3
+HITCH frame 141: 40.2 ms = present 0.3 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 39.9 | draws 0 | new shaders 0 textures 0
+HITCH frame 235: 45.6 ms = present 0.2 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 45.4 | draws 0 | new shaders 0 textures 0
+HITCH frame 407: 45.9 ms = present 0.2 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 45.8 | draws 0 | new shaders 0 textures 0
+HITCH frame 476: 81.6 ms = present 16.3 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 65.3 | draws 0 | new shaders 0 textures 0
+frame 600 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 24.9 ms avg (40 fps), worst 82 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 6 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 7.83 ms avg, worst 20.5 ms | our other hooks 0.00 ms avg
+frame 1200 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 20.8 ms avg (48 fps), worst 18 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 11.94 ms avg, worst 17.0 ms | our other hooks 0.00 ms avg
+frame 1800 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 19.4 ms avg (52 fps), worst 21 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 13.29 ms avg, worst 20.2 ms | our other hooks 0.00 ms avg
+frame 2400 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 18.7 ms avg (53 fps), worst 20 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 13.97 ms avg, worst 18.6 ms | our other hooks 0.00 ms avg
+frame 3000 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 18.3 ms avg (55 fps), worst 19 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 14.41 ms avg, worst 16.8 ms | our other hooks 0.00 ms avg
+frame 3600 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 18.0 ms avg (55 fps), worst 21 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 14.71 ms avg, worst 20.2 ms | our other hooks 0.00 ms avg
+frame 4200 | draws 0/frame | FFP converted 0/frame (0.0%)
+    not converted: screen-space 0  skinned 0  ortho 0  vertex-format 0  untextured 0  instanced 0  mirrored 0  other-camera 0  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 0/frame, stipple-with-no-colour 0/frame (these used to convert WHITE) | post/composite quads marked 0/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 0/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 0/frame | UI-pass draws converted 0/frame
+    instancing: 0 converted from the instance stream/frame, 0 refused/frame (largest single draw 0 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 0/frame
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 0/frame, blanked 0/frame, restored from mesh cache 0/frame (0 meshes cached) | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+    world matrix changes 0/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00000, 0.00000)
+    TIMING: frame 17.8 ms avg (56 fps), worst 29 ms | shim 0.00 ms avg (0.0% of frame), worst 0.0 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 14.90 ms avg, worst 21.4 ms | our other hooks 0.00 ms avg
+vertex layout #2: elems=2 pos=float4@0(stream 0) uv=float2 normal=0 color=0 skinned=0 positionT=0
+stream freq #1: stream=0 setting=0x00000001 -> plain count=1
+stream freq #2: stream=0 setting=0x00000001 -> plain count=1
+stream freq #3: stream=0 setting=0x00000001 -> plain count=1
+stream freq #4: stream=0 setting=0x00000001 -> plain count=1
+stream freq #5: stream=0 setting=0x00000001 -> plain count=1
+stream freq #6: stream=0 setting=0x00000001 -> plain count=1
+stream freq #7: stream=0 setting=0x00000001 -> plain count=1
+HITCH frame 4563: 51.8 ms = present 16.1 + our-present 0.0 + draws 0.0 + other-hooks 0.0 + game/bridge 35.7 | draws 9 | new shaders 0 textures 18
+stream freq #8: stream=0 setting=0x00000001 -> plain count=1
+vertex layout #3: elems=12 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+stream freq #9: stream=4 setting=0x80000001 -> INSTANCEDATA count=1
+stream freq #10: stream=0 setting=0x40000001 -> INDEXEDDATA count=1
+stream freq #11: stream=4 setting=0x80000001 -> INSTANCEDATA count=1
+stream freq #12: stream=0 setting=0x40000001 -> INDEXEDDATA count=1
+vertex layout #4: elems=12 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #5: elems=13 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #6: elems=11 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #7: elems=7 pos=float3@0(stream 0) uv=short2 normal=0 color=0 skinned=0 positionT=0
+vertex layout #8: elems=8 pos=float3@0(stream 0) uv=? normal=1 color=1 skinned=0 positionT=0
+vertex layout #9: elems=10 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #10: elems=13 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #11: elems=6 pos=float3@0(stream 0) uv=short2 normal=1 color=1 skinned=0 positionT=0
+view handedness baseline: determinant 1.000 (positive)
+camera: pos 96.3 147.7 36.1 | proj _11=1.6085 _22=2.8594 _33=1.00001 _43=-0.15 (aspect 1.778)
+short2 UV range #1: u -5..1002  v 401..757  (verts=40 stride=32 off=20)
+  depth-disabled draw #1087: verts=384   prims=192   zwrite=0 tex0=4795F918 objTM=0 lightVolume=no ps='Diffuse_MapSampler' size=531.2x30.7x695.5 centre=(-189.4 28.4 -594.4) distFromCam=702.4
+short2 UV range #2: u 273..1024  v -829..519  (verts=384 stride=32 off=20)
+  depth-disabled draw #1088: verts=144   prims=72    zwrite=0 tex0=47960398 objTM=0 lightVolume=no ps='Diffuse_MapSampler' size=43.8x46.1x27.1 centre=(54.5 43.2 -260.2) distFromCam=317.0
+short2 UV range #3: u 226..1807  v -976..1490  (verts=144 stride=32 off=20)
+  depth-disabled draw #1089: verts=176   prims=88    zwrite=0 tex0=47961A58 objTM=0 lightVolume=no ps='' size=41.1x160.1x153.1 centre=(50.5 192.5 -153.2) distFromCam=199.9
+  depth-disabled draw #1090: verts=1164  prims=582   zwrite=0 tex0=47966218 objTM=0 lightVolume=no ps='' size=139.2x254.3x559.8 centre=(101.1 141.4 -351.3) distFromCam=387.5
+  depth-disabled draw #1091: verts=1124  prims=562   zwrite=0 tex0=4795F138 objTM=0 lightVolume=no ps='' size=44.5x28.7x136.1 centre=(348.2 31.1 -288.1) distFromCam=426.8
+  depth-disabled draw #1092: verts=116   prims=58    zwrite=0 tex0=4795F598 objTM=0 lightVolume=no ps='' size=32.1x3.5x20.9 centre=(52.0 10.0 -260.2) distFromCam=329.8
+vertex layout #12: elems=2 pos=float4@0(stream 0) uv=float4 normal=0 color=0 skinned=0 positionT=0
+vertex layout #13: elems=15 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #14: elems=14 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #15: elems=6 pos=float3@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+  depth-disabled draw #1148: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1149: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1150: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1151: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1152: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1153: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1154: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1155: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1156: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1157: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1158: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1159: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1160: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1161: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1162: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1163: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1164: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1165: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1166: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1167: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1168: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1169: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1170: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1171: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1172: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1173: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1174: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1175: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1176: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1177: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1178: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1179: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1180: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+  depth-disabled draw #1181: verts=8     prims=12    zwrite=0 tex0=4BD3F750 objTM=0 lightVolume=no ps='' size=1.0x1.0x1.0 centre=(0.0 0.0 0.0) distFromCam=180.0
+vertex layout #16: elems=3 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #17: elems=3 pos=float3@0(stream 0) uv=float2 normal=0 color=1 skinned=0 positionT=0
+vertex layout #18: elems=1 pos=float3@0(stream 0) uv=? normal=0 color=0 skinned=0 positionT=0
+SKY draw: PASS verts=343 ps='Diffuse_Map_1Sampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_Map_1Sampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_MapSampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_Map_1Sampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_Map_1Sampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_MapSampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_Map_1Sampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_Map_1Sampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=343 ps='Diffuse_MapSampler' rank=100 | size 36x9x36 centre (96 149 36) 1 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+vertex layout #19: elems=11 pos=float3@0(stream 0) uv=? normal=1 color=0 skinned=0 positionT=0
+SKY draw: PASS verts=173 ps='Blend_MapSampler' rank=100 | size 102541x0x102511 centre (7 -0 0) 176 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=5 ps='Blend_MapSampler' rank=100 | size 120x0x60 centre (-100 0 110) 257 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+SKY draw: PASS verts=8 ps='Blend_MapSampler' rank=100 | size 280x0x280 centre (-20 0 0) 191 from camera | why: sky (rfg-skybox family) - left for Remix to capture and tag
+short2 UV range #4: u 0..1025  v 594..769  (verts=52 stride=32 off=20)
+short2 UV range #5: u -5..1002  v 401..757  (verts=40 stride=32 off=20)
+short2 UV range #6: u 273..1024  v -829..519  (verts=384 stride=32 off=20)
+short2 UV range #7: u 226..1807  v -976..1490  (verts=144 stride=32 off=20)
+short2 UV range #8: u 373..752  v -2029..957  (verts=176 stride=32 off=20)
+short2 UV range #9: u -20..2034  v -1..1024  (verts=1164 stride=32 off=20)
+short2 UV range #10: u 266..752  v 69..983  (verts=1124 stride=32 off=20)
+short2 UV range #11: u -1543..2585  v 21..754  (verts=116 stride=32 off=20)
+short2 UV range #12: u 168..319  v 362..683  (verts=8 stride=32 off=20)
+vertex layout #20: elems=14 pos=float3@0(stream 0) uv=short2 normal=1 color=0 skinned=0 positionT=0
+HITCH frame 4566: 160.1 ms = present 15.9 + our-present 0.0 + draws 2.4 + other-hooks 0.0 + game/bridge 141.8 | draws 3533 | new shaders 0 textures 1
+call-order trace (V/v=SetVertexShader with/without objTM, P=projTM c28, O=objTM c32, W=view c48, D=draw converted, x=draw skipped):
+  DDDvmmmmOOPWvDDDOOVxxOVxOVxOVxxxOxxxOxxOVxOVxOVxVxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOxOx
+  OxOxOxOxOxOxOxOxOVxOVxOVxOOPWPvmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
+  mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
+  mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
+sky probe: 40 depth-disabled draws in a frame of 3533
+auxiliary camera at (96.3 -147.7 36.1), main camera at (96.3 147.7 36.1), 295.4 units apart | aspect 1.778 vs back buffer 1.778
+    aux  forward (0.087 0.008 -0.996) up (0.001 -1.000 -0.008) det -1.000
+    main forward (0.087 -0.008 -0.996) up (0.001 1.000 -0.008) det 1.000
+untextured material #1: first sampler is 'IR_GBuffer_DSF_DataSampler'
+HITCH frame 4567: 506.2 ms = present 0.1 + our-present 0.0 + draws 11.2 + other-hooks 0.0 + game/bridge 494.7 | draws 4079 | new shaders 0 textures 0
+shape probe written to sr3-rtx-shapes.log (329 shapes)
+HITCH frame 4568: 95.5 ms = present 0.2 + our-present 0.0 + draws 6.4 + other-hooks 0.0 + game/bridge 88.8 | draws 4082 | new shaders 0 textures 7
+vertex layout #21: elems=7 pos=float3@0(stream 0) uv=float3 normal=0 color=1 skinned=0 positionT=0
+HITCH frame 4573: 97.7 ms = present 74.6 + our-present 0.0 + draws 7.4 + other-hooks 0.0 + game/bridge 15.7 | draws 4073 | new shaders 0 textures 0
+HITCH frame 4574: 102.7 ms = present 76.4 + our-present 0.0 + draws 7.3 + other-hooks 0.0 + game/bridge 19.0 | draws 4070 | new shaders 0 textures 7
+untextured material #2: first sampler is 'Detail_Normal_MapSampler'
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 -0.0000 0.0000 -0.0000) row3 (0.0000 0.0000 -0.1500 -0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.73 146.52 31.28)
+    raw projTM row0 (-0.5636 -0.5507 0.9166 0.9166) row3 (98.8133 -365.9298 -103.6317 -103.4806) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 -0.0000 0.0000 -0.0000) row3 (0.0000 0.0000 -0.1500 -0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.73 146.52 31.28)
+    raw projTM row0 (-0.5636 -0.5507 0.9166 0.9166) row3 (98.8133 -365.9298 -103.6317 -103.4806) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 0.0000 -0.0000 -0.0000) row3 (0.0000 -0.0000 -0.1500 -0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.67 146.47 31.03)
+    raw projTM row0 (-0.4914 -0.5822 0.9302 0.9302) row3 (92.5629 -361.5616 -107.4789 -107.3278) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 0.0000 -0.0000 -0.0000) row3 (0.0000 -0.0000 -0.1500 -0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.67 146.47 31.03)
+    raw projTM row0 (-0.4914 -0.5822 0.9302 0.9302) row3 (92.5629 -361.5616 -107.4789 -107.3278) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 0.0000 0.0000 -0.0000) row3 (0.0000 0.0000 -0.1500 0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.62 146.43 30.80)
+    raw projTM row0 (-0.4248 -0.6091 0.9407 0.9407) row3 (86.6982 -357.7006 -110.7472 -110.5961) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 0.0000 0.0000 -0.0000) row3 (0.0000 0.0000 -0.1500 0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.62 146.43 30.80)
+    raw projTM row0 (-0.4248 -0.6091 0.9407 0.9407) row3 (86.6982 -357.7006 -110.7472 -110.5961) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 0.0000 0.0000 0.0000) row3 (-0.0000 0.0001 -0.1500 0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.58 146.39 30.52)
+    raw projTM row0 (-0.3438 -0.6398 0.9509 0.9509) row3 (79.4467 -353.1352 -114.4158 -114.2647) perspective=0
+HUD draw: CONVERT verts=24 target 1280x720 fmt=21 | stride=52 posType=2 posOffset=0 posStream=0 positionT=0 elements=7 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler' rank=100
+    raw positions: <dynamic buffer, not read>
+    proj row0 (1.6085 0.0000 0.0000 0.0000) row3 (-0.0000 0.0001 -0.1500 0.0000) perspective=1
+    world translation (0.00 0.00 -1024.00), camera (91.58 146.39 30.52)
+    raw projTM row0 (-0.3438 -0.6398 0.9509 0.9509) row3 (79.4467 -353.1352 -114.4158 -114.2647) perspective=0
+frame 4800 | draws 138/frame | FFP converted 37/frame (26.8%)
+    not converted: screen-space 3  skinned 9  ortho 0  vertex-format 0  untextured 68  instanced 0  mirrored 0  other-camera 12  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 68/frame, stipple-with-no-colour 6/frame (these used to convert WHITE) | post/composite quads marked 3/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 8/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 4/frame | UI-pass draws converted 0/frame
+    instancing: 46 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.0 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 8/frame
+    MARKED with the marker texture 88/frame (refused as unsafe 0/frame, 210 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 4/frame, blanked 8/frame, restored from mesh cache 12/frame (674 meshes cached) | RT textures known 55 | lights 1.4/frame (24 shaders)
+    camera 94.9 145.9 28.4 | distinct cameras this frame 1 (max 1) | transform writes 27/frame | redundant state calls dropped 773/frame
+    world matrix changes 27/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)
+    TIMING: frame 18.0 ms avg (56 fps), worst 506 ms | shim 0.20 ms avg (1.1% of frame), worst 11.2 ms
+    TIMING tail: 6 frames >=33 ms, 3 >=100 ms in this window of 600 | inside real Present 14.49 ms avg, worst 76.4 ms | our other hooks 0.00 ms avg
+    converted -> target 14DA0790 1280x720 fmt=34 : 1 draws/frame
+    converted -> target 14DA6BC0 1280x720 fmt=113 : 36 draws/frame
+    converted -> target 14DA0F50 1280x720 fmt=113 : 0 draws/frame
+    converted -> target 14DA19F8 1280x720 fmt=21 : 0 draws/frame
+frame 5400 | draws 188/frame | FFP converted 47/frame (24.8%)
+    not converted: screen-space 6  skinned 25  ortho 0  vertex-format 0  untextured 80  instanced 0  mirrored 0  other-camera 11  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 80/frame, stipple-with-no-colour 14/frame (these used to convert WHITE) | post/composite quads marked 6/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 7/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 5/frame | UI-pass draws converted 0/frame
+    instancing: 52 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.2 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 7/frame
+    MARKED with the marker texture 111/frame (refused as unsafe 0/frame, 297 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 11/frame, blanked 7/frame, restored from mesh cache 16/frame (679 meshes cached) | RT textures known 55 | lights 1.9/frame (24 shaders)
+    camera 96.6 145.9 33.5 | distinct cameras this frame 1 (max 1) | transform writes 33/frame | redundant state calls dropped 978/frame
+    world matrix changes 33/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)
+    TIMING: frame 17.9 ms avg (56 fps), worst 20 ms | shim 0.24 ms avg (1.4% of frame), worst 1.1 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 14.13 ms avg, worst 11.9 ms | our other hooks 0.00 ms avg
+    converted -> target 14DA0790 1280x720 fmt=34 : 1 draws/frame
+    converted -> target 14DA6BC0 1280x720 fmt=113 : 45 draws/frame
+    converted -> target 14DA0F50 1280x720 fmt=113 : 1 draws/frame
+    converted -> target 14DA19F8 1280x720 fmt=21 : 0 draws/frame
+frame 6000 | draws 228/frame | FFP converted 54/frame (23.9%)
+    not converted: screen-space 9  skinned 39  ortho 0  vertex-format 0  untextured 89  instanced 0  mirrored 0  other-camera 10  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 89/frame, stipple-with-no-colour 22/frame (these used to convert WHITE) | post/composite quads marked 9/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 7/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 6/frame | UI-pass draws converted 0/frame
+    instancing: 57 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.2 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 7/frame
+    MARKED with the marker texture 129/frame (refused as unsafe 0/frame, 365 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 17/frame, blanked 7/frame, restored from mesh cache 19/frame (679 meshes cached) | RT textures known 55 | lights 2.2/frame (24 shaders)
+    camera 97.6 145.9 31.3 | distinct cameras this frame 1 (max 1) | transform writes 38/frame | redundant state calls dropped 1138/frame
+    world matrix changes 38/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)
+    TIMING: frame 17.7 ms avg (56 fps), worst 23 ms | shim 0.27 ms avg (1.5% of frame), worst 0.8 ms
+    TIMING tail: 0 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 13.86 ms avg, worst 12.0 ms | our other hooks 0.00 ms avg
+    converted -> target 14DA0790 1280x720 fmt=34 : 1 draws/frame
+    converted -> target 14DA6BC0 1280x720 fmt=113 : 52 draws/frame
+    converted -> target 14DA0F50 1280x720 fmt=113 : 1 draws/frame
+    converted -> target 14DA19F8 1280x720 fmt=21 : 0 draws/frame
+HITCH frame 6552: 47.1 ms = present 10.9 + our-present 0.0 + draws 0.6 + other-hooks 0.0 + game/bridge 35.5 | draws 539 | new shaders 0 textures 0
+frame 6600 | draws 259/frame | FFP converted 61/frame (23.3%)
+    not converted: screen-space 11  skinned 50  ortho 0  vertex-format 0  untextured 96  instanced 0  mirrored 0  other-camera 9  no camera 0  other 0 (per frame)
+    prepasses hidden: sampler-less 96/frame, stipple-with-no-colour 27/frame (these used to convert WHITE) | post/composite quads marked 11/frame
+    constant-colour materials (no diffuse map, albedo from the shader's own constant) 6/frame | HUD quads demoted to UI 0/frame | back-buffer clears 0/frame | sky draws 6/frame | UI-pass draws converted 0/frame
+    instancing: 60 converted from the instance stream/frame, 0 refused/frame (largest single draw 1 instances, 0.3 buffer writes snooped/frame)
+    SKIPPED entirely 0/frame (mode 3) | demoted to UI overlay 0/frame | no-albedo materials left to Remix 6/frame
+    MARKED with the marker texture 143/frame (refused as unsafe 0/frame, 419 SetTexture calls/frame, marker created)
+    albedo: moved off stage 0 22/frame, blanked 6/frame, restored from mesh cache 22/frame (682 meshes cached) | RT textures known 55 | lights 2.5/frame (24 shaders)
+    camera 93.5 145.9 33.0 | distinct cameras this frame 1 (max 1) | transform writes 42/frame | redundant state calls dropped 1263/frame
+    world matrix changes 42/frame | objTM used without a fresh upload 0/frame | uv matrix writes 0/frame (last scale 0.00098, 0.00098)
+    TIMING: frame 17.6 ms avg (57 fps), worst 47 ms | shim 0.30 ms avg (1.7% of frame), worst 0.9 ms
+    TIMING tail: 1 frames >=33 ms, 0 >=100 ms in this window of 600 | inside real Present 13.64 ms avg, worst 12.0 ms | our other hooks 0.00 ms avg
+    converted -> target 14DA0790 1280x720 fmt=34 : 1 draws/frame
+    converted -> target 14DA6BC0 1280x720 fmt=113 : 58 draws/frame
+    converted -> target 14DA0F50 1280x720 fmt=113 : 1 draws/frame
+    converted -> target 14DA19F8 1280x720 fmt=21 : 0 draws/frame

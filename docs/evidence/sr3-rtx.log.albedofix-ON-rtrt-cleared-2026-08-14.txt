@@ -1,0 +1,236 @@
+sr3-rtx loaded (pid 8084)
+settings: publishWorld=0 oneCameraPerFrame=1 aspectFilter=1
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device vtable (backbuffer 1280x720, aspect 1.778)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader found: point (pos=c0 dir=c2 color=c4 info=c5 spot=c-1)
+light shader found: point (pos=c0 dir=c2 color=c4 info=c5 spot=c-1)
+frame 60 | published=0 (0.00/frame) rejected=0 candidates=0/0 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 0.0 0.0 0.0 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+frame 600 | published=0 (0.00/frame) rejected=927 candidates=0/0 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 0.0 0.0 0.0 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+first camera published:
+  camera pos = 1223.30 14.11 1053.24
+  projection _11=1.2991 _22=2.3095 _33=1.0000 _43=-0.15  aspect=1.778 (target 1.778)
+frame 1200 | published=1 (0.00/frame) rejected=3317 candidates=1/1 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 1223.3 14.1 1053.2 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+frame 1800 | published=2 (0.00/frame) rejected=5117 candidates=1/1 | light shaders=24 lights emitted=0 (0.0/frame) | game SetTransform=0
+    camera at 96.3 147.7 1060.1 | albedo fixes=0.0/frame | demoted-to-UI draws=0.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 0 of 0 (0.0%)
+frame 2400 | published=529 (0.22/frame) rejected=13603 candidates=68/68 | light shaders=24 lights emitted=23234 (9.7/frame) | game SetTransform=0
+    camera at 104.8 148.3 35.8 | albedo fixes=26.1/frame | demoted-to-UI draws=61.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 153163 of 1105360 (13.9%)
+frame 3000 | published=756 (0.25/frame) rejected=22603 candidates=68/68 | light shaders=24 lights emitted=41165 (13.7/frame) | game SetTransform=0
+    camera at 100.2 147.7 42.6 | albedo fixes=41.4/frame | demoted-to-UI draws=102.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 439993 of 2476232 (17.8%)
+frame 3600 | published=793 (0.22/frame) rejected=31603 candidates=68/68 | light shaders=24 lights emitted=48226 (13.4/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=54.7/frame | demoted-to-UI draws=127.3/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 830825 of 4091751 (20.3%)
+frame 4200 | published=793 (0.19/frame) rejected=40603 candidates=68/68 | light shaders=24 lights emitted=53626 (12.8/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=67.8/frame | demoted-to-UI draws=143.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 1287425 of 5887552 (21.9%)
+frame 4800 | published=793 (0.17/frame) rejected=49603 candidates=68/68 | light shaders=24 lights emitted=59026 (12.3/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=77.6/frame | demoted-to-UI draws=154.8/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 1744025 of 7683087 (22.7%)
+frame 5400 | published=793 (0.15/frame) rejected=58603 candidates=68/68 | light shaders=24 lights emitted=64426 (11.9/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=85.2/frame | demoted-to-UI draws=163.9/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 2200625 of 9478464 (23.2%)
+frame 6000 | published=793 (0.13/frame) rejected=67603 candidates=68/68 | light shaders=24 lights emitted=69826 (11.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=91.2/frame | demoted-to-UI draws=171.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 2657225 of 11273555 (23.6%)
+frame 6600 | published=793 (0.12/frame) rejected=76603 candidates=68/68 | light shaders=24 lights emitted=75226 (11.4/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=96.2/frame | demoted-to-UI draws=177.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 3113825 of 13066580 (23.8%)
+frame 7200 | published=793 (0.11/frame) rejected=85603 candidates=68/68 | light shaders=24 lights emitted=80626 (11.2/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=100.4/frame | demoted-to-UI draws=182.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 3570425 of 14858971 (24.0%)
+frame 7800 | published=793 (0.10/frame) rejected=94603 candidates=68/68 | light shaders=24 lights emitted=86026 (11.0/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=103.9/frame | demoted-to-UI draws=186.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 4027025 of 16651216 (24.2%)
+frame 8400 | published=793 (0.09/frame) rejected=103603 candidates=68/68 | light shaders=24 lights emitted=91426 (10.9/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=106.9/frame | demoted-to-UI draws=190.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 4483625 of 18442907 (24.3%)
+frame 9000 | published=793 (0.09/frame) rejected=112603 candidates=68/68 | light shaders=24 lights emitted=96826 (10.8/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=109.5/frame | demoted-to-UI draws=193.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 4940225 of 20235907 (24.4%)
+frame 9600 | published=793 (0.08/frame) rejected=121603 candidates=68/68 | light shaders=24 lights emitted=102226 (10.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=111.8/frame | demoted-to-UI draws=195.9/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 5396825 of 22028661 (24.5%)
+frame 10200 | published=793 (0.08/frame) rejected=130603 candidates=68/68 | light shaders=24 lights emitted=107626 (10.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=113.8/frame | demoted-to-UI draws=198.3/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 5853425 of 23819939 (24.6%)
+frame 10800 | published=793 (0.07/frame) rejected=139603 candidates=68/68 | light shaders=24 lights emitted=113026 (10.5/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=115.6/frame | demoted-to-UI draws=200.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 6310025 of 25612523 (24.6%)
+frame 11400 | published=793 (0.07/frame) rejected=148603 candidates=68/68 | light shaders=24 lights emitted=118426 (10.4/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=117.2/frame | demoted-to-UI draws=202.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 6766625 of 27405709 (24.7%)
+frame 12000 | published=793 (0.07/frame) rejected=157603 candidates=68/68 | light shaders=24 lights emitted=123826 (10.3/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=118.6/frame | demoted-to-UI draws=204.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 7223225 of 29200452 (24.7%)
+frame 12600 | published=793 (0.06/frame) rejected=166603 candidates=68/68 | light shaders=24 lights emitted=129226 (10.3/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=119.9/frame | demoted-to-UI draws=205.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 7679825 of 30995969 (24.8%)
+frame 13200 | published=793 (0.06/frame) rejected=175603 candidates=68/68 | light shaders=24 lights emitted=134626 (10.2/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=121.1/frame | demoted-to-UI draws=207.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 8136425 of 32789092 (24.8%)
+frame 13800 | published=793 (0.06/frame) rejected=184603 candidates=68/68 | light shaders=24 lights emitted=140026 (10.1/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=122.2/frame | demoted-to-UI draws=208.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 8593025 of 34582897 (24.8%)
+frame 14400 | published=793 (0.06/frame) rejected=193603 candidates=68/68 | light shaders=24 lights emitted=145426 (10.1/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=123.2/frame | demoted-to-UI draws=209.6/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 9049625 of 36378322 (24.9%)
+frame 15000 | published=793 (0.05/frame) rejected=202603 candidates=68/68 | light shaders=24 lights emitted=150826 (10.1/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=124.1/frame | demoted-to-UI draws=210.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 9506225 of 38173339 (24.9%)
+frame 15600 | published=793 (0.05/frame) rejected=211603 candidates=68/68 | light shaders=24 lights emitted=156226 (10.0/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=124.9/frame | demoted-to-UI draws=211.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 9962825 of 39966202 (24.9%)
+frame 16200 | published=793 (0.05/frame) rejected=220603 candidates=68/68 | light shaders=24 lights emitted=161626 (10.0/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=125.7/frame | demoted-to-UI draws=212.6/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 10419425 of 41758114 (25.0%)
+frame 16800 | published=793 (0.05/frame) rejected=229603 candidates=68/68 | light shaders=24 lights emitted=167026 (9.9/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=126.4/frame | demoted-to-UI draws=213.5/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 10876025 of 43551551 (25.0%)
+frame 17400 | published=793 (0.05/frame) rejected=238603 candidates=68/68 | light shaders=24 lights emitted=172426 (9.9/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=127.1/frame | demoted-to-UI draws=214.3/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 11332625 of 45347387 (25.0%)
+frame 18000 | published=793 (0.04/frame) rejected=247603 candidates=68/68 | light shaders=24 lights emitted=177826 (9.9/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=127.7/frame | demoted-to-UI draws=215.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 11789225 of 47143621 (25.0%)
+frame 18600 | published=793 (0.04/frame) rejected=256603 candidates=68/68 | light shaders=24 lights emitted=183226 (9.9/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=128.3/frame | demoted-to-UI draws=215.8/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 12245825 of 48938874 (25.0%)
+frame 19200 | published=793 (0.04/frame) rejected=265603 candidates=68/68 | light shaders=24 lights emitted=188626 (9.8/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=128.9/frame | demoted-to-UI draws=216.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 12702425 of 50732518 (25.0%)
+frame 19800 | published=793 (0.04/frame) rejected=274603 candidates=68/68 | light shaders=24 lights emitted=194026 (9.8/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=129.4/frame | demoted-to-UI draws=217.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 13159025 of 52526225 (25.1%)
+frame 20400 | published=793 (0.04/frame) rejected=283603 candidates=68/68 | light shaders=24 lights emitted=199426 (9.8/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=129.9/frame | demoted-to-UI draws=217.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 13615625 of 54319791 (25.1%)
+frame 21000 | published=793 (0.04/frame) rejected=292603 candidates=68/68 | light shaders=24 lights emitted=204826 (9.8/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=130.4/frame | demoted-to-UI draws=218.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 14072225 of 56114193 (25.1%)
+frame 21600 | published=793 (0.04/frame) rejected=301603 candidates=68/68 | light shaders=24 lights emitted=210226 (9.7/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=130.8/frame | demoted-to-UI draws=218.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 14528825 of 57908927 (25.1%)
+frame 22200 | published=793 (0.04/frame) rejected=310603 candidates=68/68 | light shaders=24 lights emitted=215626 (9.7/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=131.2/frame | demoted-to-UI draws=219.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 14985425 of 59704042 (25.1%)
+frame 22800 | published=793 (0.03/frame) rejected=319603 candidates=68/68 | light shaders=24 lights emitted=221026 (9.7/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=131.6/frame | demoted-to-UI draws=219.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 15442025 of 61499343 (25.1%)
+frame 23400 | published=793 (0.03/frame) rejected=328603 candidates=68/68 | light shaders=24 lights emitted=226426 (9.7/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=132.0/frame | demoted-to-UI draws=220.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 15898625 of 63293935 (25.1%)
+frame 24000 | published=793 (0.03/frame) rejected=337603 candidates=68/68 | light shaders=24 lights emitted=231826 (9.7/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=132.3/frame | demoted-to-UI draws=220.6/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 16355225 of 65089499 (25.1%)
+frame 24600 | published=793 (0.03/frame) rejected=346603 candidates=68/68 | light shaders=24 lights emitted=237226 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=132.6/frame | demoted-to-UI draws=221.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 16811825 of 66884671 (25.1%)
+frame 25200 | published=793 (0.03/frame) rejected=355603 candidates=68/68 | light shaders=24 lights emitted=242626 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=133.0/frame | demoted-to-UI draws=221.3/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 17268425 of 68678726 (25.1%)
+frame 25800 | published=793 (0.03/frame) rejected=364603 candidates=68/68 | light shaders=24 lights emitted=248026 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=133.3/frame | demoted-to-UI draws=221.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 17725025 of 70474352 (25.2%)
+frame 26400 | published=793 (0.03/frame) rejected=373603 candidates=68/68 | light shaders=24 lights emitted=253426 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=133.6/frame | demoted-to-UI draws=222.1/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 18181625 of 72270456 (25.2%)
+frame 27000 | published=793 (0.03/frame) rejected=382603 candidates=68/68 | light shaders=24 lights emitted=258826 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=133.8/frame | demoted-to-UI draws=222.4/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 18638225 of 74065234 (25.2%)
+frame 27600 | published=793 (0.03/frame) rejected=391603 candidates=68/68 | light shaders=24 lights emitted=264226 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=134.1/frame | demoted-to-UI draws=222.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 19094825 of 75860305 (25.2%)
+frame 28200 | published=793 (0.03/frame) rejected=400603 candidates=68/68 | light shaders=24 lights emitted=269626 (9.6/frame) | game SetTransform=0
+    camera at 101.3 149.3 42.8 | albedo fixes=134.3/frame | demoted-to-UI draws=223.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 19551425 of 77655373 (25.2%)
+frame 28800 | published=947 (0.03/frame) rejected=409603 candidates=68/68 | light shaders=24 lights emitted=275873 (9.6/frame) | game SetTransform=0
+    camera at 101.1 152.1 40.5 | albedo fixes=134.3/frame | demoted-to-UI draws=223.2/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 19898481 of 79121014 (25.1%)
+frame 29400 | published=1444 (0.05/frame) rejected=418603 candidates=68/68 | light shaders=24 lights emitted=298686 (10.2/frame) | game SetTransform=0
+    camera at 99.2 152.0 38.8 | albedo fixes=133.5/frame | demoted-to-UI draws=223.8/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 19980631 of 79992313 (25.0%)
+frame 30000 | published=1928 (0.06/frame) rejected=427603 candidates=68/68 | light shaders=24 lights emitted=312637 (10.4/frame) | game SetTransform=0
+    camera at 103.0 149.9 32.9 | albedo fixes=132.5/frame | demoted-to-UI draws=224.0/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 20032912 of 80594686 (24.9%)
+frame 30600 | published=2513 (0.08/frame) rejected=436603 candidates=68/68 | light shaders=24 lights emitted=337426 (11.0/frame) | game SetTransform=0
+    camera at 97.1 151.8 67.0 | albedo fixes=132.2/frame | demoted-to-UI draws=224.8/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 20220659 of 81671626 (24.8%)
+frame 31200 | published=3064 (0.10/frame) rejected=445603 candidates=68/68 | light shaders=24 lights emitted=344595 (11.0/frame) | game SetTransform=0
+    camera at 98.3 152.5 67.9 | albedo fixes=131.7/frame | demoted-to-UI draws=224.7/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 20315555 of 82343707 (24.7%)
+frame 31800 | published=3599 (0.11/frame) rejected=454603 candidates=68/68 | light shaders=24 lights emitted=354913 (11.2/frame) | game SetTransform=0
+    camera at 98.5 151.6 63.3 | albedo fixes=131.3/frame | demoted-to-UI draws=224.9/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 20440962 of 83274941 (24.5%)
+frame 32400 | published=4034 (0.12/frame) rejected=463603 candidates=68/68 | light shaders=24 lights emitted=359463 (11.1/frame) | game SetTransform=0
+    camera at 95.7 153.1 62.8 | albedo fixes=130.5/frame | demoted-to-UI draws=224.6/frame (637 shaders, 432 of them skinned)
+    light-volume draws kept out of the world: 0.0/frame | composite passes skipped entirely: 0.0/frame
+    draws using a camera OTHER than the published one: 20469596 of 83732629 (24.4%)

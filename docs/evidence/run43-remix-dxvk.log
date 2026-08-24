@@ -1,0 +1,550 @@
+[23:35:31.313] info:  Game: SaintsRowTheThird.exe
+[23:35:31.313] info:  DXVK_Remix: remix-1.5.2+68edea01
+[23:35:31.313] info:  System Information Report:
+[23:35:31.313] info:    CPU: (AuthenticAMD) AMD Ryzen 7 9800X3D 8-Core Processor           
+[23:35:31.313] info:    Memory: 18.01 GiB / 61.66 GiB physical, 20.37 GiB / 61.66 GiB committed, 4.91 GiB / 128.00 TiB virtual (current process)
+[23:35:31.313] info:    OS: Windows 10.0 Build 26100
+[23:35:31.313] info:  Initializing RtxOptions...
+[23:35:31.313] info:  Initializing RtxOption system layers...
+[23:35:31.313] info:  Attempting to parse option layer: dxvk.conf...
+[23:35:31.313] info:  No config file found at: dxvk.conf
+[23:35:31.317] info:  Did not find app config for executable: D:\SR3RTXREMIXCOMP\Saints Row 3\SaintsRowTheThird.exe
+[23:35:31.317] info:  Attempting to parse option layer: rtx.conf...
+[23:35:31.317] info:  Found config file: rtx.conf
+[23:35:31.317] info:  Parsed config file.
+[23:35:31.317] info:  Effective Combined Config for DXVK Options configuration:
+[23:35:31.317] info:    rtx.worldSpaceUiBackgroundTextures = -0x196FBE2CAB23CB16, -0x3AE04A318AA2ABB1, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0x8E4C8047F62D947A, -0xAEFF15798CCD7C0E
+[23:35:31.317] info:    rtx.worldSpaceUiTextures = -0x196FBE2CAB23CB16, -0x4E866A84552FD39A, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0xA7CBBE4B23C16C44, -0xF1A42F0E82DC4604
+[23:35:31.317] info:    rtx.fallbackLightRadiance = 100, 100, 100
+[23:35:31.317] info:    rtx.ignoreLastTextureStage = False
+[23:35:31.317] info:    rtx.lightConversionMaxIntensity = 1e+06
+[23:35:31.317] info:    rtx.allowCubemaps = False
+[23:35:31.317] info:    rtx.graph.enable = True
+[23:35:31.317] info:    rtx.enableLegacyRectLightConeShaping = False
+[23:35:31.317] info:    rtx.raytracedRenderTarget.enable = True
+[23:35:31.317] info:    rtx.useVertexCapture = True
+[23:35:31.317] info:    rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = False
+[23:35:31.317] info:    rtx.fallbackLightMode = 0
+[23:35:31.317] info:    rtx.enableDirectLighting = True
+[23:35:31.317] info:    rtx.opacityMicromap.showAdvancedOptions = False
+[23:35:31.317] info:    rtx.enableProbabilisticUnorderedResolveInIndirectRays = True
+[23:35:31.317] info:    rtx.vertexColorIsBakedLighting = True
+[23:35:31.317] info:    rtx.ignoreGameDirectionalLights = False
+[23:35:31.317] info:    rtx.camera.freeCameraPosition = -2.30478, 1.02876, 3.97308
+[23:35:31.317] info:    rtx.freeCameraSpeed = 15.7
+[23:35:31.317] info:    rtx.bloom.enable = False
+[23:35:31.317] info:    rtx.opacityMicromap.enable = True
+[23:35:31.317] info:    rtx.camera.freeCameraPitch = 0
+[23:35:31.317] info:    rtx.playerModel.enablePrimaryShadows = True
+[23:35:31.317] info:    rtx.ignoreTextures = 0x645CF1DD53FF6357, 0x978271113F293CE4, 0xE36A6560E0C77FD1, -0x196FBE2CAB23CB16, -0x345AB54DAB08D132, -0x3869FE5976C427DA, -0x4B17F5ECBA4D9E4D, -0x4FAE8190C113287B, -0x5DD44DFBED334A45, -0x6AC1CFA187D094AA, -0x8E4C8047F62D947A, -0x98E491E6E58092DE, -0xA22BB20412CCB5BB, -0xA8C25F3663FBB3FE, -0xB47ED05C13408F82, -0xC75ABEE33CC2F1EF, -0xCB3B4D13CF8165EE
+[23:35:31.317] info:    rtx.enableAlwaysCalculateAABB = False
+[23:35:31.317] info:    rtx.autoExposure.evMaxValue = 13.01
+[23:35:31.317] info:    rtx.particles.enable = True
+[23:35:31.317] info:    rtx.fallbackLightType = 0
+[23:35:31.317] info:    rtx.defaultToAdvancedUI = True
+[23:35:31.317] info:    rtx.camera.freeCameraYaw = 0
+[23:35:31.317] info:    rtx.autoExposure.evMinValue = -80
+[23:35:31.317] info:    rtx.particleTextures = -0x0AB9F87BFA6F8D28, -0x196FBE2CAB23CB16, -0x735E25575F1EAC7C, -0xA808F9F82BE29ABC, -0xD0E0D57A3AB84F1D, -0xEA0A8CC4E7F589A7
+[23:35:31.317] info:    rtx.captureInstances = True
+[23:35:31.317] info:    rtx.lightConversionDistantLightFixedIntensity = 2.21
+[23:35:31.317] info:    rtx.leftHandedCoordinateSystem = False
+[23:35:31.317] info:    rtx.captureOverwriteExistingCapture = False
+[23:35:31.317] info:    rtx.ignoreGameSpotLights = False
+[23:35:31.317] info:    rtx.enableCullingInSecondaryRays = False
+[23:35:31.318] info:    rtx.opacityMicromap.building.splitBillboardGeometry = True
+[23:35:31.318] info:    rtx.opacityMicromap.enableBinding = True
+[23:35:31.318] info:    rtx.autoExposure.enabled = True
+[23:35:31.318] info:    rtx.enableShaderExecutionReorderingInPathtracerIntegrateIndirect = True
+[23:35:31.318] info:    rtx.skyBoxTextures = 0x4822C3D374F8E5ED, 0xA23FA925AC35598D, 0xFBC6C5FFCC8AD259, -0x18B606E2E3F7E0DC, -0x645CF1DD53FF6357
+[23:35:31.318] info:    rtx.enableSecondaryBounces = True
+[23:35:31.318] info:    rtx.enableCulling = True
+[23:35:31.318] info:    rtx.fallbackLightDirection = -0.2, -1, 0.4
+[23:35:31.318] info:    rtx.enableRectLightConeShapingRatioScaling = False
+[23:35:31.318] info:    rtx.enableRussianRoulette = True
+[23:35:31.318] info:    rtx.camera.lockFreeCamera = False
+[23:35:31.318] info:    rtx.orthographicIsUI = False
+[23:35:31.318] info:    rtx.capture.correctBakedTransforms = False
+[23:35:31.318] info:    rtx.useVertexCapturedNormals = True
+[23:35:31.318] info:    rtx.captureShowMenuOnHotkey = True
+[23:35:31.318] info:    rtx.zUp = False
+[23:35:31.318] info:    rtx.suppressLightKeeping = False
+[23:35:31.318] info:    rtx.ignoreLights = -0x645CF1DD53FF6357
+[23:35:31.318] info:    rtx.viewModel.enable = False
+[23:35:31.318] info:    rtx.opacityMicromap.enableResetEveryFrame = False
+[23:35:31.318] info:    rtx.useHighlightLegacyMode = False
+[23:35:31.318] info:    rtx.ignoreGamePointLights = False
+[23:35:31.318] info:    rtx.camera.enableFreeCamera = False
+[23:35:31.318] info:    rtx.lightConversionSphereLightFixedRadius = 0.18
+[23:35:31.318] info:    rtx.skyAutoDetect = 0
+[23:35:31.318] info:    rtx.useHighlightUnsafeAnchorMode = False
+[23:35:31.318] info:    rtx.lightConversionDistantLightFixedAngle = 0.0349
+[23:35:31.318] info:    rtx.enableRaytracing = True
+[23:35:31.318] info:    rtx.fogIgnoreSky = False
+[23:35:31.318] info:    rtx.useWorldMatricesForShaders = True
+[23:35:31.318] info:    rtx.localtonemap.finalizeWithACES = True
+[23:35:31.318] info:    rtx.fallbackLightAngle = 5
+[23:35:31.318] info:    rtx.enableMultiStageTextureFactorBlending = True
+[23:35:31.318] info:  Attempting to parse option layer: user.conf...
+[23:35:31.318] info:  Found config file: user.conf
+[23:35:31.318] info:  Parsed config file.
+[23:35:31.318] info:  RtxOption system layer initialization complete.
+[23:35:31.318] info:  Geometry generation hash rule:
+[23:35:31.318] info:  	positions
+[23:35:31.318] info:  	indices
+[23:35:31.318] info:  	texcoords
+[23:35:31.318] info:  	geometrydescriptor
+[23:35:31.318] info:  	vertexlayout
+[23:35:31.318] info:  	vertexshader
+[23:35:31.318] info:  [RTX Neural Radiance Cache] Selected Medium preset mode.
+[23:35:31.318] info:  Geometry asset hash rule:
+[23:35:31.318] info:  	positions
+[23:35:31.318] info:  	indices
+[23:35:31.318] info:  	geometrydescriptor
+[23:35:31.318] info:  Effective RtxOption values (after all config layers and migrations):
+[23:35:31.318] info:    rtx.enableFirstBounceLobeProbabilityDithering = False
+[23:35:31.318] info:    rtx.worldSpaceUiTextures = -0x196FBE2CAB23CB16, -0x4E866A84552FD39A, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0xA7CBBE4B23C16C44, -0xF1A42F0E82DC4604
+[23:35:31.318] info:    rtx.dlfg.enable = False
+[23:35:31.318] info:    rtx.di.enableRayTracedBiasCorrection = False
+[23:35:31.318] info:    rtx.dlssPreset = 2
+[23:35:31.318] info:    rtx.russianRouletteMaxContinueProbability = 0.7
+[23:35:31.318] info:    rtx.worldSpaceUiBackgroundTextures = -0x196FBE2CAB23CB16, -0x3AE04A318AA2ABB1, -0x645CF1DD53FF6357, -0x6AC1CFA187D094AA, -0x8E4C8047F62D947A, -0xAEFF15798CCD7C0E
+[23:35:31.318] info:    rtx.minOpaqueSpecularLobeSamplingProbability = 0.05
+[23:35:31.318] info:    rtx.russianRoulette1stBounceMinContinueProbability = 0.4
+[23:35:31.318] info:    rtx.neuralRadianceCache.resetSceneBoundsOnCameraCut = False
+[23:35:31.318] info:    rtx.neuralRadianceCache.qualityPreset = 0
+[23:35:31.318] info:    rtx.di.stealBoundaryPixelSamplesWhenOutsideOfScreen = False
+[23:35:31.318] info:    rtx.fallbackLightMode = 0
+[23:35:31.318] info:    rtx.neuralRadianceCache.trainingMaxPathBounces = 6
+[23:35:31.318] info:    rtx.enableUnorderedResolveInIndirectRays = False
+[23:35:31.318] info:    rtx.camera.freeCameraPosition = -2.30478, 1.02876, 3.97308
+[23:35:31.318] info:    rtx.di.initialSampleCount = 3
+[23:35:31.318] info:    rtx.freeCameraSpeed = 15.7
+[23:35:31.318] info:    rtx.pathMaxBounces = 2
+[23:35:31.318] info:    rtx.bloom.enable = False
+[23:35:31.318] info:    rtx.neuralRadianceCache.terminationHeuristicThreshold = 0.001
+[23:35:31.318] info:    rtx.neuralRadianceCache.smallestResolvableFeatureSizeMeters = 0.06
+[23:35:31.318] info:    rtx.ignoreTextures = 0x645CF1DD53FF6357, 0x978271113F293CE4, 0xE36A6560E0C77FD1, -0x196FBE2CAB23CB16, -0x345AB54DAB08D132, -0x3869FE5976C427DA, -0x4B17F5ECBA4D9E4D, -0x4FAE8190C113287B, -0x5DD44DFBED334A45, -0x6AC1CFA187D094AA, -0x8E4C8047F62D947A, -0x98E491E6E58092DE, -0xA22BB20412CCB5BB, -0xA8C25F3663FBB3FE, -0xB47ED05C13408F82, -0xC75ABEE33CC2F1EF, -0xCB3B4D13CF8165EE
+[23:35:31.318] info:    rtx.restirGI.biasCorrectionMode = 1
+[23:35:31.318] info:    rtx.defaultToAdvancedUI = True
+[23:35:31.318] info:    rtx.denoiseDirectAndIndirectLightingSeparately = False
+[23:35:31.318] info:    rtx.autoExposure.evMinValue = -80
+[23:35:31.318] info:    rtx.lightConversionDistantLightFixedIntensity = 2.21
+[23:35:31.318] info:    rtx.volumetrics.froxelGridResolutionScale = 16
+[23:35:31.318] info:    rtx.di.enableDenoiserConfidence = False
+[23:35:31.318] info:    rtx.skyBoxTextures = 0x4822C3D374F8E5ED, 0xA23FA925AC35598D, 0xFBC6C5FFCC8AD259, -0x18B606E2E3F7E0DC, -0x645CF1DD53FF6357
+[23:35:31.318] info:    rtx.di.disocclusionSamples = 2
+[23:35:31.318] info:    rtx.di.permutationSamplingNthFrame = 1
+[23:35:31.318] info:    rtx.particleTextures = -0x0AB9F87BFA6F8D28, -0x196FBE2CAB23CB16, -0x735E25575F1EAC7C, -0xA808F9F82BE29ABC, -0xD0E0D57A3AB84F1D, -0xEA0A8CC4E7F589A7
+[23:35:31.318] info:    rtx.neuralRadianceCache.targetNumTrainingIterations = 2
+[23:35:31.318] info:    rtx.qualityDLSS = 3
+[23:35:31.319] info:    rtx.orthographicIsUI = False
+[23:35:31.319] info:    rtx.gui.textureGridThumbnailScale = 2.5
+[23:35:31.319] info:    rtx.di.enableBestLightSampling = False
+[23:35:31.319] info:    rtx.enableReplacementAssets = False
+[23:35:31.319] info:    rtx.ignoreLights = -0x645CF1DD53FF6357
+[23:35:31.319] info:    rtx.gui.legacyTextureGuiShowAssignedOnly = True
+[23:35:31.319] info:    rtx.demodulate.enableDirectLightBoilingFilter = False
+[23:35:31.319] info:    rtx.graphicsPreset = 4
+[23:35:31.319] info:    rtx.restirGI.useReflectionReprojection = False
+[23:35:31.319] info:    rtx.postFilterThreshold = 10
+[23:35:31.319] info:    rtx.postfx.enable = False
+[23:35:31.319] info:    rtx.russianRouletteMode = 1
+[23:35:31.319] info:    rtx.di.enableSampleStealing = False
+[23:35:31.319] info:    rtx.minOpaqueDiffuseLobeSamplingProbability = 0.05
+[23:35:31.319] info:    rtx.neeCache.enableModeAfterFirstBounce = 2
+[23:35:31.319] info:    rtx.pathMinBounces = 0
+[23:35:31.319] info:    rtx.enableTransmissionApproximationInIndirectRays = True
+[23:35:31.319] info:    rtx.autoExposure.evMaxValue = 13.01
+[23:35:31.319] info:    rtx.enableStochasticAlphaBlend = False
+[23:35:31.319] info:    rtx.usePostFilter = False
+[23:35:31.319] info:    rtx.lightConversionSphereLightFixedRadius = 0.18
+[23:35:31.319] info:    rtx.fallbackLightRadiance = 100, 100, 100
+[23:35:31.319] info:    rtx.lightConversionMaxIntensity = 1e+06
+[23:35:31.319] info:    rtx.gui.showLegacyTextureGui = True
+[23:35:31.319] info:    rtx.volumetrics.enable = False
+[23:35:31.319] info:    rtx.volumetrics.froxelDepthSlices = 48
+[23:35:31.319] info:  Built-in extension providers:
+[23:35:31.319] info:    Win32 WSI
+[23:35:31.319] info:    OpenVR
+[23:35:31.319] info:    OpenXR
+[23:35:31.319] info:  OpenVR: could not open registry key, status 2
+[23:35:31.319] info:  OpenVR: Failed to locate module
+[23:35:31.386] info:  Enabled instance extensions:
+[23:35:31.386] info:    VK_KHR_external_memory_capabilities
+[23:35:31.386] info:    VK_KHR_external_semaphore_capabilities
+[23:35:31.386] info:    VK_KHR_get_physical_device_properties2
+[23:35:31.386] info:    VK_KHR_get_surface_capabilities2
+[23:35:31.386] info:    VK_KHR_surface
+[23:35:31.386] info:    VK_KHR_win32_surface
+[23:35:31.391] info:  Enabled Layer Names:
+[23:35:31.453] warn:  Skipping Integrated GPU adapter: AMD Radeon(TM) Graphics
+[23:35:31.453] info:  D3D9: VK_FORMAT_D16_UNORM_S8_UINT -> VK_FORMAT_D24_UNORM_S8_UINT
+[23:35:31.453] info:  NVIDIA GeForce RTX 3090:
+[23:35:31.453] info:    Driver: 610.88.0
+[23:35:31.453] info:    Vulkan: 1.4.341
+[23:35:31.453] info:    Memory Heap[0]: 
+[23:35:31.453] info:      Size: 24322 MiB
+[23:35:31.453] info:      Flags: 0x1
+[23:35:31.453] info:      Memory Type[1]: Property Flags = 0x1
+[23:35:31.453] info:      Memory Type[2]: Property Flags = 0x1
+[23:35:31.453] info:      Memory Type[5]: Property Flags = 0x7
+[23:35:31.453] info:    Memory Heap[1]: 
+[23:35:31.453] info:      Size: 31571 MiB
+[23:35:31.453] info:      Flags: 0x0
+[23:35:31.453] info:      Memory Type[0]: Property Flags = 0x0
+[23:35:31.453] info:      Memory Type[3]: Property Flags = 0x6
+[23:35:31.453] info:      Memory Type[4]: Property Flags = 0xe
+[23:35:31.453] info:  D3D9: VK_FORMAT_D16_UNORM_S8_UINT -> VK_FORMAT_D24_UNORM_S8_UINT
+[23:35:31.453] info:  NVIDIA GeForce RTX 3090:
+[23:35:31.453] info:    Driver: 610.88.0
+[23:35:31.453] info:    Vulkan: 1.4.341
+[23:35:31.453] info:    Memory Heap[0]: 
+[23:35:31.453] info:      Size: 24322 MiB
+[23:35:31.453] info:      Flags: 0x1
+[23:35:31.453] info:      Memory Type[1]: Property Flags = 0x1
+[23:35:31.453] info:      Memory Type[2]: Property Flags = 0x1
+[23:35:31.453] info:      Memory Type[5]: Property Flags = 0x7
+[23:35:31.453] info:    Memory Heap[1]: 
+[23:35:31.453] info:      Size: 31571 MiB
+[23:35:31.453] info:      Flags: 0x0
+[23:35:31.453] info:      Memory Type[0]: Property Flags = 0x0
+[23:35:31.453] info:      Memory Type[3]: Property Flags = 0x6
+[23:35:31.453] info:      Memory Type[4]: Property Flags = 0xe
+[23:35:31.453] info:  Process set as DPI aware
+[23:35:31.920] info:  Device properties:
+[23:35:31.920] info:    Device name:     : NVIDIA GeForce RTX 3090
+[23:35:31.920] info:    Vendor name:     : NVIDIA
+[23:35:31.920] info:    Device ID:       : 0x2204
+[23:35:31.920] info:    Vendor ID:       : 0x10de
+[23:35:31.920] info:    Driver version   : 610.88.0
+[23:35:31.920] info:  Enabled device extensions:
+[23:35:31.920] info:    VK_EXT_4444_formats
+[23:35:31.920] info:    VK_EXT_calibrated_timestamps
+[23:35:31.921] info:    VK_EXT_conservative_rasterization
+[23:35:31.921] info:    VK_EXT_custom_border_color
+[23:35:31.921] info:    VK_EXT_depth_clip_enable
+[23:35:31.921] info:    VK_EXT_extended_dynamic_state
+[23:35:31.921] info:    VK_EXT_full_screen_exclusive
+[23:35:31.921] info:    VK_EXT_memory_priority
+[23:35:31.921] info:    VK_EXT_opacity_micromap
+[23:35:31.921] info:    VK_EXT_robustness2
+[23:35:31.921] info:    VK_EXT_shader_atomic_float
+[23:35:31.921] info:    VK_EXT_shader_demote_to_helper_invocation
+[23:35:31.921] info:    VK_EXT_shader_viewport_index_layer
+[23:35:31.921] info:    VK_EXT_transform_feedback
+[23:35:31.921] info:    VK_EXT_vertex_attribute_divisor
+[23:35:31.921] info:    VK_KHR_acceleration_structure
+[23:35:31.921] info:    VK_KHR_buffer_device_address
+[23:35:31.921] info:    VK_KHR_create_renderpass2
+[23:35:31.921] info:    VK_KHR_deferred_host_operations
+[23:35:31.921] info:    VK_KHR_depth_stencil_resolve
+[23:35:31.921] info:    VK_KHR_draw_indirect_count
+[23:35:31.921] info:    VK_KHR_driver_properties
+[23:35:31.921] info:    VK_KHR_external_memory
+[23:35:31.921] info:    VK_KHR_external_memory_win32
+[23:35:31.921] info:    VK_KHR_external_semaphore
+[23:35:31.921] info:    VK_KHR_external_semaphore_win32
+[23:35:31.921] info:    VK_KHR_image_format_list
+[23:35:31.921] info:    VK_KHR_maintenance4
+[23:35:31.921] info:    VK_KHR_pipeline_library
+[23:35:31.921] info:    VK_KHR_push_descriptor
+[23:35:31.921] info:    VK_KHR_ray_query
+[23:35:31.921] info:    VK_KHR_ray_tracing_pipeline
+[23:35:31.921] info:    VK_KHR_sampler_mirror_clamp_to_edge
+[23:35:31.921] info:    VK_KHR_shader_float16_int8
+[23:35:31.921] info:    VK_KHR_shader_float_controls
+[23:35:31.921] info:    VK_KHR_swapchain
+[23:35:31.921] info:    VK_KHR_synchronization2
+[23:35:31.921] info:    VK_NVX_binary_import
+[23:35:31.921] info:    VK_NVX_image_view_handle
+[23:35:31.921] info:    VK_NV_low_latency
+[23:35:31.921] info:    VK_NV_present_metering
+[23:35:31.921] info:    VK_NV_ray_tracing_invocation_reorder
+[23:35:31.921] info:  Device features:
+[23:35:31.921] info:    robustBufferAccess                     : 1
+[23:35:31.921] info:    fullDrawIndexUint32                    : 1
+[23:35:31.921] info:    imageCubeArray                         : 1
+[23:35:31.921] info:    independentBlend                       : 1
+[23:35:31.921] info:    geometryShader                         : 1
+[23:35:31.921] info:    tessellationShader                     : 0
+[23:35:31.921] info:    sampleRateShading                      : 1
+[23:35:31.921] info:    dualSrcBlend                           : 0
+[23:35:31.921] info:    logicOp                                : 0
+[23:35:31.921] info:    multiDrawIndirect                      : 0
+[23:35:31.921] info:    drawIndirectFirstInstance              : 0
+[23:35:31.921] info:    depthClamp                             : 1
+[23:35:31.921] info:    depthBiasClamp                         : 1
+[23:35:31.921] info:    fillModeNonSolid                       : 1
+[23:35:31.921] info:    depthBounds                            : 1
+[23:35:31.921] info:    multiViewport                          : 1
+[23:35:31.921] info:    samplerAnisotropy                      : 1
+[23:35:31.921] info:    textureCompressionBC                   : 1
+[23:35:31.921] info:    occlusionQueryPrecise                  : 1
+[23:35:31.921] info:    pipelineStatisticsQuery                : 1
+[23:35:31.921] info:    vertexPipelineStoresAndAtomics         : 1
+[23:35:31.921] info:    fragmentStoresAndAtomics               : 0
+[23:35:31.921] info:    shaderImageGatherExtended              : 0
+[23:35:31.921] info:    shaderStorageImageExtendedFormats      : 0
+[23:35:31.921] info:    shaderStorageImageReadWithoutFormat    : 0
+[23:35:31.921] info:    shaderStorageImageWriteWithoutFormat   : 1
+[23:35:31.921] info:    shaderClipDistance                     : 1
+[23:35:31.921] info:    shaderCullDistance                     : 1
+[23:35:31.921] info:    shaderFloat64                          : 0
+[23:35:31.921] info:    shaderInt64                            : 0
+[23:35:31.921] info:    variableMultisampleRate                : 0
+[23:35:31.921] info:    hostQueryReset                         : 1
+[23:35:31.921] info:    scalarBlockLayout                      : 1
+[23:35:31.921] info:    uniformBufferStandardLayout            : 1
+[23:35:31.921] info:  VK_EXT_4444_formats
+[23:35:31.921] info:    formatA4R4G4B4                         : 1
+[23:35:31.921] info:    formatA4B4G4R4                         : 1
+[23:35:31.921] info:  VK_EXT_custom_border_color
+[23:35:31.921] info:    customBorderColors                     : 1
+[23:35:31.921] info:    customBorderColorWithoutFormat         : 1
+[23:35:31.921] info:  VK_EXT_depth_clip_enable
+[23:35:31.921] info:    depthClipEnable                        : 1
+[23:35:31.921] info:  VK_EXT_extended_dynamic_state
+[23:35:31.921] info:    extendedDynamicState                   : 1
+[23:35:31.921] info:  VK_EXT_memory_priority
+[23:35:31.921] info:    memoryPriority                         : 1
+[23:35:31.921] info:  VK_EXT_robustness2
+[23:35:31.921] info:    robustBufferAccess2                    : 1
+[23:35:31.921] info:    robustImageAccess2                     : 0
+[23:35:31.921] info:    nullDescriptor                         : 1
+[23:35:31.921] info:  VK_EXT_shader_demote_to_helper_invocation
+[23:35:31.921] info:    shaderDemoteToHelperInvocation         : 1
+[23:35:31.921] info:  VK_EXT_transform_feedback
+[23:35:31.921] info:    transformFeedback                      : 1
+[23:35:31.921] info:    geometryStreams                        : 0
+[23:35:31.921] info:  VK_EXT_vertex_attribute_divisor
+[23:35:31.921] info:    vertexAttributeInstanceRateDivisor     : 1
+[23:35:31.921] info:    vertexAttributeInstanceRateZeroDivisor : 1
+[23:35:31.921] info:  VK_KHR_buffer_device_address
+[23:35:31.921] info:    bufferDeviceAddress                    : 1
+[23:35:31.921] info:  Queue families:
+[23:35:31.921] info:    Graphics : 0
+[23:35:31.921] info:    Transfer : 1
+[23:35:31.921] info:    Async Compute : 2
+[23:35:31.921] info:    Present : 2
+[23:35:32.131] info:  DXVK: Read 23798 valid state cache entries
+[23:35:32.131] info:  DXVK: Using 10 compiler threads
+[23:35:32.134] info:  USD plugin, Remix loaded!
+[23:35:32.134] info:  [RTX info] Neural Radiance Cache: supported
+[23:35:33.403] info:  NVIDIA DLSS Frame Generation not available on this hardware/platform: (code: 0x00000001, info: NVSDK_NGX_Result_Success)
+[23:35:33.405] info:  Reflex initialized successfully.
+[23:35:33.413] info:  Automatic Raytrace Mode Preset in use (Set rtx.raytraceModePreset to something other than Auto use a non-automatic preset)
+[23:35:33.413] info:  NVIDIA architecture detected, setting default raytrace modes to Trace Ray (Indirect Integrate) and Ray Query (GBuffer, Direct Integrate)
+[23:35:33.492] info:  [RTX info] Opacity Micromap: supported
+[23:35:33.492] info:  [RTX info] Shader Execution Reordering: not supported
+[23:35:33.492] info:  [RTX info] Shader Execution Reordering: disabled
+[23:35:33.492] info:  CPU supports SIMD: AVX2
+[23:35:33.496] info:  D3D9DeviceEx::ResetSwapChain:
+[23:35:33.496] info:    Requested Presentation Parameters
+[23:35:33.496] info:      - Width:              1280
+[23:35:33.496] info:      - Height:             720
+[23:35:33.496] info:      - Format:             D3D9Format::X8R8G8B8
+[23:35:33.496] info:      - Auto Depth Stencil: true
+[23:35:33.496] info:                  ^ Format: D3D9Format::D24S8
+[23:35:33.496] info:      - Windowed:           true
+[23:35:33.497] info:  Adding asset search path: d:\sr3rtxremixcomp\saints row 3\rtx-remix\mods\sr3rtx\
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Ice.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Lens.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeCamera_A01_01.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeDigital_A02_01.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeIsogrid_A01_01.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeIsogrid_A02_01.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeIsogrid_A03_01.usd
+[23:35:33.497] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_RTX_CompanionCube_A1_01.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_RollCage.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Healthpack.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Space.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Pillow_A.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Ceramic.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Wood.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCubeDigital_A01_01.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_SteamPunk_A01.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_ArtsAndCrafts.usd
+[23:35:33.498] warn:  [SecretReplacement] Could not find stage: D:\SR3RTXREMIXCOMP\Saints Row 3\rtx-remix\mods\sr3rtx\./SubUSDs/SM_Prop_CompanionCube_Cubus.usd
+[23:35:33.520] info:  Presenter: Actual swap chain properties:
+[23:35:33.520] info:    Format:       VK_FORMAT_R8G8B8A8_UNORM
+[23:35:33.520] info:    Present mode: VK_PRESENT_MODE_IMMEDIATE_KHR
+[23:35:33.520] info:    Buffer size:  1280x720
+[23:35:33.520] info:    Image count:  3
+[23:35:33.520] info:    Exclusive FS: 2
+[23:35:33.720] info:  Presenter: Actual swap chain properties:
+[23:35:33.720] info:    Format:       VK_FORMAT_R8G8B8A8_UNORM
+[23:35:33.720] info:    Present mode: VK_PRESENT_MODE_FIFO_KHR
+[23:35:33.720] info:    Buffer size:  1280x720
+[23:35:33.720] info:    Image count:  3
+[23:35:33.720] info:    Exclusive FS: 2
+[23:35:33.757] info:  No winproc detected, initiating bridge message channel for: 0000000000070A52
+[23:35:33.763] warn:  ConvertFormat: Unknown format encountered: 1396921934
+[23:35:34.938] info:  Presenter: Actual swap chain properties:
+[23:35:34.938] info:    Format:       VK_FORMAT_R8G8B8A8_UNORM
+[23:35:34.938] info:    Present mode: VK_PRESENT_MODE_FIFO_KHR
+[23:35:34.938] info:    Buffer size:  1280x720
+[23:35:34.938] info:    Image count:  3
+[23:35:34.938] info:    Exclusive FS: 2
+[23:35:34.978] info:  [RTX-Compatibility-Info] Trying to raytrace but not detecting a valid camera.
+[23:35:35.009] info:  Message channel UWM_REMIX_BRIDGE_REGISTER_THREADPROC_MSG established.
+[23:35:36.046] warn:  Found a null sampler. Fallback to linear-repeat
+[23:35:40.667] info:  [RTX-Compatibility-Info] Skipped drawcall, colour write disabled.
+[23:35:57.209] warn:  D3D9Texture2D::QueryInterface: Unknown interface query
+[23:35:57.209] warn:  794950f2-adfc-458a-905e-10a10b0b503b
+[23:35:57.209] info:  [RTX-Compatibility-Info] Found a draw call to a non-primary, non-raytraced render target. Falling back to rasterization
+[23:35:57.843] warn:  [rtx-interleaver] Unsupported texcoord buffer format (80), skipping texcoord
+[23:35:57.844] info:  [RTX-Compatibility-Info] Trying to raytrace an occlusion query. Ignoring.
+[23:35:57.845] warn:  D3D9DeviceEx::SetRenderState: Unhandled render state D3DRS_MULTISAMPLEANTIALIAS
+[23:35:57.845] info:  [RTX-Compatibility-Info] Trying to raytrace an unsupported primitive topology [1]. Ignoring.
+[23:35:57.873] warn:  Sky may not appear correct: sky intermediate format has been forced to HDR while the original sky is LDR and no HDR sky replacement has been found!
+[23:35:57.873] warn:  [rtx-interleaver] Unsupported color0 buffer format (109), skipping color0
+[23:35:57.985] info:  [RTX] Opacity Micromap: enabled
+[23:35:57.994] info:  RenderPass GBuffer Raytrace Mode: Ray Query (CS)
+[23:35:57.994] info:  RenderPass Integrate Direct Raytrace Mode: Ray Query (CS)
+[23:35:57.994] info:  RenderPass Integrate Indirect Raytrace Mode: Trace Ray (RGS)
+[23:35:58.007] info:  [RTX Neural Radiance Cache] NRC SDK: Loading the default network config data.
+[23:35:58.019] info:  [RTX Neural Radiance Cache] NRC v0.13 (22 January 2025) Context successfully initialized. 
+[23:35:58.062] info:  [RTX] Integrate Indirect Mode: Neural Radiance Cache - activated
+[23:35:58.136] info:  [RTX-Compatibility-Info] Trying to bind a texture to a mesh without UVs.  Was this intended?
+[23:35:58.311] info:  [RTX Opacity Micromap] Instance has non triangle list topology. This is only partially supported. Falling back to a conservative max value for estimated numTexelsPerMicroTriangle instead.
+[23:35:58.511] warn:  [RTX Opacity Micromap] Texcoord data is unavailable for calculateNumTexelsPerMicroTriangle(). Falling back to a conservative max value for estimated numTexelsPerMicroTriangle instead.
+[23:36:02.679] info:  [RTX Opacity Micromap] Instance does not have compatible texture coordinates. Ignoring the Opacity Micromap request.
+[23:36:04.962] warn:  [RTX] CameraManager: FOV of a camera changed between frames
+[23:42:35.727] warn:  Found multiple draw calls with the same 'objectPickingValue'. Ignoring further MetaInfo-s, some objects might be not be available through object picking
+[23:42:56.132] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:42:57.037] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:42:57.206] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:42:57.908] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:42:58.244] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:44:05.916] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:44:06.579] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:44:10.228] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:44:19.051] info:  skytextures - added (positive opinion) FF4CFEFBFBC34BA2
+[23:44:37.742] info:  skytextures - added (positive opinion) 6FF3AF54ED2B7F4B
+[23:45:11.968] info:  terraintextures - added (positive opinion) CF0907D42F2698CE
+[23:45:11.978] warn:  [RTX Terrain Baker] Terrain render target is of sRGB format VK_FORMAT_R16G16B16A16_SFLOAT. Instead, it is expected to be of linear format.
+[23:45:22.806] info:  terraintextures - removed (negative opinion) CF0907D42F2698CE
+[23:45:24.842] info:  terraintextures - added (positive opinion) 2F865B20C4FBB46F
+[23:45:33.092] info:  terraintextures - added (positive opinion) 9BDD710C6151F1EE
+[23:45:36.275] info:  terraintextures - added (positive opinion) F9D1D398E0801F39
+[23:45:36.962] info:  terraintextures - added (positive opinion) CF0907D42F2698CE
+[23:46:01.473] info:  terraintextures - added (positive opinion) A252A7B448FCF9C8
+[23:46:22.249] info:  terraintextures - removed (negative opinion) CF0907D42F2698CE
+[23:46:22.799] info:  terraintextures - removed (negative opinion) A252A7B448FCF9C8
+[23:46:23.299] info:  terraintextures - removed (negative opinion) F9D1D398E0801F39
+[23:46:23.840] info:  terraintextures - removed (negative opinion) 2F865B20C4FBB46F
+[23:46:24.517] info:  terraintextures - removed (negative opinion) 9BDD710C6151F1EE
+[23:46:38.127] info:  terraintextures - added (positive opinion) 8E4C8047F62D947A
+[23:47:08.602] info:  terraintextures - removed (negative opinion) 8E4C8047F62D947A
+[23:47:21.535] info:  raytracedRenderTargetTextures - added (positive opinion) 8E4C8047F62D947A
+[23:47:23.124] info:  raytracedRenderTargetTextures - removed (negative opinion) 8E4C8047F62D947A
+[23:47:26.209] info:  raytracedRenderTargetTextures - added (positive opinion) 8E4C8047F62D947A
+[23:48:55.368] info:  Attempting to parse option layer: rtx.conf...
+[23:48:55.368] info:  Found config file: rtx.conf
+[23:48:55.368] info:  Parsed config file.
+[23:48:55.369] info:  [RTX Option]: Reloaded layer config from 'rtx.conf'
+[23:50:36.528] info:  particleemittertextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:39.632] info:  particleemittertextures - removed (negative opinion) 8E4C8047F62D947A
+[23:50:43.037] info:  particleemittertextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:43.829] info:  particleemittertextures - removed (negative opinion) 8E4C8047F62D947A
+[23:50:46.662] info:  smoothnormalstextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:47.534] info:  smoothnormalstextures - removed (negative opinion) 8E4C8047F62D947A
+[23:50:49.816] info:  ignorealphaontextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:50.825] info:  ignorealphaontextures - removed (negative opinion) 8E4C8047F62D947A
+[23:50:52.705] info:  ignorebakedlightingtextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:53.506] info:  ignorebakedlightingtextures - removed (negative opinion) 8E4C8047F62D947A
+[23:50:55.518] info:  opacitymicromapignoretextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:56.060] info:  opacitymicromapignoretextures - removed (negative opinion) 8E4C8047F62D947A
+[23:50:58.151] info:  playermodelbodytextures - added (positive opinion) 8E4C8047F62D947A
+[23:50:58.869] info:  playermodelbodytextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:00.217] info:  playermodeltextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:01.373] info:  playermodeltextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:01.804] info:  playermodeltextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:02.549] info:  playermodeltextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:03.884] info:  motionBlurMaskOutTextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:04.639] info:  motionBlurMaskOutTextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:05.577] info:  antiCullingTextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:06.329] info:  antiCullingTextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:07.698] info:  watertextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:08.466] info:  watertextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:10.271] info:  terraintextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:14.164] info:  terraintextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:15.338] info:  terraintextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:21.393] info:  terraintextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:21.981] info:  terraintextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:24.583] info:  terraintextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:25.994] info:  decaltextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:27.655] info:  decaltextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:29.515] info:  lightconvertertextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:30.197] info:  lightconvertertextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:30.562] info:  lightconvertertextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:32.876] info:  lightconvertertextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:38.405] info:  ignoretransparencytextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:40.032] info:  ignoretransparencytextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:41.526] info:  beamtextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:42.219] info:  beamtextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:44.316] info:  particletextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:44.992] info:  particletextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:46.366] info:  ignorelights - added (positive opinion) 8E4C8047F62D947A
+[23:51:47.605] info:  ignorelights - removed (negative opinion) 8E4C8047F62D947A
+[23:51:48.823] info:  lightmaptextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:49.672] info:  lightmaptextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:50.090] info:  lightmaptextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:51.981] info:  lightmaptextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:52.442] info:  lightmaptextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:55.849] info:  lightmaptextures - removed (negative opinion) 8E4C8047F62D947A
+[23:51:57.340] info:  hidetextures - added (positive opinion) 8E4C8047F62D947A
+[23:51:59.162] info:  hidetextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:03.794] info:  ignoretextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:04.697] info:  ignoretextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:06.765] info:  skytextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:07.690] info:  skytextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:10.589] info:  worldspaceuibackgroundtextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:12.900] info:  worldspaceuibackgroundtextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:13.426] info:  worldspaceuibackgroundtextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:15.124] info:  worldspaceuibackgroundtextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:16.603] info:  worldspaceuitextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:17.347] info:  worldspaceuitextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:17.714] info:  worldspaceuitextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:19.217] info:  worldspaceuitextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:22.078] info:  uitextures - added (positive opinion) 8E4C8047F62D947A
+[23:52:22.705] info:  uitextures - removed (negative opinion) 8E4C8047F62D947A
+[23:52:54.959] info:  particletextures - added (positive opinion) D0E0D57A3AB84F1D
+[23:53:11.447] info:  particletextures - removed (negative opinion) D0E0D57A3AB84F1D
+[23:53:18.705] info:  Serializing config file: rtx.conf
+[23:53:18.705] info:  [RTX Option]: Saved layer config to 'rtx.conf'
+[23:54:57.938] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:55:28.991] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:55:29.807] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:55:30.805] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:55:31.539] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:55:32.806] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:55:33.690] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:56:45.955] info:  ignorelights - added (positive opinion) 79C54086767ED79B
+[23:56:46.565] info:  ignorelights - removed (negative opinion) 79C54086767ED79B
+[23:56:47.185] info:  ignorelights - added (positive opinion) 79C54086767ED79B
+[23:56:47.765] info:  ignorelights - removed (negative opinion) 79C54086767ED79B
+[23:56:54.846] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:56:56.341] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:57:06.645] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:57:12.683] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:57:18.978] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:57:24.967] info:  ignoretextures - removed (negative opinion) 978271113F293CE4
+[23:57:36.666] info:  ignoretextures - added (positive opinion) DA9B9550FA8337FE
+[23:57:56.252] info:  ignoretextures - removed (negative opinion) DA9B9550FA8337FE
+[23:58:10.755] info:  ignoretextures - added (positive opinion) 978271113F293CE4
+[23:59:16.579] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:20.113] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[23:59:21.146] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:22.029] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[23:59:22.312] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:22.495] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[23:59:22.811] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:23.094] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[23:59:23.643] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:24.494] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[23:59:25.266] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:25.733] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[23:59:29.367] info:  watertextures - added (positive opinion) CA9BA0BB995E09A2
+[23:59:31.783] info:  watertextures - removed (negative opinion) CA9BA0BB995E09A2
+[00:01:06.402] err:   [41] common device objects were not disposed of.

@@ -1,0 +1,70 @@
+MIT License
+
+Copyright (c) 2026 Purrsian and the sr3-rtx contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+UPSTREAM NOTICE
+
+This project is derived from BRAGme/sr2-rtx-remix-proxy, which is MIT licensed and
+itself derived from xoxor4d/remix-comp-base as adapted by Kim2091. The fixed-function
+conversion approach implemented here is theirs. Their copyright notice is reproduced
+below as the MIT License requires:
+
+    Copyright (c) 2026 github.com/xoxor4d
+    Copyright (c) 2026 Kim2091
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+See CREDITS.md for the full attribution.
+
+THIRD-PARTY SOFTWARE NOT DISTRIBUTED HERE
+
+This repository does not bundle, and therefore does not relicense, any of the
+following. Each is downloaded by the user from its own source, under its own terms:
+
+  * The NVIDIA RTX Remix runtime (d3d9.dll and .trex\)
+  * Ultimate ASI Loader by ThirteenAG
+  * The Vibe-Reverse-Engineering toolkit (MIT, Copyright 2026 Emanuel Kozerski),
+    which itself bundles radare2 (LGPL-3.0), Ghidra SLEIGH definitions (Apache-2.0),
+    and depends on Frida (wxWindows Library Licence 3.1), Capstone (BSD-3-Clause)
+    and pefile (MIT)
+
+This repository contains NO Saints Row: The Third game assets. Saints Row is a
+trademark of its respective owners; this is an unofficial fan project and is not
+affiliated with or endorsed by Volition, Deep Silver, THQ Nordic, Koch Media,
+PLAION, or NVIDIA.

@@ -1,0 +1,30 @@
+# The game copy itself is not versioned — only configs, docs, tools and the shim source.
+Saints Row 3/
+
+# Downloaded/extracted RTX Remix runtime releases (get them from NVIDIA, see INSTALL.md)
+runtime/
+
+# Extracted game assets — NOT redistributable. Regenerate with tools/vpp_extract.py
+re/
+
+# Third-party toolkit, cloned separately. See docs/vibe-re-tools.md
+tools/vibe-re/
+
+# Build intermediates. The built sr3-rtx.asi IS committed so the release can be reproduced.
+build/*.obj
+build/*.pdb
+build/*.exp
+build/*.lib
+__pycache__/
+*.pyc
+
+# Release staging
+dist/
+
+# --- Not redistributable: content derived from the game itself ---
+# Dumped game textures (character/clothing/pattern maps). These are Volition/Deep Silver
+# art assets, not ours. Regenerate locally with charTexDump=1 in sr3-rtx.ini.
+docs/evidence/cloth/
+# Crash minidumps: a memory snapshot of SaintsRowTheThird.exe embeds the game's own code,
+# and can carry local paths. Attach these to an issue if needed, don't commit them.
+*.dmp

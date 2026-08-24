@@ -1,0 +1,353 @@
+; sr3-rtx shim settings. Lives next to SaintsRowTheThird.exe.
+; Change a value and restart the game - no rebuild needed.
+[sr3-rtx]
+
+; ---------------------------------------------------------------------------------------
+; MODE. 0 = INTERPOSE (everything built so far: classify the engine's draws at the d3d9
+; boundary and demote/skip/fix them). 1 = ENGINE (patch the game's own rendering code, so
+; unwanted work is never submitted and the engine stays internally consistent).
+;
+; Interpose's ceiling: the engine still believes every draw happened, so removing one leaves
+; it depending on output that no longer exists. That is why skipping composite passes blacks
+; the screen and skipping fixed-function draws froze the image.
+;
+; Engine mode forces every interpose heuristic OFF, so both layers can never remove draws at
+; once and make a result unattributable. Camera publishing and light injection stay on in both.
+;
+; At present mode=1 only VERIFIES the engine map (docs/engine-map.md) against the running
+; process and logs the result - it patches nothing yet, so it is safe to run.
+mode=1
+
+; Forward the engine's per-object matrix (objTM, c32) as D3DTS_WORLD.
+; DEFAULT OFF, and it should stay off: skinned meshes (characters) transform through
+; Bone_weights (c52) and never write c32, so they inherited a stale world matrix from
+; whatever drew last and exploded into spiked garbage. With this off, Remix's vertex capture
+; supplies final positions instead and characters render correctly. Verified A/B 2026-08-13.
+publishWorld=0
+
+; Publish at most one camera per frame. The engine submits ~70 perspective passes per frame
+; at the back-buffer aspect; without this latch the camera flip-flops mid-frame and Remix
+; reports constant "camera cut"s, which re-initialises the neural radiance cache and was
+; crashing the game on level load.
+oneCameraPerFrame=1
+
+; Reject passes whose projection aspect doesn't match the back buffer (shadow maps,
+; reflections, light volumes). Turn off only for debugging.
+aspectFilter=1
+
+; Translate the engine's inferred-lighting light volumes into D3D9 lights, which Remix
+; converts into real ray-traced lights. This is what stops interiors being pitch black:
+; the fallback sun cannot reach indoors, so without it a room has only emissive lamps.
+injectLights=1
+
+; Brightness and range multipliers, as percentages, for tuning injected lights.
+lightScalePercent=100
+lightRangePercent=100
+
+; Remix reads texture stage 0 as a surface's albedo, but Saints Row only binds the diffuse
+; map there in about half its shaders - 903 of them put a normal map in s0 and keep the
+; diffuse at s1 or s3. Those materials were shaded using a normal map as base colour, which
+; is the bright yellow-green tint. This rebinds the shader's real diffuse map to stage 0 for
+; the duration of each draw, then restores it. Set to 0 to compare.
+; 2026-08-14: tested at 0 and RESTORED to 1. Returning to the exact same wall with the fix off
+; showed the identical wrong-texture tiling, so the albedo fix does NOT cause it (the real
+; cause is light-volume geometry, see demoteLightVolumes). Turning it off only brought the
+; yellow-green tint back. The suspected stale-slot bug is therefore unproven: BeginAlbedoFix
+; does read g_boundTextures[stage] without checking the current draw bound that stage, which
+; is still worth tightening, but it is not what is on screen.
+fixAlbedoStage=1
+
+; Screen-space quads (post-process passes, HUD atlases) use vertex shaders that never
+; reference projTM - they output clip-space directly. Publishing the main camera left them
+; inheriting a perspective transform, so Remix ray-traced them as world geometry floating in
+; front of the player and moving with the camera. This hands those draws an identity
+; (orthographic) transform, which Remix classifies as UI via rtx.orthographicIsUI.
+; 2026-08-14: user set this to 0 while playing - it fixed squeezed/mis-transformed character
+; geometry. Recorded here because the running game had 0 while this file still said 1, which
+; would have silently reverted it on the next restart.
+; NOTE this switch is the master gate for ALL demotion: with it at 0, skinnedAsUI and
+; proceduralAsUI have no effect either, because BeginScreenSpaceDraw returns early. To demote
+; HUD quads but keep characters ray-traced, use screenSpaceAsUI=1 with skinnedAsUI=0.
+screenSpaceAsUI=0
+
+; Keep skinned meshes (characters, pedestrians) out of the ray-traced world. Remix's vertex
+; capture only handles simple vertex shaders, and Saints Row skins through a 192-register
+; Bone_weights palette; the reconstruction fails badly enough that the player model lands in
+; front of the camera as a giant blue blob. With this on, characters rasterise normally
+; instead - they lose path-traced shading but stop blocking the view.
+; Set to 0 once a proper skinning solution exists (a Remix fork, or re-submitting skinned
+; geometry pre-transformed).
+skinnedAsUI=1
+
+; Particle and billboard shaders build camera-facing quads in the vertex shader; vertex
+; capture mangles them into screen-filling planes (e.g. a giant orange sheet with a flame
+; sliver). Demote them alongside skinned meshes.
+proceduralAsUI=1
+
+; Keep draws that use a camera other than the published one out of the ray-traced world.
+; Vertex capture reconstructs positions as clip * inverse(projection) * inverse(view) using
+; OUR matrices, so a draw submitted under a different projTM lands somewhere arbitrary.
+; Measured on the HO TRAFFIC save: 5.1% of draws. Principled, but it stops that 5% being path
+; traced - judge visually. NOTE: this measurement also disproved the theory that camera
+; mismatch was why skinned characters break; 95% of draws do match, so the skinning failure is
+; genuinely vertex capture, not the camera.
+demoteCameraMismatch=0
+
+; Keep the inferred-lighting light volumes (a sphere per point light, a cone per spot) out of
+; the ray-traced world. They are invisible helper geometry drawn into the irradiance buffer,
+; but Remix renders them as real objects.
+;
+; Confirmed 2026-08-14 to be what the user sees as "spheres around me": the mesh takes whatever
+; texture was last bound (character clothing/body maps), several overlap at once, and the count
+; matches the 11-17 lights injected per frame. Do NOT tag that texture - it belongs to the
+; character that owns it, so tagging removes the clothes, not the sphere.
+;
+; REWORKED 2026-08-14. The first version set the view AND projection to identity, which broke
+; light placement: the shim emits each light (SetLight, world-space position) and Remix resolves
+; it against the view matrix, so clobbering the view misplaced or dropped every light. That is
+; why enabling it produced "most lights not working / no direct light outdoors" while the log
+; still showed a healthy ~17 lights/frame - SetLight kept succeeding, so the counter looked fine.
+; It now overrides the PROJECTION ONLY, which is all Remix's orthographic-is-UI test reads, and
+; leaves the view matrix alone.
+;
+; What to check when this is on: the spheres should be gone AND "lights emitted" in sr3-rtx.log
+; must stay at 11-17/frame with lights still visibly illuminating the world. If the spheres go
+; but the lighting dies, this approach is wrong too - set it back to 0 and say so.
+demoteLightVolumes=0
+
+; demoteViewSpheres: REMOVED from the shim 2026-08-13, do not re-add.
+; The theory was that "ir_sr3carviewsphere_*" drew a reflection shell around the player. It
+; does not. Checked against re/shader_constants.csv: a Viewsphere* sampler appears in exactly
+; 128 pixel shaders across 46 files; ALL 128 also carry Tint_color and Base_Paint_Color, and
+; 19 of the files are skinned. These are car-paint and character-body MATERIALS that sample an
+; environment map - so the toggle was demoting cars and characters out of the ray-traced world,
+; which is exactly the "character transforms broken" regression the user reported.
+
+; SR3 composites its finished rasterised frame as a fullscreen quad. Demoting it to UI is NOT
+; enough - Remix then rasterises it as an overlay on top of the path-traced image, which looks
+; exactly like the old "everything is rasterised" bug welded to the camera. This drops those
+; draws entirely. Detected as: screen-space vertex shader whose pixel shader reads the engine's
+; G-buffer or light buffer (IR_GBuffer* / IR_LBuffer*).
+; If the HUD or parts of the image vanish, set this to 0 and report what disappeared.
+; 2026-08-14: user had this at 1 in the running game (12.3 skips/frame) while the file said 0.
+; Recorded so a restart does not silently revert it. It blacked out Shaundi's loft in an
+; earlier session, so if the scene goes dark this is the first thing to put back to 0.
+skipCompositePasses=0
+
+; ---------------------------------------------------------------------------------------
+; BISECTION SKIPS - drop a whole class of draws instead of demoting it, to reduce the
+; ray-traced scene to world geometry alone and rule each class in or out one at a time.
+; These DROP the draw, so the geometry leaves the game's own raster image too. All default 0.
+; None of them can ever apply to a draw carrying a light: EmitLight runs first and the skip is
+; refused for light volumes, so lighting survives with any combination of these.
+; Change ONE at a time and check the screen and the "draws dropped by class" counter.
+
+; Drop the light-volume mesh entirely - the spheres/cones around the player. This is the only
+; skip that can affect lighting, so it is the one to watch. EmitLight runs BEFORE the skip, so
+; the light parameters are harvested and SetLight is called regardless; the question is whether
+; Remix still registers a light whose draw never happens.
+;   spheres gone + lights still working  -> keep this on, problem solved
+;   spheres gone + scene goes dark       -> Remix needs the draw; lights must instead be
+;                                           re-emitted on ordinary world draws (bigger change)
+; Check "lights emitted" stays 10-80/frame AND that light actually falls on surfaces.
+; 2026-08-14: tested at 1. Light-volume meshes were confirmed dropped (108.8/frame) and the
+; spheres did NOT go away, so light volumes are not their source. Back to 0.
+skipLightVolumes=0
+
+; Drop draws submitted under a projection other than the one we publish - shadow-map and
+; reflection passes, ~22% of all draws. Vertex capture rebuilds them with OUR camera matrices,
+; so they land in the wrong place. PROVEN 2026-08-14: a capture contained the player mesh
+; twice, at x=+96.2 (correct) and x=-96.2 (a mirrored duplicate sitting on the camera), and
+; most other geometry appeared 2-3 times as well - 1454 mesh instances for one small scene.
+; This is the same idea as demoteCameraMismatch, which failed because demoting only deforms
+; a draw; this removes it.
+; Expect: fewer objects overall, spheres/floating panels gone. Watch for real world geometry
+; disappearing (that would mean legitimate draws are being caught) and check the log's
+; "draws dropped by class" lands near 22% of total draws.
+skipCameraMismatch=0
+
+; Collapse untextured clip-space quads to a single point for the duration of their draw, by
+; swapping in a tiny vertex shader and restoring the game's immediately after. The draw still
+; executes, so device state and frame pacing are untouched - unlike skipScreenSpace, which
+; froze the image by removing draws the runtime needed.
+; Target: the WHITE PLANE welded to the camera. Identified from a capture as a 2.0x2.0 quad
+; (clip space is -1..1, so 2x2 is fullscreen) sitting 1.0 units from the camera with NOTHING
+; bound at texture stage 0. Because it is untextured it has no hash, which is why adding
+; -0x5DD44DFBED334A45 to rtx.ignoreTextures did not remove it.
+; 2026-08-14: first attempt also required the screen-space class and matched NOTHING
+; (0.0/frame), which proves the plane's vertex shader does reference projTM - Remix classifies
+; it as world geometry even though it acts as a fullscreen quad. Now keyed purely on the
+; geometry signature: no texture at stage 0 AND at most 2 triangles.
+; Check "blank quads collapsed" in sr3-rtx.log: expect a small number, roughly 1-5/frame.
+; If real world geometry starts vanishing, or the HUD goes, set back to 0.
+cullBlankScreenQuads=0
+
+; Diagnostic: log the shape of the first 40 untextured draws (primitive count, vertex count,
+; shader class, whether the draw matches the published camera). Use this to identify the plane
+; from data instead of guessing. Costs nothing after 40 lines; safe to leave on for one run.
+logBlankDraws=0
+
+; Collapse draws whose PIXEL SHADER never samples texture stage 0.
+; 2026-08-14, the actual root cause of the flickering planes and the spheres. Remix reads
+; stage 0 as a surface's albedo. These draws never bind anything there, so the previous draw's
+; texture is still bound and Remix paints it on - which is why they cycle through unrelated
+; images (your character's clothing atlas, world textures) as the camera moves, why hovering
+; them in Game Setup offers nothing useful to tag, and why ignoring a single hash did nothing:
+; the texture is different every frame and each one legitimately belongs to something else.
+; Detected from the CTAB, not from bound-texture state - from D3D's side a texture IS bound,
+; which is why the earlier "no texture bound" test found only ONE draw in 18,000 frames.
+; Watch "blank quads collapsed" for the population size. If real world geometry disappears,
+; the test is too broad - set back to 0 and say what vanished.
+cullStaleAlbedoDraws=0
+
+; ---------------------------------------------------------------------------------------
+; GEOMETRY RE-SUBMISSION PROJECT - phase 1 (diagnostic only, changes nothing on screen).
+; The plan: stop relying on Remix reconstructing geometry from vertex-shader output, and
+; instead build plain fixed-function triangles ourselves - world-space positions, one honest
+; UV set, the real diffuse at stage 0 - then submit them with DrawIndexedPrimitiveUP and
+; collapse the game's original draw. That replaces guesswork with a whitelist and fixes wrong
+; UVs, stale albedo, mirrored duplicates and broken skinning through one mechanism.
+;
+; This switch dumps the vertex declaration of the first 30 real world-geometry draws: field
+; offsets and types for position/normal/uv/blend weights/blend indices, plus the stream stride.
+; Misreading a declaration produces silent garbage, so these numbers get checked before any
+; code depends on them.
+logGeometry=1
+
+; Collapse the engine's fullscreen composite quads - THE WHITE PLANE welded to the camera.
+; Identified 2026-08-15 by reading the vertex array at the call site: all 57 DrawPrimitiveUP
+; draws per frame are 2 triangles spanning exactly 0..1280 x 0..720 in screen pixels (the
+; render resolution), from one call site (0x49D60A), one vertex shader, one render target.
+; Texture-based removal cannot work: that render target's hash was added to rtx.ignoreTextures
+; and the plane stayed, because it is the GEOMETRY being ray-traced, not the texture sampled.
+; Matched purely on geometry: 2 prims whose bounds equal the back buffer. Collapsed with the
+; degenerate vertex shader rather than skipped, so the draw still executes - dropping draws is
+; what froze the image when skipScreenSpace was tried.
+; Watch 'blank quads collapsed' in sr3-rtx.log: expect about 57/frame.
+; If the screen goes black or the HUD vanishes, set back to 0 - these are the engine's
+; post-process passes and something downstream may depend on them.
+; 2026-08-15: TESTED AND REVERTED TO 0. Its only effect was blacking out the intro videos
+; and menu background - those are the ONLY fullscreen composite quads the engine submits via
+; DrawPrimitiveUP. During gameplay the UP draws are HUD elements and particle billboards
+; (footprints like 30x35 at screen centre, or 2444x509 with negative coords), and
+; "blank quads collapsed" stayed at 0.0/frame. The camera-welded plane is therefore NOT a UP
+; draw - it comes from a vertex-buffer draw.
+cullFullscreenQuads=0
+
+; ---------------------------------------------------------------------------------------
+; FFP CONVERSION - the approach proven by BRAGme/sr2-rtx-remix-proxy on Saints Row 2 (same
+; studio, same engine lineage, same problem). Remix path-traces FIXED-FUNCTION geometry
+; natively; everything else it must RECONSTRUCT from vertex-shader output, and that
+; reconstruction is the root of nearly every defect in this project: mis-scaled short2 UVs,
+; meshes duplicated 2-3x, quads landing on the camera, stale albedo.
+;
+; Each qualifying world draw is re-issued as fixed function: null both shaders, apply
+; world/view/projection via SetTransform, bind the real diffuse to stage 0, disable stages
+; 1-7, draw, restore. No reconstruction, so nothing can land in the wrong place.
+;
+; NOT converted: skinned meshes (they transform through the c52 bone palette so objTM is
+; meaningless - the SR2 proxy skips them too), screen-space quads, and light volumes.
+; Watch "FFP converted" in sr3-rtx.log. Expect a large fraction of the ~1800 indexed
+; draws/frame. Cost: ~20 extra state calls per converted draw, so expect a framerate hit.
+ffpConvert=1
+
+; Diagnostic for the camera-welded plane. Locks stream 0 on draws of 2 triangles or fewer
+; and logs their actual vertex positions (24 lines max, then silent). The plane is known
+; NOT to be a DrawPrimitiveUP draw, so it must come from a vertex buffer; this reads the
+; buffer at the source rather than inferring from a capture, which is what finally worked
+; for the UP quads. Locking mid-frame can stall, so leave this off except when hunting.
+logSmallDraws=1
+
+; ---------------------------------------------------------------------------------------
+; PASS-LEVEL BISECTION. The engine renders through several distinct render targets: the
+; inferred-lighting depth/DSF prepass, the low-res light buffer, the material pass, shadow
+; maps, reflections, the post chain. Those are real engine passes, not shader heuristics,
+; which makes them a sounder axis to bisect along than anything tried so far.
+; NOTE this does NOT separate characters from buildings - those are draws into the same
+; targets and are distinguishable only by shader.
+;
+; The log lists every target as "render target #N WxH format=F", then reports draws per
+; target per frame. Set collapseTarget to one of those indices to collapse every draw in
+; that pass (via the degenerate vertex shader, so the draw still executes) and see what
+; disappears. -1 = off.
+; 2026-08-15 inventory (43 targets, measured in-street):
+;   #22 1280x720 G16R16   592.8 draws/frame  depth/DSF prepass
+;   #31 1280x720 RGBA16F  502.3 draws/frame  main material pass
+;   #26  512x288 RGBA16F  105.9 draws/frame  LIGHT BUFFER (0.4x res, inferred lighting)
+;   #32/#25 1280x720      39.6/14.7          composite / transparency
+;   #27-29 400x288        2.0 each           reflections
+;   #35-39 64x64..1x1 R32F                   auto-exposure luminance chain
+;   #0  1280x720 X8R8G8B8  1.0               final blit
+;
+; FIRST TEST: collapseTarget=22. The depth prepass draws the whole world (593/frame) and the
+; material pass draws it AGAIN (502/frame). Remix cannot tell a prepass from real geometry, so
+; it ray-traces both - which is why captures held 2-3 copies of every mesh, including the
+; player at mirrored x=+96.2 and x=-96.2. Collapsing the prepass should leave one copy.
+; Watch for: fewer duplicate meshes, spheres/planes possibly reduced. If the world goes dark
+; or untextured, the material pass depends on the prepass output - revert to -1.
+; 2026-08-15 TEST 1 - collapseTarget=22 (depth prepass): MOST OF THE WORLD WENT INVISIBLE.
+; So the geometry Remix renders comes from the PREPASS, not the material pass - the opposite
+; of what I predicted. Character and spheres stayed visible, so they arrive via another pass.
+; TEST 2 - collapseTarget=31 (material pass, 502 draws/frame): if #22 supplies the visible
+; world, then #31 is the duplicate copy, and collapsing it should keep the world while
+; removing the doubled geometry seen in captures. If the world vanishes again, both passes
+; contribute and neither can be collapsed wholesale - go back to -1.
+; 2026-08-15 TEST 2 - collapseTarget=31 (material pass): THE SPHERES DISAPPEARED and the
+; world still rendered path-traced. That identifies the spheres as material-pass geometry,
+; after light volumes, characters, camera-mismatch duplicates and the depth prepass were all
+; ruled out. The white plane survived, so it is separate.
+; BUT Remix crashed: ACCESS_VIOLATION reading 0x20 inside .trex/d3d9.dll (+0x1fe674), a null
+; dereference. Collapsing 502 draws/frame to zero-area triangles is the likely trigger -
+; degenerate geometry at scale, from which Remix builds acceleration structures.
+; So collapsing is off, and the same pass is dropped instead: Remix then receives nothing at
+; all for it and has no degenerate input to choke on.
+collapseTarget=-1
+
+; Drop every draw whose render target is this index (-1 = off). Same pass selection as
+; collapseTarget but removes the draw rather than degenerating it. Preferred after the crash.
+; Render targets to DROP, comma-separated (empty = none). Indices from the "render target #N"
+; lines in the log. Dropping rather than collapsing: collapsing 502 draws/frame to zero-area
+; triangles crashed the Remix runtime (null deref in d3d9.dll).
+;
+;   31 = main material pass. Dropping it REMOVED THE SPHERES around the player and the world
+;        still renders (geometry reaches Remix via the depth prepass #22 instead).
+;   32 = composite / transparency, 39.6 draws/frame.
+;   25 = composite, 14.7 draws/frame.
+;
+; Capture 14:55 shows 13 quads glued to the camera at distance ~1.0, extent (0.31,0.70,1.22) -
+; a 1.2-unit quad one unit away fills the screen, which is the plane(s) blocking the view.
+; Their materials include mat_A22BB20412CCB5BB (the white 1280x720 render target) and several
+; with NO material at all, which Remix shades flat - hence one white plane and one black one.
+; Those are post-process quads, so the composite targets are the next thing to drop.
+; 2026-08-15: cleared. Pass-skipping is superseded by ffpConvert. It also had two flaws:
+; indices are only valid for one graphics configuration, and dropping the material pass left
+; the world rendering from the DEPTH PREPASS - which binds no albedo, hence the yellow/green
+; untextured look in every screenshot since.
+skipTargets=
+
+; Characters and pedestrians (432 skinned shaders). Set to 1 to see the world with no people.
+; 2026-08-14: tested at 1 - characters vanished but the spheres did NOT, ruling out character
+; geometry as their source.
+skipSkinned=0
+
+; Particles and billboards.
+skipProcedural=0
+
+; Fullscreen / HUD quads (vertex shaders that never reference projTM), plus fixed-function
+; draws. Aggressive: the engine's own composite lives in this class, so expect a big change.
+;
+; 2026-08-14: set to 1 to remove the WHITE PLANE welded to the game camera. Confirmed with
+; Remix's free camera: the plane stays pinned to the game camera while the viewer moves, which
+; is the signature of a clip-space quad being handed our perspective camera and placed in the
+; world. Demoting this class is not an option - that is screenSpaceAsUI, which is off because
+; demotion deformed characters. Skipping removes the draw instead.
+; Expect the HUD/minimap to disappear too (same class). If the whole screen goes black instead,
+; set this back to 0 and also try skipCompositePasses=0.
+;
+; 2026-08-14: TESTED AT 1 AND REVERTED. The image froze - "repeats the last 3 frames, like the
+; camera hangs and the render freezes" - at most angles. Cause not yet established, but this
+; class is too broad: it also catches every FIXED-FUNCTION draw (null vertex shader), because
+; g_currentVSClass defaults to VS_SCREEN when no shader is bound. Dropping those evidently
+; removes something the runtime needs to advance a frame. If this is retried, split
+; fixed-function into its own switch first and test the two halves separately.
+skipScreenSpace=0

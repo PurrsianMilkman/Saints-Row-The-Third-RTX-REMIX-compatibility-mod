@@ -1,0 +1,230 @@
+sr3-rtx loaded (pid 30576) - FFP conversion, ported from sr2-rtx-remix-proxy
+settings: ffp=1 convertSkinned=0 perspectiveOnly=1 skipDepthOnly=1 finiteFar=1(far=5000) rankAlbedo=1 excludeRTAlbedo=1 injectLights=1 uvScale=0.00000
+CreateDevice hook installed
+CreateDeviceEx hook installed
+CreateDeviceEx -> hooking device (backbuffer 1280x720)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+light shader: directional (pos=c0 dir=c-1 color=c2 info=c-1 spot=c-1)
+vertex layout #1: elems=3 uv=float2 normal=0 color=1 skinned=0 positionT=0
+frame 60 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  no camera 0  other 0  (per frame)
+    albedo: moved off stage 0 0/frame, blanked 0/frame | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+frame 600 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  no camera 0  other 0  (per frame)
+    albedo: moved off stage 0 0/frame, blanked 0/frame | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+frame 1200 | draws 0/frame | FFP converted 0/frame (0.0%) | far substitutions 0/frame
+    not converted: screen-space 0  skinned 0  depth-only 0  ortho 0  no camera 0  other 0  (per frame)
+    albedo: moved off stage 0 0/frame, blanked 0/frame | RT textures known 55 | lights 0.0/frame (24 shaders)
+    camera 0.0 0.0 0.0 | distinct cameras this frame 0 (max 0) | transform writes 0/frame | redundant state calls dropped 0/frame
+vertex layout #2: elems=2 uv=float2 normal=0 color=0 skinned=0 positionT=0
+vertex layout #3: elems=12 uv=short2 normal=1 color=0 skinned=0 positionT=0
+camera: pos 96.3 147.7 36.1 | proj _11=1.6085 _22=2.8594 _33=1.00003 _43=-0.15 (aspect 1.778)
+short2 UV range #1: u 0..0  v 1024..1024  (verts=121 stride=24 off=16)
+short2 UV range #2: u 0..0  v 1024..1024  (verts=180 stride=24 off=16)
+short2 UV range #3: u 0..1023  v 0..1023  (verts=4 stride=24 off=16)
+short2 UV range #4: u 0..1023  v 0..1023  (verts=4 stride=24 off=16)
+vertex layout #4: elems=12 uv=short2 normal=1 color=0 skinned=0 positionT=0
+short2 UV range #5: u -701..1695  v -90..1991  (verts=3931 stride=24 off=20)
+short2 UV range #6: u -13822..14846  v -13823..14847  (verts=1369 stride=24 off=20)
+vertex layout #5: elems=13 uv=short2 normal=1 color=0 skinned=0 positionT=0
+short2 UV range #7: u -6681..7705  v -6655..7679  (verts=770 stride=28 off=20)
+short2 UV range #8: u -28192..29216  v -28192..29216  (verts=317 stride=28 off=20)
+vertex layout #6: elems=11 uv=short2 normal=1 color=0 skinned=0 positionT=0
+short2 UV range #9: u -13822..14846  v -13823..14847  (verts=1369 stride=24 off=20)
+short2 UV range #10: u -13822..14846  v -13823..14847  (verts=1369 stride=24 off=20)
+short2 UV range #11: u -6859..8736  v 6..1021  (verts=315 stride=20 off=16)
+short2 UV range #12: u 6..1014  v 5..1016  (verts=261 stride=20 off=16)
+vertex layout #7: elems=7 uv=short2 normal=0 color=0 skinned=0 positionT=0
+vertex layout #8: elems=8 uv=? normal=1 color=1 skinned=0 positionT=0
+vertex layout #9: elems=10 uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #10: elems=13 uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #11: elems=6 uv=short2 normal=1 color=1 skinned=0 positionT=0
+vertex layout #12: elems=2 uv=float4 normal=0 color=0 skinned=0 positionT=0
+vertex layout #13: elems=15 uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #14: elems=14 uv=short2 normal=1 color=0 skinned=1 positionT=0
+vertex layout #15: elems=6 uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #16: elems=3 uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #17: elems=3 uv=float2 normal=0 color=1 skinned=0 positionT=0
+vertex layout #18: elems=1 uv=? normal=0 color=0 skinned=0 positionT=0
+vertex layout #19: elems=11 uv=? normal=1 color=0 skinned=0 positionT=0
+vertex layout #20: elems=14 uv=short2 normal=1 color=0 skinned=0 positionT=0
+vertex layout #21: elems=7 uv=float3 normal=0 color=1 skinned=0 positionT=0
+frame 1800 | draws 790/frame | FFP converted 558/frame (70.6%) | far substitutions 558/frame
+    not converted: screen-space 6  skinned 41  depth-only 181  ortho 0  no camera 0  other 4  (per frame)
+    albedo: moved off stage 0 42/frame, blanked 289/frame | RT textures known 55 | lights 3.6/frame (24 shaders)
+    camera 96.2 147.7 35.2 | distinct cameras this frame 3 (max 3) | transform writes 11/frame | redundant state calls dropped 11147/frame
+frame 2400 | draws 1632/frame | FFP converted 1150/frame (70.5%) | far substitutions 1150/frame
+    not converted: screen-space 13  skinned 87  depth-only 373  ortho 0  no camera 0  other 7  (per frame)
+    albedo: moved off stage 0 87/frame, blanked 597/frame | RT textures known 55 | lights 7.5/frame (24 shaders)
+    camera 96.2 147.7 35.2 | distinct cameras this frame 3 (max 3) | transform writes 23/frame | redundant state calls dropped 22998/frame
+camera: pos 96.5 147.1 26.9 | proj _11=1.5919 _22=2.8300 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.0 147.0 26.6 | proj _11=1.5756 _22=2.8010 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.6 146.9 26.2 | proj _11=1.5591 _22=2.7717 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.4 146.9 25.7 | proj _11=1.5442 _22=2.7452 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.3 146.9 25.2 | proj _11=1.5296 _22=2.7192 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.2 147.0 24.7 | proj _11=1.5146 _22=2.6925 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.1 147.0 24.1 | proj _11=1.4998 _22=2.6663 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.0 147.1 24.0 | proj _11=1.4854 _22=2.6407 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 94.9 147.3 23.8 | proj _11=1.4708 _22=2.6146 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 94.7 147.7 23.4 | proj _11=1.4567 _22=2.5896 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 94.7 147.8 22.9 | proj _11=1.4423 _22=2.5641 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 94.9 147.8 22.4 | proj _11=1.4284 _22=2.5394 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.2 147.5 22.0 | proj _11=1.4152 _22=2.5159 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.5 147.1 21.5 | proj _11=1.4007 _22=2.4902 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.8 146.6 21.0 | proj _11=1.3878 _22=2.4671 _33=1.00003 _43=-0.15 (aspect 1.778)
+vertex layout #22: elems=9 uv=float2 normal=0 color=1 skinned=0 positionT=0
+camera: pos 96.0 146.4 20.5 | proj _11=1.3745 _22=2.4435 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.0 146.4 20.0 | proj _11=1.3611 _22=2.4197 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.9 146.3 19.4 | proj _11=1.3479 _22=2.3962 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 95.9 146.3 18.8 | proj _11=1.3350 _22=2.3732 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.0 146.3 18.2 | proj _11=1.3220 _22=2.3502 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.0 146.2 17.7 | proj _11=1.3096 _22=2.3282 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.1 146.2 17.1 | proj _11=1.2991 _22=2.3095 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.9 146.7 5.5 | proj _11=1.3167 _22=2.3408 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.9 146.3 4.9 | proj _11=1.3350 _22=2.3733 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 146.0 4.5 | proj _11=1.3503 _22=2.4006 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 145.7 4.1 | proj _11=1.3638 _22=2.4246 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 145.4 3.7 | proj _11=1.3773 _22=2.4485 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 145.1 3.3 | proj _11=1.3898 _22=2.4707 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 144.7 2.9 | proj _11=1.4033 _22=2.4948 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 144.4 2.5 | proj _11=1.4166 _22=2.5184 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 144.0 2.2 | proj _11=1.4306 _22=2.5432 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.4 143.8 1.8 | proj _11=1.4434 _22=2.5660 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 143.8 1.7 | proj _11=1.4320 _22=2.5457 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 143.9 1.1 | proj _11=1.4205 _22=2.5252 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.3 144.0 0.2 | proj _11=1.4093 _22=2.5053 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.3 144.0 255.3 | proj _11=1.3989 _22=2.4868 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.3 144.0 254.4 | proj _11=1.3870 _22=2.4657 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.3 144.1 253.4 | proj _11=1.3754 _22=2.4451 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.4 144.1 252.5 | proj _11=1.3635 _22=2.4239 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.4 144.2 251.5 | proj _11=1.3521 _22=2.4036 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 144.2 250.7 | proj _11=1.3420 _22=2.3858 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 144.3 249.7 | proj _11=1.3302 _22=2.3648 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 144.3 248.8 | proj _11=1.3186 _22=2.3441 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 144.3 247.8 | proj _11=1.3074 _22=2.3242 _33=1.00003 _43=-0.15 (aspect 1.778)
+frame 3000 | draws 2145/frame | FFP converted 1519/frame (70.8%) | far substitutions 1519/frame
+    not converted: screen-space 17  skinned 114  depth-only 485  ortho 0  no camera 0  other 10  (per frame)
+    albedo: moved off stage 0 118/frame, blanked 781/frame | RT textures known 55 | lights 9.7/frame (24 shaders)
+    camera 96.8 144.4 237.1 | distinct cameras this frame 3 (max 3) | transform writes 28/frame | redundant state calls dropped 30370/frame
+camera: pos 96.9 141.4 228.5 | proj _11=1.3216 _22=2.3495 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.9 140.8 229.6 | proj _11=1.3067 _22=2.3230 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.9 140.7 230.0 | proj _11=1.2906 _22=2.2944 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 140.5 230.3 | proj _11=1.2747 _22=2.2660 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 140.3 230.2 | proj _11=1.2589 _22=2.2380 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 140.0 230.1 | proj _11=1.2444 _22=2.2122 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 139.8 229.9 | proj _11=1.2306 _22=2.1876 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 139.5 229.7 | proj _11=1.2168 _22=2.1632 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 139.2 229.6 | proj _11=1.2032 _22=2.1389 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 138.9 229.4 | proj _11=1.1895 _22=2.1146 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 138.6 229.2 | proj _11=1.1769 _22=2.0922 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 138.4 229.0 | proj _11=1.1648 _22=2.0707 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 138.1 228.8 | proj _11=1.1529 _22=2.0495 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 137.8 228.6 | proj _11=1.1411 _22=2.0286 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.8 137.4 228.4 | proj _11=1.1297 _22=2.0083 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 137.1 228.2 | proj _11=1.1185 _22=1.9885 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 136.8 228.0 | proj _11=1.1081 _22=1.9699 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 136.5 227.8 | proj _11=1.0980 _22=1.9519 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 135.9 227.4 | proj _11=1.0785 _22=1.9173 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 135.2 227.0 | proj _11=1.0593 _22=1.8832 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 134.5 226.6 | proj _11=1.0407 _22=1.8501 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 133.8 226.1 | proj _11=1.0225 _22=1.8178 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.7 133.1 225.7 | proj _11=1.0063 _22=1.7889 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 132.4 225.2 | proj _11=0.9897 _22=1.7594 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 131.7 224.7 | proj _11=0.9752 _22=1.7336 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 131.0 224.3 | proj _11=0.9612 _22=1.7088 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 130.3 223.8 | proj _11=0.9480 _22=1.6852 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 129.6 223.3 | proj _11=0.9352 _22=1.6625 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 128.8 222.8 | proj _11=0.9226 _22=1.6401 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 128.1 222.3 | proj _11=0.9104 _22=1.6185 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 127.3 221.8 | proj _11=0.8987 _22=1.5976 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 126.5 221.2 | proj _11=0.8867 _22=1.5763 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 125.7 220.7 | proj _11=0.8756 _22=1.5566 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.5 124.9 220.2 | proj _11=0.8649 _22=1.5376 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 96.6 116.8 214.8 | proj _11=0.8548 _22=1.5195 _33=1.00003 _43=-0.15 (aspect 1.778)
+vertex layout #23: elems=7 uv=short2 normal=1 color=1 skinned=0 positionT=0
+vertex layout #24: elems=15 uv=short2 normal=1 color=0 skinned=1 positionT=0
+camera: pos 97.8 5.9 133.7 | proj _11=0.9775 _22=1.7377 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 97.9 6.3 134.0 | proj _11=1.0229 _22=1.8185 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.0 6.5 134.3 | proj _11=1.0712 _22=1.9043 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.2 6.8 134.7 | proj _11=1.1223 _22=1.9951 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.3 7.1 135.0 | proj _11=1.1771 _22=2.0925 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.4 7.3 135.3 | proj _11=1.2357 _22=2.1968 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.5 7.6 135.7 | proj _11=1.2988 _22=2.3089 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.7 7.9 135.9 | proj _11=1.3668 _22=2.4298 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.8 8.2 136.1 | proj _11=1.4405 _22=2.5608 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.8 8.3 136.4 | proj _11=1.5028 _22=2.6717 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.8 8.1 135.7 | proj _11=1.5154 _22=2.6939 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.7 8.0 135.2 | proj _11=1.5270 _22=2.7147 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.7 8.0 134.9 | proj _11=1.5382 _22=2.7346 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.7 7.9 134.6 | proj _11=1.5485 _22=2.7529 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.6 7.8 134.4 | proj _11=1.5591 _22=2.7717 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.6 7.7 134.1 | proj _11=1.5697 _22=2.7906 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.6 7.6 133.9 | proj _11=1.5805 _22=2.8098 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.6 7.6 133.7 | proj _11=1.5914 _22=2.8292 _33=1.00003 _43=-0.15 (aspect 1.778)
+camera: pos 98.6 7.4 133.5 | proj _11=1.6025 _22=2.8488 _33=1.00003 _43=-0.15 (aspect 1.778)
+frame 3600 | draws 2368/frame | FFP converted 1657/frame (70.0%) | far substitutions 1657/frame
+    not converted: screen-space 20  skinned 168  depth-only 514  ortho 0  no camera 0  other 9  (per frame)
+    albedo: moved off stage 0 143/frame, blanked 824/frame | RT textures known 55 | lights 9.5/frame (24 shaders)
+    camera 100.8 5.5 135.6 | distinct cameras this frame 3 (max 3) | transform writes 38/frame | redundant state calls dropped 33123/frame
+frame 4200 | draws 2667/frame | FFP converted 1795/frame (67.3%) | far substitutions 1795/frame
+    not converted: screen-space 22  skinned 285  depth-only 555  ortho 0  no camera 0  other 9  (per frame)
+    albedo: moved off stage 0 183/frame, blanked 868/frame | RT textures known 55 | lights 8.8/frame (24 shaders)
+    camera 100.8 5.5 135.6 | distinct cameras this frame 3 (max 3) | transform writes 63/frame | redundant state calls dropped 35896/frame
+frame 4800 | draws 2891/frame | FFP converted 1902/frame (65.8%) | far substitutions 1902/frame
+    not converted: screen-space 24  skinned 369  depth-only 588  ortho 0  no camera 0  other 8  (per frame)
+    albedo: moved off stage 0 214/frame, blanked 902/frame | RT textures known 55 | lights 8.4/frame (24 shaders)
+    camera 100.8 5.5 135.6 | distinct cameras this frame 3 (max 3) | transform writes 83/frame | redundant state calls dropped 38021/frame
+frame 5400 | draws 3026/frame | FFP converted 1960/frame (64.8%) | far substitutions 1960/frame
+    not converted: screen-space 25  skinned 424  depth-only 609  ortho 0  no camera 0  other 8  (per frame)
+    albedo: moved off stage 0 233/frame, blanked 918/frame | RT textures known 55 | lights 8.0/frame (24 shaders)
+    camera 103.7 4.5 146.1 | distinct cameras this frame 2 (max 3) | transform writes 94/frame | redundant state calls dropped 39181/frame
+frame 6000 | draws 3126/frame | FFP converted 2025/frame (64.8%) | far substitutions 2025/frame
+    not converted: screen-space 26  skinned 442  depth-only 624  ortho 0  no camera 0  other 9  (per frame)
+    albedo: moved off stage 0 235/frame, blanked 944/frame | RT textures known 55 | lights 8.8/frame (24 shaders)
+    camera 95.6 5.0 112.4 | distinct cameras this frame 3 (max 3) | transform writes 101/frame | redundant state calls dropped 40490/frame
+frame 6600 | draws 2983/frame | FFP converted 1922/frame (64.4%) | far substitutions 1922/frame
+    not converted: screen-space 27  skinned 429  depth-only 596  ortho 0  no camera 0  other 9  (per frame)
+    albedo: moved off stage 0 222/frame, blanked 897/frame | RT textures known 55 | lights 8.6/frame (24 shaders)
+    camera 100.5 4.5 107.3 | distinct cameras this frame 2 (max 3) | transform writes 99/frame | redundant state calls dropped 38431/frame
+frame 7200 | draws 2907/frame | FFP converted 1866/frame (64.2%) | far substitutions 1866/frame
+    not converted: screen-space 27  skinned 428  depth-only 578  ortho 0  no camera 0  other 8  (per frame)
+    albedo: moved off stage 0 213/frame, blanked 869/frame | RT textures known 55 | lights 8.5/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 100/frame | redundant state calls dropped 37297/frame
+frame 7800 | draws 2717/frame | FFP converted 1735/frame (63.8%) | far substitutions 1735/frame
+    not converted: screen-space 28  skinned 412  depth-only 535  ortho 0  no camera 0  other 8  (per frame)
+    albedo: moved off stage 0 198/frame, blanked 804/frame | RT textures known 55 | lights 7.9/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 96/frame | redundant state calls dropped 34681/frame
+frame 8400 | draws 2560/frame | FFP converted 1624/frame (63.4%) | far substitutions 1624/frame
+    not converted: screen-space 28  skinned 401  depth-only 500  ortho 0  no camera 0  other 7  (per frame)
+    albedo: moved off stage 0 185/frame, blanked 750/frame | RT textures known 55 | lights 7.5/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 93/frame | redundant state calls dropped 32459/frame
+frame 9000 | draws 2423/frame | FFP converted 1528/frame (63.0%) | far substitutions 1528/frame
+    not converted: screen-space 29  skinned 391  depth-only 468  ortho 0  no camera 0  other 7  (per frame)
+    albedo: moved off stage 0 173/frame, blanked 703/frame | RT textures known 55 | lights 7.1/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 90/frame | redundant state calls dropped 30534/frame
+frame 9600 | draws 2295/frame | FFP converted 1441/frame (62.8%) | far substitutions 1441/frame
+    not converted: screen-space 29  skinned 378  depth-only 441  ortho 0  no camera 0  other 7  (per frame)
+    albedo: moved off stage 0 163/frame, blanked 660/frame | RT textures known 55 | lights 6.7/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 86/frame | redundant state calls dropped 28805/frame
+frame 10200 | draws 2182/frame | FFP converted 1365/frame (62.5%) | far substitutions 1365/frame
+    not converted: screen-space 29  skinned 366  depth-only 416  ortho 0  no camera 0  other 6  (per frame)
+    albedo: moved off stage 0 154/frame, blanked 623/frame | RT textures known 55 | lights 6.4/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 82/frame | redundant state calls dropped 27276/frame
+frame 10800 | draws 2090/frame | FFP converted 1298/frame (62.1%) | far substitutions 1298/frame
+    not converted: screen-space 29  skinned 361  depth-only 395  ortho 0  no camera 0  other 6  (per frame)
+    albedo: moved off stage 0 146/frame, blanked 590/frame | RT textures known 55 | lights 6.2/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 81/frame | redundant state calls dropped 25945/frame
+frame 11400 | draws 2006/frame | FFP converted 1239/frame (61.8%) | far substitutions 1239/frame
+    not converted: screen-space 30  skinned 356  depth-only 376  ortho 0  no camera 0  other 6  (per frame)
+    albedo: moved off stage 0 139/frame, blanked 561/frame | RT textures known 55 | lights 6.0/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 79/frame | redundant state calls dropped 24757/frame
+frame 12000 | draws 1927/frame | FFP converted 1185/frame (61.5%) | far substitutions 1185/frame
+    not converted: screen-space 30  skinned 348  depth-only 358  ortho 0  no camera 0  other 6  (per frame)
+    albedo: moved off stage 0 133/frame, blanked 534/frame | RT textures known 55 | lights 5.7/frame (24 shaders)
+    camera 95.1 11.6 110.7 | distinct cameras this frame 3 (max 3) | transform writes 77/frame | redundant state calls dropped 23676/frame

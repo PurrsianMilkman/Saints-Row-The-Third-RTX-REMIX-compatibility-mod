@@ -1,0 +1,82 @@
+# Display options.
+# This file is rewritten whenever options are changed in the menu.
+# Toggle values can be true/false or 1/0. Everything else is a number.
+
+ResolutionWidth = 1280
+ResolutionHeight = 720
+RefreshRate = 144
+MSAA_Level = 0
+Fullscreen = false
+
+# Which monitor should be used in fullscreen mode.
+DisplayIndex = 0
+
+# Toggle whether resolution is verified before setting.
+# This can be used to run the game at any arbitrary resolution in a window.
+# However this will break fullscreen mode and Alt+Enter.
+VerifyResolution = true
+
+# Toggle v-sync in fullscreen.
+VSync = false
+
+# Preset is a number between 1 and 5 for low, medium, high, ultra-high, and custom.
+# Custom allows the rest of the settings below to be edited in the UI.
+Preset = 5
+
+# TextureDetailLevel toggles the use of high res textures. Currently ignored.
+TextureDetailLevel = 0
+
+# AnisoLevel is usually 0 (for trilinear filtering) or 1 through 16.
+AnisoLevel = 16
+
+# Lighting detail can be 1, 2, or 3 for low, high, and ultra-high.
+LightingDetail = 2
+
+# SSAO level can be 0, 1, 2 or 3 for off, accumulative SSAO, regular SSAO, and hi-res SSAO.
+SSAO_Level = 0
+
+# ShadowDetail is the shadow map resolution. 1024, 2048, and 4096 are default options,
+# but any power of two will work.
+# Zero for no shadows.
+ShadowDetail = 0
+
+# Scene detail controls the geometric detail of the scene. 1 through 3 for low, medium, high.
+# This includes LODs, view distance, and turning off certain scene elements.
+SceneDetail = 1
+
+# Reflections are 0, 1, or 2, for off, low, or high.
+Reflections = 0
+
+# MotionBlur can override motion blur off even when post process detail is up.
+MotionBlur = false
+
+# PostProcess can be 0, 1, or 2 for off, low, or high.
+# HDR bloom and tone mapping, basic DoF, and motion blur all come on at low,
+# God rays and diffusion depth of field come on at high.
+# DDoF is incompatible with lighting details other than 3.
+# If DDoF is enabled, bokeh DoF will come on automatically on DX11 level cards.
+PostProcess = 0
+
+# Toggles whether cutscenes are letter-boxed in the center monitor or
+# expand to fill all monitors in Eyefinity mode.
+LetterboxEyefinity = true
+
+# Toggles whether or not the game will auto-detect input devices when plugged in.
+InputDeviceAutoDetect = true
+
+# Extremely low framerate (less than two frames a second) could be due to low video memory.
+# * Resolution is the biggest factor in video memory usage.
+# * Lighting detail has a major effect on memory usage.
+#   It effects lighting quality slightly, but turning it to low will also turn off advanced depth of field.
+# * At high resolutions, anti-aliasing modes can result in high memory usage.
+# * Shadows and Ambient Occlusion have a minor effect on video memory usage.
+
+# Poor frame rate on low-end CPU’s can be aided by the following options.
+# * Scene detail has the biggest effect on CPU performance and visuals. The low setting here should be a last resort.
+# * Reflections can have an effect if they are turned off.
+# * Shadows will improve CPU performance if turned off, but will seriously affect visuals.
+
+# Poor frame rate on low-end GPU’s can be aided by the following options.
+# * The presets are geared toward GPU performance. Using auto-detect should choose settings appropriate for your GPU.
+# * Resolution and lighting detail have the biggest effect.
+# * Post processing has a major effect on GPU performance when set to high.
