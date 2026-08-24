@@ -29,10 +29,14 @@ bug report, attach it to the issue rather than committing it.
 
 ## The A/B proof
 
-`2026-08-13_menu_WITHOUT_asi_rasterized.png` and `2026-08-13_menu_WITH_asi_pathtraced.png` are the
-controlled pair behind the claim that this shim is what makes RTX Remix path-trace the game at
-all: identical scene, identical settings, the only variable being whether `sr3-rtx.asi` is loaded.
+The claim that this shim is what makes RTX Remix path-trace the game at all rests on a controlled
+A/B: identical scene, identical settings, the only variable being whether the conversion runs.
 
-The same result was later measured a second way, without screenshots: setting `ffp=0` makes the
-shim a passive observer, and with it the world is rasterised and Remix's capture button does
-nothing, because there is no ray-traced scene to capture.
+It is reproducible on your own machine rather than taken on trust. Set `ffp=0` in `sr3-rtx.ini`,
+which makes the shim a passive observer — it still loads, still logs, still injects lights, and
+converts nothing. The world is then **rasterised**: no path tracing, and Remix's capture button
+does nothing, because there is no ray-traced scene to capture. Set it back to `ffp=1` and the
+path-traced world returns.
+
+So the fixed-function conversion is not *contributing to* the ray-traced scene. It is the entire
+scene.

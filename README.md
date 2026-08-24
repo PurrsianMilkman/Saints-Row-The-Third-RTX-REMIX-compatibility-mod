@@ -5,11 +5,13 @@
 captured, and eventually re-authored with PBR assets.**
 
 Without this shim, Remix does not path-trace Saints Row: The Third at all. With it, the game is
-path traced — proven by a controlled A/B in [docs/evidence/](docs/evidence/).
+path traced.
 
-| without the shim | with the shim |
-|---|---|
-| ![rasterised](docs/evidence/2026-08-13_menu_WITHOUT_asi_rasterized.png) | ![path traced](docs/evidence/2026-08-13_menu_WITH_asi_pathtraced.png) |
+That is a measurement, not a claim: setting `ffp=0` in `sr3-rtx.ini` makes the shim a passive
+observer — it still logs, still injects lights, converts nothing — and with it the world is
+**rasterised**, with no path tracing at all. Remix's capture button does nothing, because there is
+no ray-traced scene to capture. The fixed-function conversion *is* the path-traced world, all of
+it. See [docs/evidence/](docs/evidence/).
 
 ---
 

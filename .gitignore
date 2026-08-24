@@ -28,3 +28,5 @@ docs/evidence/cloth/
 # Crash minidumps: a memory snapshot of SaintsRowTheThird.exe embeds the game's own code,
 # and can carry local paths. Attach these to an issue if needed, don't commit them.
 *.dmp
+# Screenshots are not published in this repository.
+docs/evidence/*.png
