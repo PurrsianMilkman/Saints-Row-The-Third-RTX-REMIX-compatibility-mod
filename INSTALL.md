@@ -17,6 +17,7 @@ sr3-rtx.asi
 sr3-rtx.ini
 rtx.conf
 dxvk.conf
+user.conf
 ```
 
 Run the game. Go to **Options > Display**.
@@ -33,6 +34,7 @@ sr3-rtx.asi
 sr3-rtx.ini
 rtx.conf
 dxvk.conf
+user.conf
 ```
 
 Then restore your `display.ini` backup.
