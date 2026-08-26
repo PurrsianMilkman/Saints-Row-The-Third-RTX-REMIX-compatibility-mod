@@ -37,7 +37,11 @@ Roughly in order of value:
    captured, because the constant probe's twelve slots fill with other materials first.
 4. **Player clothing colour.** The recipe is disassembled and written down in
    `docs/YOUR-INSTRUCTIONS.md`; it needs TEXCOORD1 reconciled against TEXCOORD0.
-5. **Performance.** Nothing has been optimised yet — functionality was the priority.
+5. **Shim time growing across a session** — ~24% to ~44% of frame time, with worst-case stalls
+   around 300 ms. It tracks skinned-geometry volume (211k → 354k skinned vertices/frame), so it
+   may be nothing but a busier district, but the stalls are visible and this is the largest open
+   problem after the sky and the HUD. Nothing has been optimised yet — functionality was the
+   priority.
 6. **Testing on other hardware and other copies of the game.** This has been developed against one
    GOG copy on one machine. Bug reports with `sr3-rtx.log` and `rtx-remix\logs\remix-dxvk.log`
    attached are useful even with no fix attached.

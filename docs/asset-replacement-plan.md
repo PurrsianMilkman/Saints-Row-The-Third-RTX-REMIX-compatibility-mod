@@ -178,3 +178,54 @@ prevented every replacement from loading).
 3. The hash-to-asset-name bridge, still the real bottleneck for bulk replacement. Try reproducing
    Remix's texture hash offline first; it turns the job into a script if it works.
 4. World replacement and POM, which need no new capability - only assets and fresh captures.
+
+---
+
+## Update, 2026-08-26 - a correction and two unblocked prerequisites
+
+### CORRECTION: "Remix cannot skin a replacement mesh" is WRONG
+
+The phase-4 claim that a static replacement would freeze a character in bind pose does not hold.
+Remix 1.5.2 ships:
+
+- `gpu_skinning`, `performSkinning`, `RtxGeometryUtils::dispatchSkinning`
+- full `UsdSkelBindingAPI` read paths (`GetJointIndicesPrimvar`, `CreateSkeletonRel`)
+- a `ReadBoneTransform` graph node - *"The mesh prim to read the bone transform from. Must be a
+  skinned mesh."*
+- a `skeletons/` directory in every capture
+- `rtx.limitedBonesPerVertex` - *"Limit the number of bone influences per vertex **for replacement
+  geometry**. D3D9 games were limited to 4, which is the default."*
+
+**So remastered characters with working animation AND live customisation are reachable without a
+fork.** This removed the strongest argument for forking dxvk-remix.
+
+### The catch, and it is a real one
+
+Remix skins draws that CARRY bones - `dispatchSkinning: draw call has bones but no blend weight
+buffer, cannot apply skinning`. We CPU-skin and submit pre-posed geometry with no bones, so Remix
+sees a static mesh each frame and has nothing to attach a skinned replacement to.
+
+The obvious route to supply them - D3D9 fixed-function indexed vertex blending - is **closed**:
+
+    MaxVertexBlendMatrices = 4, MaxVertexBlendMatrixIndex = 8
+
+Four influences per vertex is right; nine addressable matrices against SR3's 64 is not. So skinned
+character replacement needs another way to hand Remix the palette, and that is currently unsolved.
+Static world replacement is unaffected.
+
+### Unblocked
+
+- **USD reading.** `pxr` is already installed on this machine. Captures open directly; meshes,
+  instances, transforms, materials and lights are all enumerable. This is the tooling phase 2
+  needed for the hash-to-asset bridge - the "reproduce Remix's hash offline" route can now be
+  tested against real capture data rather than guessed at.
+- **The hash rule for replacements.** `indices,texcoords,geometrydescriptor` is stable across
+  animation AND discriminating between parts. `positions` churns because CPU skinning rewrites them
+  every frame; without `texcoords` parts sharing an index buffer collide.
+
+### Still blocking authoring
+
+Capture-off is now in place, so the scene no longer contains duplicate geometry - that blocker is
+cleared. But **car parts and NPC heads are still rendered wrong** (see YOUR-INSTRUCTIONS "OPEN"),
+and authoring replacements against a scene with misplaced parts is authoring against the wrong
+thing. Fix that first.

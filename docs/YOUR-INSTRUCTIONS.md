@@ -1,31 +1,74 @@
 # Start here
 
-*Rewritten 2026-08-17 as a full handoff. Everything needed to resume is on disk.*
+*Rewritten 2026-08-17 as a full handoff. Current-state sections updated 2026-08-26.*
 
 ## Resuming
 
 Start Claude Code in `D:\SR3RTXREMIXCOMP` and say:
 
-> Continue the SR3 RTX Remix project. Read docs/YOUR-INSTRUCTIONS.md, docs/sr2-fork.md and the
-> last two sessions of docs/worklog.md before doing anything.
+> Continue the SR3 RTX Remix project. Read docs/YOUR-INSTRUCTIONS.md and the last session of
+> docs/worklog.md before doing anything.
+
+**State in one paragraph, 2026-08-26.** Vertex capture is OFF and working - the blocker that
+dominated four sessions is solved by answering the game's own occlusion queries (`forceOcclusionVisible`),
+because SR3 reads its depth prepass back for GPU culling and capture-off is a global skip. That also
+let `hiddenPassMode=2` become viable, deleting the marker subsystem and the magenta entirely. Lights
+are fixed (`d3d9.maxEnabledLights = 64` in `dxvk.conf`). **The open bug is that knocked-off car parts
+and car glass are rendered in the wrong place and move with player/NPC animation, and NPC heads are
+wrong.** It requires our .asi - the vanilla game is clean, and so is Remix with the shim disabled.
+Five fixes have been attempted and reverted; our arithmetic is verified correct against the device
+and the disassembly. **Read "The costliest failure of this project" before proposing a sixth.**
+
+**The drift is FIXED as of 2026-08-26** - confirmed by the user and by `FOREIGN BONE` and
+`DISPLACED SKIN` both going to zero reports, with `NO BONE DECL: 15.3 draws/frame` showing the gate
+doing the work. The
+shim decided "this draw is skinned" from the vertex DECLARATION. The game decides it from the
+SHADER, and car body/glass ship two variants over the same mesh and the same declaration:
+`ir_sr3cardiffusespec_g_v` declares `dcl_blendindices` and reads `c52[v.x*3]`; the `_s` variant
+declares neither and places by `objTM` alone. On the static variant `boneReg` came back -1 and the
+code **fell back to c52**, posing a detached part from whatever palette the last character draw had
+left there. `skinRequireBoneDecl=1` gates skinning on `dcl_blendindices`. `skinRequireBoneDecl=0`
+restores the old behaviour with no rebuild, if this ever needs re-proving.
+
+The ring is **eliminated**: `SKIN RING LOCK: 0.01 ms/frame discarding` and `0.02 wraps/frame`, so
+neither its cost nor its recycling explains anything. It did need raising from 8 MB (it genuinely
+wrapped) - see "The skinning ring" below.
 
 | File | What it holds |
 |---|---|
-| **this file** | Current state, what works, dead ends, next step. **Read "The hiding problem" first** - it corrects a conclusion that stood for three days and cost nine runs |
+| **this file** | Current state, what works, dead ends, next step. **Read "Current state" and "The costliest failure of this project"** |
+| `docs/worklog.md` | Session history, run by run. **The 2026-08-23..26 entry is the current front** |
+| `re/shader_constants.csv` | 52,990 named constants across 7,276 shaders - **query it, don't re-derive.** It settles "which register holds X" in seconds |
+| `re/shaders/` | 1,693 `.fxo_pc` files. `tools/fxo_disasm.py <file> <index>` disassembles them - **this is how the vehicle/character bone difference was found** |
+| **`<game>/rtx-remix/logs/remix-dxvk.log`** | **Remix's own log. READ IT FIRST** - it names what it refused and why, and confirms whether a setting was parsed |
+| `<game>/.trex/d3d9.dll` | Remix's renderer. `retools.search strings` on it is a searchable manual for every option |
+| `<game>/rtx-remix/captures/*.usd` | Remix captures. **`pxr` is installed - open them directly** (see "Reading Remix captures") |
 | `docs/sr2-fork.md` | The design being implemented and what is still to port |
-| `docs/worklog.md` | Session history, run by run. **Runs 55-67 are the current front** |
+| `docs/asset-replacement-plan.md` | Remastered asset replacement. **Note the 2026-08-26 correction: Remix DOES skin replacement meshes** |
 | `docs/engine-map.md` | The exe's D3D9 call sites (unused by the shim now, still valid) |
-| `re/shader_constants.csv` | 52,990 named constants across 7,276 shaders - query it, don't re-derive |
-| `re/shaders/` | 1,693 `.fxo_pc` files. `tools/fxo_disasm.py <file> <index>` disassembles them |
-| `docs/evidence/` | Every run's log, the frame dump, captures, the pre-fork source |
-| **`<game>/rtx-remix/logs/remix-dxvk.log`** | **Remix's own log. READ IT FIRST on any "Remix does not show X" question** - it names what it refused and why. It is what found the texcoord format bug after three correct shim-side disproofs |
-| `<game>/.trex/d3d9.dll` | Remix's renderer. `retools.search strings` on it is a searchable manual: every option name, its documentation, and the full `VK_FORMAT_*` table in enum order |
-| `docs/asset-replacement-plan.md` | **The plan for Remastered asset replacement** - the two substitution points, what is already unblocked, and the two cheap experiments that decide the rest |
-| `docs/vibe-re-tools.md` | The Vibe-RE toolkit in `tools/vibe-re/` - static/dynamic RE, D3D9 tracer, and a `dx9-ffp-port` skill describing this exact task |
+| `docs/vibe-re-tools.md` | The Vibe-RE toolkit in `tools/vibe-re/` |
 | `src/sr3-rtx/` | The shim + `build.ps1` |
-| `configs/` | Versioned `sr3-rtx.ini` and `rtx.conf` |
+| `configs/` | Versioned `sr3-rtx.ini`, `rtx.conf`, `dxvk.conf`, `user.conf` |
 
-Backup of the whole project (minus the 11G game dir): `D:\SR3RTXREMIXCOMP-backup-2026-08-16`.
+**Deployed and hash-verified 2026-08-26** (masters in `build/` and `configs/`):
+
+    sr3-rtx.asi  6beeadac4395526ac5e0c88f482ffee6
+    sr3-rtx.ini  25a85afe2c47c4afbcc90a492d0647b7
+    rtx.conf     0872ecaa9ff251c4b34a71759cb7ca8d
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5
+    user.conf    8b361562e85c86ab88ab2fe61495b335
+
+    ffp=1  convertSkinned=1  hiddenPassMode=2  forceOcclusionVisible=1  skinRigidSingleBone=1
+    skinRingMB=24  skinRequireBoneDecl=1  generateCloth=1  clothAlbedoPercent=200
+    dedupSkinned=0  rejectStaleBones=0  clampBonesToUpload=0  paletteSetupScope=0  vehicleBonesOff=0
+    rtx.useVertexCapture = False
+    rtx.geometryAssetHashRuleString = indices,texcoords,geometrydescriptor
+    d3d9.maxEnabledLights = 64
+
+**Hash-verify these before the user runs.** `skinRigidSingleBone` must stay 1 - at 0 every vehicle
+body/glass/panel draw is refused and the cars do not render at all.
+
+Backups: `D:\SR3RTXREMIXCOMP-backup-2026-08-21` (project + live game-dir state + captures).
 
 ---
 
@@ -59,35 +102,117 @@ about what ELSE reaches Remix besides our converted geometry.
 
 ### OPEN
 
-**Everything below now hangs off one decision: `rtx.useVertexCapture` must be turned OFF** (see
-"The hiding problem"), and three things block that.
+**`rtx.useVertexCapture = False` is now IN PLACE and working** - the blocker that dominated
+sessions 18-21 is solved (see "Capture-off: how it was unblocked"). What remains:
 
-1. **Stability - the blocker.** With capture off, objects enter the view frustum and are dropped
-   immediately. Cause unmeasured. Ruled out: `antiCulling.object` (verified parsed, no change),
-   `rtx.enableCulling` (front/back-face only), de-instancing converted draws (no change, reverted).
-   The run-67 probe measures the leading suspect: converted instanced draws take their world matrix
-   from a **snooped copy** of the game's instance buffer, refreshed at **0.7 writes a frame against
-   ~377 instanced draws**, and nothing has ever checked whether the bytes read were actually
-   written.
-2. **The UI.** Shader-drawn, never converted, so the HUD vanishes with capture off. Already
-   imperfect with capture on - lingering UI planes mid-air at some angles.
-3. **The sky.** 50 draws a frame, the only pass-through population. Converting it needs care: a
-   343-vertex dome one unit from the camera, and treating it as ordinary lit geometry is what
-   produced the black sky in session 14.
+1. **Car parts and glass drift - THE open bug.** A knocked-off bumper or car window is rendered in
+   the wrong place and moves in rhythm with player or NPC animation, varying with what is on
+   screen. The mesh is correct and undeformed; the game's own physics position does **not** move.
+   **It requires our .asi** - absent in the vanilla game AND absent with the shim disabled while
+   Remix runs. Five fixes attempted and reverted; our arithmetic is verified correct against the
+   device (649,925 constant comparisons, 0 mismatches) and against the disassembly. Full account in
+   the worklog under "The car-part drift". Current suspect: the CPU-skinning ring buffer.
+2. **NPC heads are wrong** - same shape of defect (right mesh, wrong owner), likely the same cause.
+3. **The UI.** Shader-drawn, never converted, so the HUD is absent with capture off. `Disp::Hide`
+   cannot fix it - it sets `D3DTS_PROJECTION`, which **Remix never reads for a shader-driven
+   draw**, and with capture off the draw is skipped before any UI classification. The fix is named
+   in the code: convert HUD quads to fixed function so `orthographicIsUI` fires.
+4. **The sky.** ~135 draws a frame (not the 50 recorded earlier), deliberately passed through, so
+   absent with capture off. Converting it needs care: a 343-vertex dome one unit from the camera.
+5. **Hair renders white.** `Hair_Spec_Color1/2` never captured - the probe's slots fill first.
+6. **The player's clothing colour** - a different recipe needing TEXCOORD1 reconciled with TEXCOORD0.
+7. **~12 draws a frame still have unreadable texcoords** - DYNAMIC source buffers, needs a per-draw ring.
 
-Also open, and independent of the above:
+## Capture-off: how it was unblocked, 2026-08-23
 
-4. **Hair renders white.** Neither of its textures holds the colour - the `Dob_Map` is white strands
-   on a green field and the `Diffuse_Map` is smooth directional data - and every character colour
-   constant measures (1,1,1). `Hair_Spec_Color1/2` are the remaining candidates and have never been
-   captured, because the probe's twelve slots fill with other materials first.
-5. **The player's clothing colour.** A different recipe from the NPC one:
-   `albedo = Diffuse_Map * Diffuse_Color * layer(pattern)` with the pattern on a SECOND texture
-   coordinate set. Folding them into one texture needs TEXCOORD1 to be a fixed transform of
-   TEXCOORD0; the probe that measures this has never fired.
-6. **~11 draws a frame still have unreadable texcoords** - their source vertex buffer is DYNAMIC,
-   so the per-buffer UV conversion cannot cache them. Needs a per-draw ring.
-7. **Windshield and door glass move with the camera.** Untouched.
+The engine collapse under `useVertexCapture = False` was never Remix. **SR3 does its own GPU
+occlusion culling and reads the depth prepass back**, and the rule was already written in this
+codebase above `hiddenPassMode`: *"a draw whose RESULT the engine reads can never be skipped, only
+hidden."* Capture-off IS a global skip.
+
+Measured, same area, camera y~147:
+
+    capture ON   5330 draws/frame        capture OFF  1426 draws/frame
+
+73% of the GAME's own submission gone - matching the 77% collapse recorded for `hiddenPassMode=2`.
+Objects clipped by a frustum plane survived, because an occlusion test on a clipped bounding box is
+unreliable and engines skip the query for those. That detail is what identified the mechanism.
+
+**The fix needed nothing from Remix.** Occlusion queries are D3D9 objects and we are the D3D9
+layer. `forceOcclusionVisible=1` answers `D3DQUERYTYPE_OCCLUSION` readbacks with 2^20 visible
+pixels. Measured **243.9 queries/frame, all answered**. Only occlusion queries -
+`D3DQUERYTYPE_EVENT` is a frame-pacing fence. The real query is never drained, because
+`D3DGETDATA_FLUSH` would stall across the bridge.
+
+**Consequences:** `hiddenPassMode=2` became viable, which deleted the marker subsystem entirely -
+**3886 marked draws and 14,319 SetTexture calls a frame, and the magenta permanently.** The cost is
+that the game no longer culls anything, so more geometry is submitted than it would normally draw.
+
+## Config layers and precedence
+
+Parse order from the Remix log: **`dxvk.conf`, then `rtx.conf`, then `user.conf` LAST.** `user.conf`
+wins, and it is what the Remix in-game menu rewrites - the menu has silently dropped hand-edited
+keys from `rtx.conf` before. **`dxvk.conf` is not rewritten by the menu** and is the safest home
+for hand-authored settings.
+
+| file | holds |
+|---|---|
+| `dxvk.conf` | `d3d9.maxEnabledLights = 64` |
+| `rtx.conf` | `useVertexCapture=False`, `geometryAssetHashRuleString=indices,texcoords,geometrydescriptor`, `enableAlwaysCalculateAABB=True`, `useBuffersDirectly=False`, `antiCulling.light.enable=True` |
+| `user.conf` | upscaler/DLSS, `enableReplacementAssets=True` - **menu-owned, expect rewrites** |
+
+## The geometry hash rule - settled
+
+| rule | stable across animation? | unique per part? |
+|---|---|---|
+| `positions,indices,geometrydescriptor` | **no** - CPU skinning changes positions every frame | yes |
+| `indices,geometrydescriptor` | yes | **no** - parts sharing an index buffer collide |
+| **`indices,texcoords,geometrydescriptor`** | **yes** | **yes** |
+
+Our skinning copies UVs from the bind pose untouched, so they never churn, and different parts have
+different UVs. User-confirmed stable. **Keep this one.** Note Remix's own text: the asset hash rule
+is for *"sampling from replacements and doing USD capture"*, not for placing geometry.
+
+## Lights - the 8-slot cap was ours to raise
+
+`d3d9.maxEnabledLights` is a DXVK option that fills `caps.MaxActiveLights` and defaults to 8, while
+the game injects ~27 lights a frame. D3D9 silently ignores `LightEnable` past the cap and which
+lights lose changes per frame. The shim already supported 64 and was simply being told 8. Set in
+`dxvk.conf`; confirmed `device reports MaxActiveLights = 64`. **No code change was needed.**
+
+## Fixed-function vertex blending is NOT available
+
+    MaxVertexBlendMatrices = 4, MaxVertexBlendMatrixIndex = 8
+
+Four influences per vertex is right, but only **nine matrices are addressable and SR3 needs 64**.
+So the palette cannot be handed to Remix through fixed function, and CPU skinning stays.
+
+## CORRECTION: Remix DOES support skinned replacement geometry
+
+The claim "Remix cannot skin a replacement mesh" in `asset-replacement-plan.md` is **wrong**. Remix
+1.5.2 ships `gpu_skinning`, `performSkinning`, `RtxGeometryUtils::dispatchSkinning`, full
+`UsdSkelBindingAPI` read paths, a `ReadBoneTransform` graph node, a `skeletons/` capture directory,
+and `rtx.limitedBonesPerVertex`, whose text is explicit: *"Limit the number of bone influences per
+vertex **for replacement geometry**."* This removed the strongest argument for forking dxvk-remix.
+The catch: it needs the DRAW to carry bones, which CPU skinning does not supply, and FF vertex
+blending cannot supply them either (nine matrices).
+
+## Reading Remix captures - tooling exists now
+
+`pxr` (USD python bindings) is **already installed** (`Python312/Lib/site-packages/pxr`). Captures
+are binary `PXR-USDC`:
+
+```python
+from pxr import Usd, UsdGeom, Gf
+st = Usd.Stage.Open("capture_....usd")
+# /RootNode/meshes/mesh_<hash>/mesh   points, faceVertexIndices
+# /RootNode/instances/inst_<hash>_N   xformOp:transform  (name encodes the mesh hash)
+# /RootNode/lights  /RootNode/Looks  /RootNode/cameras/Camera
+```
+
+A capture records the **ray-traced scene** - anything Remix rasterises does not appear. It is a
+single frame, so it cannot show motion; two captures with a static camera can be diffed by mesh
+hash. This also unblocks the hash-to-asset bridge for asset replacement.
 
 ## Established engine facts (measured, trust these)
 
@@ -407,6 +532,50 @@ an environment term, not skin tone.
 
 ---
 
+## The skinning ring - sized by the game's vertex indices, not by our geometry
+
+`SkinAndBind` writes converted vertices into one `D3DPOOL_DEFAULT | D3DUSAGE_DYNAMIC` vertex
+buffer. Two properties of it are easy to get wrong and both have now cost a run:
+
+**1. Its size is set by the game's largest `firstVertex`, not by how much we skin.**
+
+    const UINT base = firstVertex * stride;
+    if (g_skinRingPos < base) g_skinRingPos = base;
+
+The write position is dragged up to the game's own vertex index so the game's index buffer can be
+reused verbatim - no index copy, no rebasing. Measured high water is **15.24 MB**, which at 32-byte
+vertices is ~480,000 vertices; we only ever write ~6.8 MB of actual geometry a frame. So do not
+reason about the ring's size from vertex counts. Read `high water` out of the report.
+
+The only reason the position is forced up is that `SetStreamSource`'s offset (`g_skinRingPos -
+base`) cannot be negative. `DrawIndexedPrimitive` takes a `BaseVertexIndex` that the hook currently
+forwards unchanged; adjusting it for converted skinned draws removes the constraint and the ring
+drops to ~2 MB. **That is the real fix and it has not been made** - it is a change on the hottest
+path.
+
+**2. A DISCARD renames the WHOLE buffer, so a bigger ring is not a free bigger ring.**
+
+The ring resets at every Present, so the first skinned lock of each frame is `D3DLOCK_DISCARD`.
+The driver must hand back a fresh allocation of the entire buffer and blocks if its pool has none
+free. At `skinRingMB=64` this made the game unplayable in a busy street - shim time went from
+12-18 ms to a 20-65 ms sawtooth while the draw count moved only ~20%.
+
+So the two costs pull against each other: too small and it wraps mid-frame, too large and the
+per-frame rename stalls. `24` is the current compromise (57% over the measured high water).
+
+**The report tells you which one you are paying:**
+
+    SKIN RING: N MB, high water H MB, W wraps/frame, D discards/frame
+    SKIN RING LOCK: X ms/frame discarding, Y ms/frame appending, worst single lock Z ms
+
+`appending` is the control - the same call on the same path without the rename. If `discarding`
+dwarfs it, the size is the cost. If both are ~0, the ring is exonerated and the shim's time is
+CPU skinning volume (211,312 vertices/frame across 54 draws), which is a different problem.
+
+**Do not infer the ring's cost from the shape of the frame times.** It was timed for exactly that
+reason: the sawtooth fits a driver stall, and it also fits a street filling up with NPCs.
+---
+
 ## Changes that were MEASURED WORSE and reverted
 
 Every one of these looked correct when written. They are recorded with the symptom that killed
@@ -457,6 +626,61 @@ When a counter and the screen disagree, the counter is measuring the wrong thing
 
 ---
 
+
+## The costliest failure of this project: inventing a definition of "correct"
+
+Sessions 22-26 spent five runs on the car-part drift and produced five wrong fixes. Three of them
+failed the same way - **a metric I invented, measuring legitimate behaviour as a defect:**
+
+1. *"a rigid part should end up centred on its own origin"* - **wrong.** `bone[13]` is a 22-degree
+   rotation plus `(0, 1.121, -1.440)` and the mesh is authored at the origin: the bone legitimately
+   **places the part on the car**. An offset result is normal.
+2. *"bones written at different draw indices belong to different objects"* - **wrong.** One
+   object's palette arrives as several `SetVertexShaderConstantF` calls, which naturally span
+   several draw indices.
+3. *"geometry that moves while objTM is static is drifting"* - **wrong.** It captured a destroyed
+   car's suspension settling to rest: `bone[0]` translation decaying `0.117 -> 0.109 -> 0.097 ->
+   0.087 -> 0.072 -> 0.000` over consecutive frames. Correct animation, correctly read.
+
+Each one produced a confident diagnosis, a fix, an ini key with a long justification, and a wasted
+run. **A falsifier only helps if the thing it falsifies is anchored to something outside your own
+reasoning.** The measurements that held up were all anchored externally:
+
+- the **shader disassembly** (`tools/fxo_disasm.py`) - what the game actually computes
+- the **device's own constants** (`GetVertexShaderConstantF` read back and compared - 649,925
+  comparisons, 0 mismatches) - not our mirror of them
+- the **shader constant table corpus** (`re/shader_constants.csv`) - all 882 `Bone_weights`
+  declarations at c52, all 2357 `objTM` at c32, settled in seconds
+- **the game with the shim disabled** - which halved the search space in one run
+
+### When you have burned two runs on hypotheses, stop and ask for an A/B
+
+The single most valuable experiment of the session was the user's, not the agent's: run the game
+**vanilla**, and run it **with Remix but with our .asi disabled**. Both were clean. That proved the
+drift requires our shim and dissolved a paradox that had survived five probes - because with vertex
+capture Remix reads the game's ALREADY-TRANSFORMED vertex output, so it is identical to the game by
+construction, whereas we recompute that transform.
+
+It should have been proposed after the second failed hypothesis, not the fifth.
+
+### Read the code you already have before instrumenting
+
+The occlusion-culling breakthrough was sitting in a comment above `hiddenPassMode` the whole time -
+*"a draw whose RESULT the engine reads can never be skipped, only hidden"* - and the 73% collapse
+matched the 77% already recorded there. Sessions 62-67 blamed Remix instead.
+
+Likewise, `objTM`'s existing guard already described the exact failure mode later chased for the
+palette, and `re/shader_constants.csv` could have killed the "wrong bone register" theory before it
+was ever built.
+
+### Verify a parser against real data before shipping it
+
+The `dcl_blendweight` scan shipped with a bug caught only because it was re-implemented in Python
+and run against the real bytecode first: **a comment block (CTAB is one, and it sits immediately
+after the version token) carries its length in bits 16-30, not the 24-27 field instructions use.**
+Reading the wrong field walks into the middle of the constant table and never reaches the dcls. It
+would have shipped as a silent no-op and cost another run.
+
 ## Dead ends - do not retry without new information
 
 - **`rtx.ignoreTextures` on game textures to remove shapes.** The shapes are ordinary world
@@ -490,6 +714,25 @@ When a counter and the screen disagree, the counter is measuring the wrong thing
 
 ---
 
+
+- **Fixed-function vertex blending to hand Remix a bone palette.** `MaxVertexBlendMatrixIndex = 8`;
+  SR3 needs 64. Closed by one caps line at device creation.
+- **`rejectStaleBones` / `clampBonesToUpload` / `paletteSetupScope`** - three attempts to decide
+  which palette "belongs" to a draw. All reverted; see the worklog. The palette IS read correctly
+  (649,925 device comparisons, 0 mismatches), so ownership was never the defect.
+- **`rtx.useBuffersDirectly = False`** - verified parsed by Remix; the drift was unchanged. Buffer
+  lifetime is not the cause.
+- **`rtx.enableInstanceDebuggingTools = True`** ("disables temporal correlation for instances") and
+  **`upscalerType = 0` + `useDenoiser = False`** (all temporal reprojection off) - drift unchanged.
+  Temporal handling is not the cause.
+- **`rtx.enableAlwaysCalculateAABB = True`** - retried deliberately, because the session-31 revert
+  happened when only ONE character was ever in the probe frame so the option had nothing to work
+  with. Retried with multiple characters and vehicles present: no change.
+- **`positions` in the geometry asset hash rule** - unique per part, but churns every frame because
+  CPU skinning rewrites positions. Use `indices,texcoords,geometrydescriptor`.
+- **The bind-pose cache invalidation** (`InvalidateBaseMeshes` on VB write-lock) reported **0
+  invalidations** - the game never refills those buffers. Kept because it is correct by
+  construction, but it fixes nothing and must not be credited for anything.
 
 ## The magenta: nine mechanisms, one hit. What that cost and why
 

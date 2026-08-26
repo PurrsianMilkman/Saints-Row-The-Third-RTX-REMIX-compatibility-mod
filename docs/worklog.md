@@ -5428,3 +5428,493 @@ write. A zero count kills the leading suspect, which after nine failed mechanism
     sr3-rtx.asi   79725eda32a1adf03f7774dde708ed5b
     sr3-rtx.ini   50e4d4cee8c13543dc1e352c0f90a1a1
     rtx.conf      b9434d9408e39759f05dd2e4892aeb95
+
+---
+
+## Session 2026-08-23 to 2026-08-26: capture-off achieved, and the car-part drift
+
+### Run 68: the occlusion-query hook - THE BREAKTHROUGH
+
+`rtx.useVertexCapture = False` had always collapsed the game. Runs 62-67 blamed Remix. The cause
+was in SR3, and the codebase already knew the rule - it is written above `hiddenPassMode`:
+
+> **2 skip** - MEASURED TO BREAK THE ENGINE: its own submission collapsed from 2,615 to 593 draws
+> a frame and the image froze, **because it reads the prepass back - GPU occlusion culling**. The
+> general rule: **a draw whose RESULT the engine reads can never be skipped, only hidden.**
+
+`useVertexCapture = False` IS a skip - Remix refuses every shader draw, the depth prepass among
+them. Two frame dumps in the same area (camera y~147) measured the collapse directly:
+
+    capture ON   5330 draws/frame   (MARK 3930, CONVERT 1260, PASS 140)
+    capture OFF  1426 draws/frame   (MARK 1182, CONVERT  220, PASS  24)
+
+**73% of the GAME's own submission gone**, against the 77% recorded for `hiddenPassMode=2`. The
+same failure. Objects clipped by a frustum plane survived because an occlusion test on a clipped
+bounding box is unreliable and engines skip the query for those - which is why only the periphery
+rendered, the detail that identified the mechanism.
+
+**The fix needed nothing from Remix.** Occlusion queries are D3D9 objects and we are the D3D9
+layer. `Hook_CreateQuery` (device slot 118) patches the shared `IDirect3DQuery9` vtable;
+`Hook_QueryGetData` (slot 7) answers `D3DQUERYTYPE_OCCLUSION` with 2^20 visible pixels and
+`D3D_OK`. Only occlusion queries - `D3DQUERYTYPE_EVENT` is a frame-pacing fence. The real query is
+never drained: calling through can carry `D3DGETDATA_FLUSH`, which stalls across the bridge.
+
+Measured: **243.9 occlusion queries read back per frame, all 243.9 answered VISIBLE**, 4097 query
+objects. World, cars, NPCs and props stopped being culled. `forceOcclusionVisible=1`.
+
+### Run 69: hiddenPassMode=2 became viable, and the marker subsystem is gone
+
+With the readback neutralised, mode 2 no longer breaks the engine - 3173 draws/frame, no collapse.
+That deleted the entire marker mechanism: **3886 marked draws and 14,319 SetTexture calls a frame,
+and the magenta permanently**. `MARKED 0/frame`.
+
+### Lights: the cap was ours to raise
+
+`device reports MaxActiveLights = 8` against `lights 26.8/frame`. D3D9 silently ignores
+`LightEnable` past the cap and which lights lose changes per frame - "unstable, culled at random
+positions". `d3d9.maxEnabledLights` is a DXVK option that fills that cap; it defaults to 8. The
+shim already supported 64:
+
+    g_maxLightSlots = (caps.MaxActiveLights == 0) ? 64u : min(64u, caps.MaxActiveLights);
+
+New `dxvk.conf` with `d3d9.maxEnabledLights = 64`. Confirmed: **`device reports MaxActiveLights =
+64, using 64 light slots`**. No code change - the shim had been ready all along and was being told
+there were 8. Also added `rtx.antiCulling.light.enable = True`.
+
+**`dxvk.conf` is a separate option layer the Remix in-game menu does not rewrite** - a safer home
+for hand-authored settings. Parse order, from the Remix log: `dxvk.conf`, then `rtx.conf`, then
+**`user.conf` last, so user.conf wins.**
+
+### Fixed-function vertex blending: DEAD, and cheaply
+
+Asked rather than assumed, one log line at device creation:
+
+    MaxVertexBlendMatrices = 4, MaxVertexBlendMatrixIndex = 8, VertexProcessingCaps = 0x17B
+
+Four influences per vertex is right; **only nine matrices are addressable and SR3 needs 64.** The
+route is closed. CPU skinning stays.
+
+### CORRECTION: Remix DOES support skinned replacement geometry
+
+`asset-replacement-plan.md` said "Remix cannot skin a replacement mesh". **That is wrong.** Remix
+1.5.2 has `gpu_skinning`, `performSkinning`, `RtxGeometryUtils::dispatchSkinning`, full
+`UsdSkelBindingAPI` read paths, a `ReadBoneTransform` graph node, a `skeletons/` capture directory,
+and an option whose text is explicit:
+
+> "Limit the number of bone influences per vertex **for replacement geometry**. D3D9 games were
+> limited to 4, which is the default." - `rtx.limitedBonesPerVertex`
+
+That removed the strongest argument for forking dxvk-remix. It does require the draw to carry
+bones (`dispatchSkinning: draw call has bones but no blend weight buffer`), which our CPU skinning
+does not - and FF vertex blending, the way to supply them, is capped at 9 matrices.
+
+### The shader disassembly: vehicles use ONE bone, characters four
+
+Read rather than guessed, with `tools/fxo_disasm.py`.
+
+`ir_sr3cardiffusespec_g_v` shader[0..4], and `ir_sr3carglass_g_v` - identical in form:
+
+    dcl_position v0 / dcl_normal v1 / dcl_blendindices v2      <- NO dcl_blendweight
+    mul  r2.x, c0.z, v2.x        (c0.z = 3)
+    mova a0.x, r2.x
+    dp4  r0.x, c52[a0.x], r1     <- ONE bone, unweighted
+    dp4  r1.x, c32, r0           <- then objTM
+
+`ir_sr3npcclothfull_c` shader[0]:
+
+    dcl_blendweight v4 / dcl_blendindices v5
+    mul r2, v4.y, c52[a0.x] ... four weighted bones
+
+The shim decided this from the VERTEX DECLARATION, which still carries BLENDWEIGHT bytes on a
+vehicle draw that the shader ignores - so we blended four bones where the game blends one, pulling
+in three indices from bytes the shader never reads. Now decided from the shader's own `dcl`
+instructions.
+
+**A parser bug caught before shipping:** a comment block (CTAB is one, and it sits immediately
+after the version token) carries its length in bits 16-30, NOT the 24-27 field instructions use.
+Reading the wrong field walks into the constant table and never reaches the dcls. Verified offline
+against real bytecode before the run: vehicles SINGLE, characters 4-bone.
+
+Result: `SHADER BLEND FORM: 109.3 four-bone/frame, 82.3 SINGLE/frame`, refusals 0. **It did not
+fix the drift.**
+
+### `skinRigidSingleBone` must stay ON
+
+It is the gate that lets a declaration with no BLENDWEIGHT element (`weights=?(-1)@-1`) through
+`GetBaseMesh`. At 0, every vehicle body/glass/panel draw is refused, falls back to pass-through,
+and under `hiddenPassMode=2` with capture off a pass-through draw is **skipped** - the user's
+"cars do not render at all, i only see the wheels and the people in them". Wheels and characters
+carry real BLENDWEIGHT and pass either way.
+
+### USD capture tooling now exists
+
+`pxr` (USD python bindings) is **already installed** on this machine
+(`Python312/Lib/site-packages/pxr`). Captures are binary `PXR-USDC` and read directly:
+
+```python
+from pxr import Usd, UsdGeom, Gf
+st = Usd.Stage.Open("capture_....usd")
+# /RootNode/meshes/mesh_<hash>/mesh  - points, indices
+# /RootNode/instances/inst_<hash>_N  - xformOp:transform
+# /RootNode/lights, /RootNode/Looks, /RootNode/cameras/Camera
+```
+
+This unblocks the hash-to-asset bridge for asset replacement as well.
+
+---
+
+## The car-part drift: OPEN. Five failed fixes, and what they eliminated
+
+**Symptom, as finally stated by the user:** a knocked-off bumper or car glass is rendered in the
+wrong place and moves, in rhythm with player or NPC animation, "depending on what is on screen".
+The mesh is correct and undeformed. **The game's own logical/physics position does not move** - the
+part can be rolled and behaves correctly. Only the path-traced transform moves.
+
+### The one decisive experiment (the user's, not mine)
+
+**The drift does NOT happen in the vanilla game, and does NOT happen with our .asi disabled while
+Remix is running.** It requires our shim.
+
+That also dissolves the paradox that dogged five runs: with vertex capture, Remix reads the game's
+**already-transformed** vertex output, so it is identical to the game by construction. We recompute
+that transform. Everything verified about our arithmetic can be correct while the result differs,
+because the difference is not in the arithmetic.
+
+Note: our .asi with Remix REMOVED renders black - the shim nulls shaders and issues fixed function
+with nothing behind it to path-trace. A vanilla test needs both disabled: move Remix's `d3d9.dll`
+aside AND rename `sr3-rtx.asi` (the loader is `dinput8.dll` and only picks up `.asi`).
+
+### Verified correct, and therefore eliminated
+
+| link | how it was verified |
+|---|---|
+| transform form | matches all five vehicle vertex shaders in disassembly |
+| bone index | `v.x * 3`, component 0, matches `mova a0.x` |
+| palette register | c52 - **all 882 `Bone_weights` declarations in the game**, from `re/shader_constants.csv` |
+| objTM register | c32 - all 2357 declarations |
+| **constant VALUES at draw time** | **`GetVertexShaderConstantF` read back and compared: 649,925 comparisons, 0 mismatches** |
+| geometry + transforms Remix receives | two captures, static camera, **bit-identical**; cars intact, characters coherent |
+
+### Five fixes attempted, all wrong
+
+| # | hypothesis | falsifier that killed it |
+|---|---|---|
+| 1 | `skinRigidSingleBone` misfiring | not firing - refusals 0, those layouts carry BLENDWEIGHT |
+| 2 | bones from a different upload epoch (`rejectStaleBones`) | stranded **2829 verts/frame** in bind pose; epochs were one object's multi-call upload |
+| 3 | stale bind-pose cache (`InvalidateBaseMeshes`) | **0 invalidations** - the game never refills those buffers. Kept anyway: correct by construction |
+| 4 | bones outside this object's upload (`clampBonesToUpload`) | fired on 15.6% of verts, stopped the rare *stretching*, did not stop the drift |
+| 5 | palette not scoped to its draw setup (`paletteSetupScope`) | refused **3491 influences/frame**, worst case got WORSE (1.485 -> 4.083) |
+
+Also eliminated by config, each verified parsed by Remix: `useBuffersDirectly = False`,
+`enableAlwaysCalculateAABB = True`, `enableInstanceDebuggingTools = True` (disables temporal
+instance correlation), `upscalerType = 0` + `useDenoiser = False` (all temporal reprojection off),
+and three geometry hash rules.
+
+### The hash rule, settled
+
+- `positions,indices,geometrydescriptor` - unique per part but **churns**, because CPU skinning
+  changes positions every frame
+- `indices,geometrydescriptor` - stable but **collides** between parts sharing an index buffer
+- **`indices,texcoords,geometrydescriptor` - stable AND discriminating.** Our skinning copies UVs
+  from the bind pose untouched, so they never churn, and different parts have different UVs.
+  User-confirmed stable. **This is the rule to keep.**
+
+Remix's own text: the ASSET hash rule is for *"sampling from replacements and doing USD capture"*,
+NOT for placing geometry - so it was never going to be the drift's cause.
+
+### THREE metrics of mine that measured legitimate behaviour as a defect
+
+This is the methodological failure of the session and the thing most worth not repeating:
+
+1. **"a rigid part should sit at its own origin"** - wrong. `bone[13]` is a 22-degree rotation plus
+   `(0, 1.121, -1.440)`; the mesh is authored at the origin and the bone legitimately **places it
+   on the car**. An offset result is normal.
+2. **"bones written at different draw indices are foreign"** - wrong. One object's palette arrives
+   as several `SetVertexShaderConstantF` calls.
+3. **"geometry moving while objTM is static is drift"** - wrong. Captured a destroyed car's
+   suspension settling: `bone[0]` translation decaying `0.117 -> 0.109 -> 0.097 -> 0.087 -> 0.072
+   -> 0.000` across frames. That is animation, correctly read.
+
+**Every one of these was a definition of "correct" that I invented and then measured against.** The
+measurements that held up were the ones anchored to something external: the disassembly, the
+device's own constants, the game's behaviour with the shim disabled.
+
+### Where it stands
+
+Deployed for the next run: **`skinRingMB` 8 -> 64**. The CPU-skinning ring is the only shared
+mutable memory in the skinned path; its write position is forced to `firstVertex*stride` so the
+game's index buffer can be reused verbatim, which consumes it far faster than the vertex count
+implies, and a wrap issues `D3DLOCK_DISCARD` over the whole buffer. How often that happens scales
+with how much skinned geometry is on screen - the one property of the symptom nothing else
+explains. New falsifier:
+
+    SKIN RING: 64 MB, high water H MB, W wraps/frame, D discards/frame
+
+If wraps/frame was already 0 at 8 MB, the ring never recycled and this is dead regardless of what
+the screen shows.
+
+**If the ring is not it, the honest next step is not a sixth hypothesis.** It is to bisect our own
+conversion with the switches: `convertSkinned=0` (those draws vanish rather than drift - proves the
+skinned path), then narrow inside it.
+
+---
+
+## 2026-08-26 - the ring answered, and then broke the game
+
+### The ring test came back positive, and it is the first of the three outcomes
+
+Run of 3029 frames (~76 s), `skinRingMB=64`, everything else unchanged:
+
+    SKIN RING: 64 MB, high water 15.24 MB, 0.00 wraps/frame, 0.54 discards/frame
+
+High water **15.24 MB**. The old ring was **8 MB**. So at 8 MB the ring was being recycled
+mid-frame - the hypothesis was live, not idle, and the run that would have said so was never
+taken at 8 MB during gameplay (the three 8 MB samples in this log are menu frames, `high water
+0.00 MB`). At 64 MB wraps go to **0.00/frame**. That is the outcome I labelled "wraps were
+happening and now stop".
+
+What it does NOT yet say is whether the drift stopped, because the run ended before that could
+be judged: the game became unplayable.
+
+### Why 64 MB broke it
+
+The ring resets at every Present (`g_skinRingPos = 0; g_skinRingFresh = true`), so the first
+skinned lock of each frame is `D3DLOCK_DISCARD`. **A discard renames the WHOLE buffer.** Its cost
+is set by `skinRingMB`, not by the 15 MB we actually write, and certainly not by the vertex count.
+At ~0.6 discards/frame that is ~38 MB/frame of fresh allocation asked of the driver, across the
+32->64-bit Remix bridge.
+
+The shape in the log matches a driver waiting for a slice to come free, not work that scales with
+the scene:
+
+| frames | draws/frame | shim ms |
+|---|---|---|
+| 1661-2958 | 4200-4500 | 12-18 |
+| 2970-3018 | 4100-5700 | 20-65 |
+
+Draw count rose ~20%. Shim time rose 2-4x, as a hard sawtooth - `20.4, 64.6, 22.4, 28.0, 64.8,
+23.8, 22.8, 24.4, 55.7, 25.9, 64.5` - a ~40 ms spike on roughly a 1-in-2 cadence, which is the
+same cadence as the discards. CPU-skinning volume varies smoothly with what is on screen; it does
+not alternate.
+
+### That is still an inference, so it is now instrumented
+
+The sawtooth is suggestive and the mechanism is sound, but a shape in a graph is exactly the kind
+of evidence that has cost this project runs before. The competing explanation is real: the shim
+CPU-skins **211,312 vertices/frame** across 54 draws and writes 6.8 MB into write-combined GPU
+memory, and the collapse window is also where the street got busy. Both stories fit.
+
+So the lock is now timed directly, split by kind:
+
+    SKIN RING LOCK: X ms/frame discarding, Y ms/frame appending, worst single lock Z ms
+
+The `appending` (NOOVERWRITE) column is the control - same call, same path, no rename. If
+`discarding` is a few ms/frame and `worst` is tens of ms, the ring's size is the cost and the fix
+is to stop renaming 24 MB a frame. If `discarding` is ~0, the ring is exonerated and the cost is
+CPU skinning volume, which is a different fix entirely (and one we already know how to approach).
+
+### Deployed: `skinRingMB=24`
+
+24 MB clears the measured 15.24 MB high water by 57%, so **wraps should stay at 0** and the drift
+test stays valid - while asking the driver for a third of the memory per frame. If the ring is the
+cost, the spike amplitude should fall by roughly the same factor it shrank by; that is a
+quantitative prediction the next run either meets or does not.
+
+### The real fix, if the lock timing confirms it
+
+The ring only needs to be ~16 MB because of this, in `SkinAndBind`:
+
+    const UINT base = firstVertex * stride;
+    if (g_skinRingPos < base) g_skinRingPos = base;
+
+The write position is dragged up to the game's own vertex index so the game's index buffer can be
+reused verbatim. High water 15.24 MB / 32-byte vertices = ~480,000 vertices, i.e. the ring is
+sized by the game's largest `firstVertex`, **not by how much geometry we skin**. We already rebase
+through the stream offset (`SetStreamSource(..., g_skinRingPos - base, ...)`); the only reason the
+position is forced up at all is that this offset cannot go negative.
+
+`DrawIndexedPrimitive` takes a `BaseVertexIndex`, and the hook currently forwards the game's
+unchanged. Adjusting it for converted skinned draws removes the constraint entirely and the ring
+drops to ~2 MB - at which point the per-frame discard stops mattering at any cadence. That is a
+change on the hottest path and it is not being made on the same run as a measurement.
+
+### New lead, recorded and NOT acted on: FOREIGN BONE
+
+Frames 3007-3008, twenty reports, while a knocked-off part was falling:
+
+    FOREIGN BONE #1: ps='Grime_MapSampler' verts=1976 bone 0 was written under objTM generation
+    309836 but this draw is generation 309837 (1 objects later) | objTM t=(101.8 9.4 195.7) |
+    moved 0.73 | draw 4733 frame 3007
+
+Consecutive draws 4733-4745, same 1976-vertex mesh, **eight different objTM translations**
+(101.8/9.4/195.7, 101.8/9.3/196.2, 100.3/9.0/197.1, 101.0/9.3/195.2, ...) - all reading bone 0
+from the *same* upload, generation 309836.
+
+Sharing a palette across instances is not by itself wrong: under the real vertex shader the bone
+is object-local and `objTM` separates the instances. What is worth noting is that the shared bone
+value **changes between frames** - `moved 0.73` at frame 3007, `moved 0.89` at 3008 - so every
+instance reading it shifts together. "Parts move together, with a pattern like the character's"
+is what that would look like.
+
+Set against it: the frame-3000 report says `RIGID BONE OWNERSHIP: 6.9/frame use a bone written
+under their OWN objTM, 0.0/frame use one written under a DIFFERENT object's`, and `DRIFT (objTM
+unchanged between frames): 1.0 draws/frame STILL, 0.0 MOVED (worst 0.000 units)`. The foreign-bone
+reports appear only in the two frames around the knock-off.
+
+**This is exactly the shape of the three findings that already wasted runs on this project** - a
+probe firing, a plausible story, and an invented notion of what the engine ought to be doing. It
+is written down and it is next in line *after* the game is playable and the ring question is
+closed. It is not being turned into a fix on a hunch.
+
+### Also seen, unexplained, low priority
+
+`dumpFrame=1800` did not fire: the run passed frame 1800 and `sr3-rtx-frame.log` still carries the
+11:37 timestamp from the previous run. Worth a look before the next time that dump is relied on.
+
+---
+
+## 2026-08-26b - the drift, found by disassembly
+
+### The ring is dead, and it was measured dead rather than argued dead
+
+    SKIN RING: 24 MB, high water 24.00 MB, 0.02 wraps/frame, 0.73 discards/frame
+    SKIN RING LOCK: 0.01 ms/frame discarding, 0.61 ms/frame appending, worst single lock 0.4 ms
+
+**0.01 ms/frame discarding.** The whole-buffer rename costs nothing, so the sawtooth I read as a
+driver stall was not one, and the 64 MB freeze was not the lock. Adding the timer instead of
+acting on the shape of the curve was worth the rebuild - the inference was wrong.
+
+And 0.02 wraps/frame cannot produce a drift that affects every part on every frame. The ring is
+eliminated as the cause. It did need raising (the 8 MB ring genuinely wrapped), but that was a
+real bug next to the one being hunted, not the one being hunted.
+
+### The cause: we decided "skinned" from the vertex declaration, the game decides it from the shader
+
+The user's description was precise enough to aim at: *the rendered part moves as if a character's
+skeleton animation were driving it; the physics body is correctly placed; render-side only.*
+
+Disassembly of the car body and car glass shaders. Both ship in two variants over the **same mesh**
+and the **same vertex declaration**:
+
+    ir_sr3cardiffusespec_g_v      dcl_position v0 / dcl_normal v1 / dcl_blendindices v2
+                                  mul  r2.x, c0.z, v2.x          (c0.z = 3)
+                                  mova a0.x, r2.x
+                                  dp4  r0.x, c52[a0.x], r1       <- ONE bone
+                                  dp4  r1.x, c32, r0             <- then objTM
+
+    ir_sr3cardiffusespec_g_s      dcl_position v0 / dcl_normal v1     <- NO blendindices
+                                  dp4  r1.x, c32, r0             <- objTM alone, no palette
+
+`_v` is the vehicle variant, `_s` the static one. Identical for `ir_sr3carglass_g_v` / `_s`.
+
+The shim took `skinned` from `g_curLayout.skinned` - the vertex **declaration** - which is shared
+between the variants and still carries BLENDINDICES. It then asked the shader where the palette
+lives, got `boneReg = -1` (the static variant declares none), and hit this:
+
+    const UINT boneBase = (g_curVS.boneReg >= 0)
+        ? static_cast<UINT>(g_curVS.boneReg) : kRegBonePalette;   // c52
+
+**It fell back to c52 and posed the part from whatever the last character draw left there.**
+
+That is every symptom, exactly:
+
+| reported | explained by |
+|---|---|
+| rendered part moves, physics body does not | nothing is wrong with the object; only our copy of its geometry is bent |
+| movement follows player/NPC animation | c52 holds a character's palette when the part is drawn |
+| parts move *together* | they share the one stale palette |
+| mesh translates without deforming | one bone, one index, every vertex |
+| needs our .asi; vanilla and shim-disabled are clean | the fallback is ours |
+| car windows move until broken | intact glass draws through the same pair of variants |
+
+### Why every probe called this clean
+
+    if (boneBase != kRegBonePalette) ++g_skinForeignBoneReg; else ++g_skinC52BoneReg;
+
+`g_skinC52BoneReg` counts "declared at c52" and "declared nowhere, defaulted to c52" as the same
+thing. So `bone palette register: 54.1 draws/frame at c52, 0.0 ELSEWHERE` read as a clean bill of
+health for the precise draws that were broken. The counter written to catch a wrong register was
+blind to no register at all.
+
+The code comment above `boneReg` had even predicted the near-miss - *"A vehicle shader is free to
+declare Bone_weights anywhere, and if it does, every car part has been skinned by whatever happened
+to sit at c52"* - and then the check that followed only covered the case where it declares it
+**somewhere else**, not the case where it declares it **nowhere**.
+
+### The fix, and why it is safe
+
+New `ShaderInfo::usesBlendIndices`, read from the dcl stream (usage 2 on an input register) beside
+the existing `usesBlendWeights` scan. A shader that declares no BLENDINDICES input cannot index a
+palette, whatever CTAB parsing does or fails to do. Those draws now take 0 influences and fall
+through the existing bind-pose path, so objTM places them - which is precisely what the game's own
+static variant does.
+
+**Validated before shipping, twice, on the lesson from the last dcl parser bug:**
+
+1. The walk was re-implemented in Python and run against the real bytecode: `_v` -> blendindices
+   True, `_s` -> False, for both body and glass.
+2. Swept all 1,693 shader files and cross-checked against the CTAB dump:
+
+    | CTAB has Bone_weights | declares blendindices | declares blendweight | files |
+    |---|---|---|---|
+    | no | no | no | 623 |
+    | yes | yes | no | 110 |
+    | yes | yes | yes | 111 |
+    | **yes** | **no** | - | **0** |
+
+Zero shaders declare `Bone_weights` without `dcl_blendindices`. The implication matters more than
+the fix: **`dcl_blendindices` present is exactly equivalent to "this shader skins"** across the
+whole shader set, so the gate cannot stop skinning something that genuinely skins.
+
+### What the next run has to show
+
+    NO BONE DECL: N draws/frame whose vertex shader reads no BLENDINDICES
+
+If N is 0 this fixed nothing and the disassembly, while correct, is not what is on screen.
+`skinRequireBoneDecl=0` restores the old fallback with no rebuild - the A/B is one ini line.
+
+### Method note
+
+Five hypotheses tested by running the game found nothing in several sessions. Two disassembly
+sessions found the vehicle/character bone difference and then this. Both times the instruction to
+reverse-engineer came from the user. **Read the shader before measuring what the shader does.**
+
+### CONFIRMED FIXED, same day, by the run and by the probes
+
+User: *"the issue is fixed. no parts move. car glass and parts are where it should be."*
+
+The log agrees, and it agrees in the way that matters - the probes that were firing went silent
+without being touched:
+
+| probe | before | after |
+|---|---|---|
+| `FOREIGN BONE` | 20 reports | **0** |
+| `DISPLACED SKIN` | 16 reports | **0** |
+| `SKIN DISPLACEMENT` | `worst 2.1 units` moved | `101.7 draws/frame at rest, 0.0 moved >3 units` |
+| `DRIFT` | - | `2.6 STILL, 0.0 MOVED (worst 0.000 units)` |
+
+And the gate is doing real work rather than nothing:
+
+    NO BONE DECL: 15.3 draws/frame whose vertex shader reads no BLENDINDICES - gate ON
+    NO BONE DECL #1: ps='Grime_MapSampler' verts=1380 - this vertex shader declares no
+    BLENDINDICES input and places the mesh by objTM alone. boneReg=-1. Left in its bind pose.
+
+`Grime_MapSampler`, `boneReg=-1` - the car body shader, the static variant, exactly what the
+disassembly predicted before the game was run at all. The rate climbs 0.0 -> 5.0 -> 15.3
+draws/frame across the run as parts came off.
+
+That closes the bug that consumed the most sessions on this project.
+
+### Two things this run leaves open
+
+**The ring saturates at 24 MB.** `high water 24.00 MB` is pinned at the buffer size and wraps rose
+to `0.19/frame`. Deliberately not raised: wraps are now demonstrably harmless (the drift is gone
+*with* wraps happening, which is one more nail in that hypothesis), the lock costs `0.01 ms/frame`,
+and the unexplained 64 MB freeze argues against churning this while the game works. Known, benign,
+documented.
+
+**Shim time grows across a session:** 24.0% -> 35.5% -> 43.8% of frame, worst 107 -> 300 -> 215 ms,
+while skinned vertices go 211k -> 354k/frame and decoded meshes 78 -> 181. It tracks skinned
+geometry volume, so it may be nothing but a busier district - but `worst 300 ms` is a visible
+stall and this is now the largest open problem. Next up, with the HUD and the sky.
+

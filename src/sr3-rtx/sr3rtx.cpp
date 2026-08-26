@@ -200,7 +200,17 @@ struct Settings {
     bool clothDump = false;      // write the first 3 outfits and their patterns out as raw RGB
     bool charTexDump = false;    // write every named stage of the probed character materials
     int captureKey = 0x78;       // VK_F9: re-arm the frame and shape dumps, 0 disables
+    // Refuse to read a bone palette for a draw whose vertex shader declares no BLENDINDICES
+    // input. Such a shader places the mesh by objTM alone; posing it costs a bone matrix that
+    // belongs to whatever was drawn before. 0 restores the old fallback-to-c52 behaviour, which
+    // is what makes this a controlled experiment rather than an assertion.
+    int skinRequireBoneDecl = 1;
+    int skinRingMB = 8;          // size of the CPU-skinning ring; larger means fewer wraps
     bool forceOcclusionVisible = false;  // answer the engine's occlusion queries "fully visible"
+    bool rejectStaleBones = true;  // drop bone influences belonging to a different object
+    bool clampBonesToUpload = true;  // ignore bones outside this object's own palette upload
+    bool vehicleBonesOff = false;    // single-bone draws: ignore the palette, use objTM alone
+    bool paletteSetupScope = true;   // only pose by a palette published in this draw's own setup
     float clothTintScale = 1.0f; // clothAlbedoPercent/100; see the ini
     // OFF. Three attempts, three regressions, and no run in which it demonstrably reduced the
     // double-draw it was written for. See the ini for the full history. Kept as a switch because
@@ -262,7 +272,13 @@ void LoadSettings() {
     g_settings.clothDump = flag("clothDump", false);
     g_settings.charTexDump = flag("charTexDump", false);
     g_settings.captureKey = num("captureKey", 0x78);
+    g_settings.skinRequireBoneDecl = num("skinRequireBoneDecl", 1);
+    g_settings.skinRingMB = num("skinRingMB", 8);
     g_settings.forceOcclusionVisible = flag("forceOcclusionVisible", false);
+    g_settings.rejectStaleBones = flag("rejectStaleBones", true);
+    g_settings.clampBonesToUpload = flag("clampBonesToUpload", true);
+    g_settings.vehicleBonesOff = flag("vehicleBonesOff", false);
+    g_settings.paletteSetupScope = flag("paletteSetupScope", true);
     g_settings.clothTintScale = num("clothAlbedoPercent", 100) / 100.0f;
     g_settings.dedupSkinned = flag("dedupSkinned", false);
     g_settings.tintFallbackAlbedo = flag("tintFallbackAlbedo", false);
@@ -443,6 +459,58 @@ struct ShaderInfo {
     bool usesProjTM = false; // VS: false implies the shader emits clip space itself
     bool usesObjTM = false;  // VS: false implies the geometry is already in world space
     bool skinned = false;    // VS: has a Bone_weights palette
+    // WHERE that palette lives, taken from the shader's own constant table rather than assumed.
+    // The whole shim has hardcoded c52 since session 1, on the strength of ONE character
+    // shader's CTAB. A vehicle shader is free to declare Bone_weights anywhere, and if it does,
+    // every car part has been skinned by whatever happened to sit at c52 - which is a character.
+    // -1 means this shader declares no palette.
+    int boneReg = -1;
+    // Does this vertex shader actually CONSUME blend weights? Read from its dcl instructions,
+    // not from the vertex declaration - the two disagree, and that disagreement is the bug.
+    //
+    // Disassembled 2026-08-25. ir_sr3cardiffusespec_g_v shader[0], a vehicle:
+    //
+    //     dcl_position v0 / dcl_normal v1 / dcl_blendindices v2      <- no dcl_blendweight
+    //     mul r2.x, c0.z, v2.x        (c0.z = 3, three registers per bone)
+    //     mova a0.x, r2.x
+    //     dp4 r0.x, c52[a0.x], r1     <- ONE bone, unweighted
+    //     dp4 r1.x, c32, r0           <- then objTM
+    //
+    // ir_sr3npcclothfull_c shader[0], a character:
+    //
+    //     dcl_blendweight v4 / dcl_blendindices v5
+    //     mul r2, v4.y, c52[a0.x]
+    //     mad r2, v4.x, c52[a0.y], r2 ... four weighted bones
+    //
+    // The vertex DECLARATION on a vehicle draw still carries BLENDWEIGHT data, so deciding from
+    // it makes us blend four bones where the game blends one. The other three indices are
+    // whatever those bytes happen to hold, and they address a palette that belongs to somebody
+    // else - so a rigid part is dragged bodily toward a character and follows it. Every vertex
+    // shares the indices, which is why the mesh translates without deforming.
+    bool usesBlendWeights = false;
+    // Does this vertex shader consume BLENDINDICES at all?
+    //
+    // This is the question that decides whether a draw is skinned, and it is NOT the same as
+    // "the vertex declaration carries BLENDINDICES". Disassembled 2026-08-26, the car body and
+    // car glass ship in two variants over the SAME mesh:
+    //
+    //   ir_sr3cardiffusespec_g_v   dcl_position v0 / dcl_normal v1 / dcl_blendindices v2
+    //                              mul r2.x, c0.z, v2.x / mova a0.x, r2.x
+    //                              dp4 r0.x, c52[a0.x], r1      <- bone, THEN objTM
+    //
+    //   ir_sr3cardiffusespec_g_s   dcl_position v0 / dcl_normal v1     <- no blendindices
+    //                              dp4 r1.x, c32, r0            <- objTM alone
+    //
+    // The static variant does not read a palette, does not declare one, and places the mesh by
+    // objTM only. The declaration is shared with the vehicle variant, so it still carries
+    // BLENDINDICES - which is all the shim looked at. boneReg is then -1, the code below fell
+    // back to c52, and the part was posed by whatever palette the last CHARACTER draw left
+    // there. That is a detached bumper following an NPC's skeleton while its physics body sits
+    // exactly where it belongs, which is the reported bug verbatim.
+    //
+    // Read from the dcl stream, not from the constant table: a shader that declares no input
+    // cannot index a palette no matter what CTAB parsing does or fails to do.
+    bool usesBlendIndices = false;
     bool isPixelShader = false;
     bool anySampler = false;
     // The sampler that WON the albedo ranking, not merely the first one declared. The tiling
@@ -591,6 +659,34 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
     if (!length) return result;
 
     const char* bytes = reinterpret_cast<const char*>(tokens);
+    // Scan the instruction stream for dcl_blendweight on an INPUT register. Opcode 0x1F is DCL;
+    // its first source token carries the D3DDECLUSAGE in the low five bits (BLENDWEIGHT == 1) and
+    // its second is the destination register. Length lives in bits 24-27 for SM2+, so the walk
+    // steps instruction by instruction rather than guessing.
+    {
+        const DWORD* t = tokens + 1;                       // skip the version token
+        const DWORD* end = tokens + length / sizeof(DWORD);
+        while (t < end && *t != 0x0000FFFF) {               // 0xFFFF is END
+            const DWORD op = *t & 0xFFFF;
+            const DWORD len = (*t & 0x0F000000) >> 24;
+            if (op == 0x1F && t + 2 < end) {                // D3DSIO_DCL
+                const DWORD usage = t[1] & 0x1F;
+                const DWORD regType = ((t[2] & 0x70000000) >> 28) | ((t[2] & 0x00001800) >> 8);
+                if (usage == 1 /* D3DDECLUSAGE_BLENDWEIGHT */ && regType == 1 /* INPUT */)
+                    result.usesBlendWeights = true;
+                if (usage == 2 /* D3DDECLUSAGE_BLENDINDICES */ && regType == 1 /* INPUT */)
+                    result.usesBlendIndices = true;
+            }
+            // A comment block - CTAB is one, and it sits immediately after the version token -
+            // carries its length in bits 16-30, NOT in the 24-27 field the instructions use.
+            // Reading it from the wrong field walks into the middle of the constant table and
+            // the dcl instructions are never reached at all.
+            if (op == 0xFFFE) { t += 1 + ((*t >> 16) & 0x7FFF); continue; }
+            t += 1 + len;
+            if (!len) break;                                // malformed; stop rather than spin
+        }
+    }
+
     const char* ctab = nullptr;
     for (size_t i = 0; i + 4 <= length; ++i)
         if (memcmp(bytes + i, "CTAB", 4) == 0) { ctab = bytes + i; break; }
@@ -618,7 +714,10 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
 
         if (!strcmp(name, "projTM")) result.usesProjTM = true;
         else if (!strcmp(name, "objTM")) result.usesObjTM = true;
-        else if (!strcmp(name, "Bone_weights")) result.skinned = true;
+        else if (!strcmp(name, "Bone_weights")) {
+            result.skinned = true;
+            result.boneReg = reg;
+        }
 
         if (registerSet == 3) {   // D3DXRS_SAMPLER
             if (StrStrIA(name, "Stipple")) result.hasStipple = true;
@@ -893,6 +992,88 @@ bool g_worldWrittenSinceDraw = false;
 unsigned g_skinNonZeroBaseVertex = 0;
 unsigned g_lastBoneUploadDraw = 0;
 unsigned g_lastBoneUploadFrame = 0;
+// How many bones the last palette upload actually covered, and what the skinned draws did with
+// it. These exist to decide ONE question: is a skinned draw posed by its own object's bones?
+//   staleFrame  - the palette was last written in an EARLIER frame, so it belongs to whatever
+//                 was drawn then. Unambiguously wrong.
+//   beyondReach - the mesh references a bone the last upload never wrote. Those registers still
+//                 hold the previous object's palette, so the part is posed onto that object.
+//   farUpload   - palette written this frame but many draws ago; suspicious, not conclusive.
+unsigned g_lastBoneUploadBones = 0;
+unsigned g_skinPaletteStaleFrame = 0, g_skinPaletteBeyondReach = 0, g_skinPaletteFarUpload = 0;
+unsigned g_skinPaletteOwn = 0, g_skinMaxBoneSeen = 0, g_skinMinReachSeen = 0xFFFFFFFFu;
+
+// Per-bone provenance, because "the reach of the last upload" was the WRONG measurement: SR3
+// writes a palette across several SetVertexShaderConstantF calls, so a small trailing call made a
+// perfectly valid palette look one bone deep. What actually matters is not how far one call
+// reached but whether all the bones a mesh uses were written for the SAME object.
+//
+// Recorded as the draw index at which each bone's registers were last written. A mesh whose used
+// bones were written at widely separated draw indices is being posed by a MIXTURE of palettes -
+// some of its own object's bones, some left over from whatever was drawn before. That is the
+// shape of "a detached car door is standing where that NPC's arm is", and it needs no assumption
+// about how many calls an upload takes or what order they arrive in.
+unsigned g_boneWrittenDraw[kBonesMax] = {};
+unsigned g_boneWrittenUploadBones[kBonesMax] = {};
+// Which OBJECT owned the palette when each bone was written.
+//
+// Upload size is a weak fingerprint - a 20-bone car and a 20-bone character are indistinguishable
+// by it. objTM is not: it is the object's own placement, and the game rewrites it for every
+// object it draws. A bone written while a DIFFERENT objTM was in force belongs to a different
+// object, whatever size its skeleton was. Since every palette upload in this game starts at c52,
+// bone 0 is rewritten by every single object that uploads one - so a part pinned to a low bone
+// index picks up whoever wrote last, continuously. That is "windows move all the time".
+unsigned g_objGeneration = 0;
+// Which draw setup published the palette currently in the shadow, and which setup we are in now.
+// A draw may only pose by that palette if the two agree.
+unsigned g_setupId = 0, g_paletteSetupId = 0xFFFFFFFFu;
+unsigned g_boneWrittenObjGen[kBonesMax] = {};
+float g_lastObjTM[3] = {};
+unsigned g_boneWrittenFrame[kBonesMax] = {};
+unsigned g_skinMixedPalette = 0, g_skinBoneNeverWritten = 0, g_skinCleanPalette = 0;
+unsigned g_skinWorstSpread = 0;
+// How far back a bone may have been written and still count as part of this object's palette.
+// One object's upload is a burst of consecutive calls sharing a draw index or within a draw or
+// two of it; the measured bad cases sat 276 draws away, so the two populations are nowhere near
+// each other and this threshold is not a fine judgement.
+constexpr unsigned kStaleBoneDraws = 4;
+// Falsifiers for the rejection. If rejectStaleBones is on and "influences rejected" is 0, the
+// filter never fired. If "vertices left in bind pose" is large, rejection is too aggressive and
+// is flattening meshes rather than repairing them.
+unsigned g_staleInfluencesRejected = 0, g_skinVertsBindPose = 0;
+unsigned g_skinMixedReports = 0;
+unsigned g_skinForeignBoneReg = 0, g_skinC52BoneReg = 0, g_skinBoneRegSeen = 0;
+unsigned g_skinDisplaced = 0, g_skinAtRest = 0, g_skinDisplaceReports = 0;
+float g_skinWorstDisplace = 0.0f;
+unsigned g_skinFewBones = 0, g_skinFewBonesForeign = 0, g_skinFewBonesOwn = 0;
+unsigned g_skinFewBoneReports = 0, g_rigidOffsetReports = 0;
+// Per-mesh history for the drift measurement above.
+struct DriftEntry { bool seen=false; unsigned frame=0; float world[3]={}; float obj[3]={}; float bone[3]={}; };
+std::unordered_map<unsigned long long, DriftEntry> g_driftTrack;
+unsigned g_driftMoved = 0, g_driftStill = 0, g_driftReports = 0, g_paletteOutOfScope = 0;
+float g_driftWorst = 0.0f;
+// Draws split by which transform the SHADER actually performs, so the split is visible rather
+// than assumed. "single bone" is the vehicle/rigid-attachment path.
+unsigned g_skinFourBone = 0, g_skinSingleBone = 0;
+unsigned g_rigidOwnObject = 0, g_rigidForeignObject = 0, g_rigidForeignReports = 0;
+// Falsifiers for the clamp. ON with 0 stale verts means it never fired. A stale count close to
+// the total vertex count means it is rejecting nearly everything and flattening meshes instead.
+unsigned g_staleBoneVerts = 0, g_skinVertsTotal = 0, g_vehicleBonesSkipped = 0;
+unsigned g_shadowCheckReports = 0, g_shadowMismatch = 0, g_shadowMatch = 0;
+// __popcnt64 is not available to this 32-bit build; the mask is only 64 bits and this runs a
+// handful of times per frame, so a plain loop costs nothing worth optimising.
+inline unsigned BonesUsedCount(unsigned long long m) {
+    unsigned n = 0;
+    while (m) { n += static_cast<unsigned>(m & 1ull); m >>= 1; }
+    return n;
+}
+// A short history of palette uploads: which REGISTERS each call wrote and when. The draw index
+// alone cannot tell "the car refreshed five of its own bones" from "another object clobbered five
+// of the car's bones" - the register ranges can, because one object's upload is a contiguous
+// block starting at c52 and a foreign write lands wherever that object's own bones live.
+struct PaletteWrite { unsigned draw, frame, startReg, endReg; };
+PaletteWrite g_paletteHistory[24] = {};
+unsigned g_paletteHistoryPos = 0;
 
 // The last matrix actually written to the device, with a validity flag each. The flag is NOT
 // optional: identity is a legitimate and very common world matrix (every shader that does not
@@ -1212,6 +1393,7 @@ PendingLock g_pendingLock;
 // Copying it here costs one memcpy of the region actually written and never stalls the GPU.
 // Defined with the uv conversion, further down.
 void InvalidateUvBuffers(IDirect3DVertexBuffer9* vb);
+void InvalidateBaseMeshes(IDirect3DVertexBuffer9* vb);
 // Defined with the skinning, further down - every read-lock of a game vertex buffer uses it.
 bool VertexRangeFits(IDirect3DVertexBuffer9* vb, UINT streamOffset, UINT firstVertex,
                      UINT count, UINT stride);
@@ -1236,6 +1418,13 @@ HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size,
     // buffer being refilled is exactly the case a reference on it cannot protect against, and
     // this is the only place that sees it happen.
     InvalidateUvBuffers(self);
+    // The bind-pose cache has exactly the same problem and went eleven sessions without it. Its
+    // key is {vb, offset, stride, minIndex, count}, which names a SLOT in a buffer, not a mesh -
+    // so once the game refills that slot with a different character's vertices, every later draw
+    // from it is served the previous occupant's geometry. That is "each character had the wrong
+    // head", and it is invisible to a displacement check because a stale mesh is self-consistent:
+    // its bind pose and its skinned pose agree with each other, they just belong to someone else.
+    InvalidateBaseMeshes(self);
 
     // Only buffers we have already identified as instance streams are worth snooping.
     const auto it = g_instCache.find(self);
@@ -3663,6 +3852,18 @@ HRESULT WINAPI Hook_SetVertexShaderConstantF(IDirect3DDevice9* dev, UINT start,
             g_worldWritten = false;
             g_worldDirty = true;
         }
+        // The bone palette needs the same scoping objTM already has, and never had it.
+        //
+        // Measured 2026-08-25: a mesh whose objTM was IDENTICAL between two frames moved 0.75
+        // units, because bone[0]'s translation went from (0.132, -0.939, -0.360) to (0, 0, 0).
+        // The palette shadow persists across setups, so a draw whose own setup uploaded no
+        // palette silently inherits the previous object's bones - and which object that is
+        // depends on draw order, which depends on what is on screen.
+        //
+        // This is the identical failure the comment above describes for objTM, and the same
+        // remedy applies: an object that did not publish a palette gets IDENTITY bones, so objTM
+        // alone places it, rather than being posed by somebody else's skeleton.
+        ++g_setupId;
         // Reject non-finite uploads: some passes reuse these registers for parameter blocks,
         // and a NaN projection poisons Remix's camera tracking for the whole frame.
         g_viewProjValid = true;
@@ -3676,8 +3877,43 @@ HRESULT WINAPI Hook_SetVertexShaderConstantF(IDirect3DDevice9* dev, UINT start,
     if (start < kRegBonePalette + kBonesMax * kRegsPerBone && end > kRegBonePalette) {
         g_lastBoneUploadDraw = g_drawIndexThisFrame;
         g_lastBoneUploadFrame = g_frames;
+        // How far the upload actually REACHED. The palette shadow persists across draws, so
+        // registers past this point still hold whatever the previous object left there. A mesh
+        // whose bone indices run past the upload is posed by another object's bones - which is
+        // what "a car door flew to where that NPC's arm was" looks like. Recorded as a bone
+        // count so it can be compared with a mesh's highest index directly.
+        const unsigned reach = (end > kRegBonePalette) ? (end - kRegBonePalette) : 0u;
+        g_lastBoneUploadBones = reach / kRegsPerBone;
+        // Mark every bone this call touched. Partial calls accumulate instead of overwriting,
+        // which is the flaw in g_lastBoneUploadBones above.
+        g_paletteHistory[g_paletteHistoryPos % 24] =
+            {g_drawIndexThisFrame, g_frames, start, end};
+        ++g_paletteHistoryPos;
+        const unsigned firstBone = (start > kRegBonePalette)
+            ? (start - kRegBonePalette) / kRegsPerBone : 0u;
+        const unsigned lastBone = (reach + kRegsPerBone - 1) / kRegsPerBone;
+        for (unsigned b = firstBone; b < lastBone && b < static_cast<unsigned>(kBonesMax); ++b) {
+            g_boneWrittenDraw[b] = g_drawIndexThisFrame;
+            g_boneWrittenFrame[b] = g_frames;
+            // How many bones the upload that wrote this one covered. A skeleton's size is a
+            // fingerprint: a mesh that uses 1 bone but reads it from a 48-bone upload is reading
+            // a CHARACTER's root bone, and every palette upload in this game starts at c52 so
+            // bone 0 belongs to whoever wrote last.
+            g_boneWrittenUploadBones[b] = g_lastBoneUploadBones;
+            g_boneWrittenObjGen[b] = g_objGeneration;
+        g_paletteSetupId = g_setupId;
+        }
     }
     if (start <= kRegObjTM && end >= kRegObjTM + 3) {
+        // Compared by VALUE, not merely by "a write happened": the game re-uploads an identical
+        // objTM for consecutive draws of one object, and counting those as new objects would make
+        // every part look foreign.
+        const float t0 = g_vsConst[kRegObjTM][3], t1 = g_vsConst[kRegObjTM + 1][3],
+                    t2 = g_vsConst[kRegObjTM + 2][3];
+        if (t0 != g_lastObjTM[0] || t1 != g_lastObjTM[1] || t2 != g_lastObjTM[2]) {
+            g_lastObjTM[0] = t0; g_lastObjTM[1] = t1; g_lastObjTM[2] = t2;
+            ++g_objGeneration;
+        }
         Trace('O');
         g_worldDirty = true;
         g_worldWritten = true;
@@ -5160,12 +5396,64 @@ struct BaseMesh {
     // different mesh's bind pose. The key contains the pointer, so without a reference the key
     // itself is unstable.
     IDirect3DVertexBuffer9* owner = nullptr;
+    // Highest bone index this mesh actually references, counting only components with a
+    // non-zero weight - slot 255 is the "unused" sentinel and would otherwise dominate.
+    // Computed once at decode so the per-draw check costs one comparison.
+    unsigned maxBone = 0;
+    // Which bones this mesh actually reads, one bit each. 64 bones fits exactly, and it lets the
+    // per-draw check walk only the bones that matter instead of all 64.
+    unsigned long long usedBones = 0;
 };
 std::unordered_map<unsigned long long, BaseMesh> g_baseMeshes;
+// Which cached meshes came out of which buffer, so a write-lock can drop exactly those.
+std::unordered_map<IDirect3DVertexBuffer9*, std::vector<unsigned long long>> g_baseMeshByVB;
+unsigned g_baseMeshInvalidations = 0;
 constexpr size_t kMaxBaseMeshes = 1024;
 
+// Drop every cached bind pose decoded out of this buffer. Indexed by owner so a lock costs a
+// hash lookup rather than a walk of the whole cache - the game locks buffers many times a frame
+// and this runs inside that path.
+void InvalidateBaseMeshes(IDirect3DVertexBuffer9* vb) {
+    const auto list = g_baseMeshByVB.find(vb);
+    if (list == g_baseMeshByVB.end()) return;
+    for (const unsigned long long key : list->second) {
+        const auto it = g_baseMeshes.find(key);
+        if (it == g_baseMeshes.end()) continue;
+        if (it->second.owner) it->second.owner->Release();
+        g_baseMeshes.erase(it);
+        ++g_baseMeshInvalidations;
+    }
+    g_baseMeshByVB.erase(list);
+}
+
 IDirect3DVertexBuffer9* g_skinVB = nullptr;
-constexpr UINT kSkinRingBytes = 8u * 1024u * 1024u;
+// The ring the CPU-skinned vertices are written into, and the one piece of shared mutable memory
+// in the whole skinned path. Its write position is forced to firstVertex*stride so the game's own
+// index buffer can be reused verbatim - which means the ring is consumed far faster than the
+// vertex count alone suggests, because each draw skips forward to its own index base.
+//
+// When it fills, the wrap issues D3DLOCK_DISCARD over the WHOLE buffer, which orphans the
+// allocation. Anything already submitted this frame that still refers to the old storage is fine
+// for rasterisation, but it is exactly the kind of aliasing a path tracer reading the buffer later
+// would not survive. How often that happens scales with how much skinned geometry is on screen -
+// the one property of the reported drift that nothing else explains.
+//
+// Sized from the ini so the hypothesis can be tested by making wraps impossible rather than by
+// argument. 8 MB was the original fixed size.
+UINT g_skinRingBytes = 8u * 1024u * 1024u;
+unsigned g_skinRingWraps = 0, g_skinRingDiscards = 0;
+// How long the ring's own Lock takes, split by kind. A whole-buffer DISCARD asks the driver to
+// hand back a FRESH allocation of the entire buffer; if its pool has none free it blocks until
+// the GPU releases one. That stall is charged to whichever draw happened to be first in the
+// frame, so it lands in the shim's per-draw time indistinguishable from skinning arithmetic.
+// Timed separately, "is the ring's SIZE costing us frames?" stops being an inference from the
+// shape of a sawtooth and becomes a number.
+double g_skinLockDiscardMs = 0.0, g_skinLockKeepMs = 0.0, g_skinLockWorstMs = 0.0;
+// Draws whose vertex shader reads no BLENDINDICES: not skinned by the game, whatever the
+// vertex declaration says. Counted apart from g_skinC52BoneReg, which lumps "declared at c52"
+// together with "declared nowhere, defaulted to c52" and so reported this bug as clean.
+unsigned g_skinNoBoneDecl = 0, g_skinNoBoneDeclReports = 0;
+UINT g_skinRingHighWater = 0;
 UINT g_skinRingPos = 0;
 bool g_skinRingFresh = true;   // next lock must DISCARD
 
@@ -5308,6 +5596,7 @@ const BaseMesh* GetBaseMesh(UINT firstVertex, UINT numVertices) {
     // turns that cliff into a rebuild: the meshes still on screen are re-decoded within a frame
     // or two. Releasing the pinned buffers is part of the clear, not optional.
     if (g_baseMeshes.size() >= kMaxBaseMeshes) {
+        g_baseMeshByVB.clear();
         for (auto& kv : g_baseMeshes)
             if (kv.second.owner) kv.second.owner->Release();
         g_baseMeshes.clear();
@@ -5395,6 +5684,13 @@ const BaseMesh* GetBaseMesh(UINT firstVertex, UINT numVertices) {
         } else {
             memcpy(out.idx, ib, 4);
         }
+        // Only weighted components count: an unused slot carries index 255 with weight 0 and
+        // would make every mesh look like it reads bone 255.
+        for (int k = 0; k < 4; ++k) {
+            if (out.w[k] == 0.0f || out.idx[k] >= static_cast<unsigned>(kBonesMax)) continue;
+            if (out.idx[k] > mesh.maxBone) mesh.maxBone = out.idx[k];
+            mesh.usedBones |= 1ull << out.idx[k];
+        }
     }
     g_stream0->Unlock();
     if (!ok) return nullptr;
@@ -5402,6 +5698,7 @@ const BaseMesh* GetBaseMesh(UINT firstVertex, UINT numVertices) {
     ++g_baseMeshDecodes;
     mesh.owner = g_stream0;
     mesh.owner->AddRef();
+    g_baseMeshByVB[g_stream0].push_back(key);
     return &(g_baseMeshes[key] = std::move(mesh));
 }
 
@@ -5422,6 +5719,88 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
         return false;
     }
 
+    // Does the palette we are about to read belong to THIS object? Measured, not assumed - the
+    // assumption in the code below is "the palette is written a few draws earlier under the same
+    // objTM, so it belongs to the draw", and detached car parts posed onto NPC limbs is what it
+    // looks like when that is false.
+    // The draw index of the most recent palette write among the bones this mesh reads. That
+    // burst is THIS object's palette; anything written materially earlier belongs to something
+    // drawn before and must not pose these vertices. Zero means "no usable epoch", which leaves
+    // the blend below unfiltered.
+    unsigned paletteEpoch = 0;
+    {
+        const bool sameFrame = (g_lastBoneUploadFrame == g_frames);
+        const unsigned drawsAgo =
+            sameFrame && g_drawIndexThisFrame >= g_lastBoneUploadDraw
+                ? g_drawIndexThisFrame - g_lastBoneUploadDraw : 0u;
+        if (mesh->maxBone > g_skinMaxBoneSeen) g_skinMaxBoneSeen = mesh->maxBone;
+        if (g_lastBoneUploadBones < g_skinMinReachSeen) g_skinMinReachSeen = g_lastBoneUploadBones;
+        if (!sameFrame) ++g_skinPaletteStaleFrame;
+        else if (mesh->maxBone >= g_lastBoneUploadBones) ++g_skinPaletteBeyondReach;
+        else if (drawsAgo > 16) ++g_skinPaletteFarUpload;
+        else ++g_skinPaletteOwn;
+
+        // The measurement that does not depend on how many calls an upload took: were all the
+        // bones this mesh reads written at the same time, for the same object?
+        unsigned oldest = 0xFFFFFFFFu, newest = 0u;
+        bool neverWritten = false;
+        for (unsigned b = 0; b < static_cast<unsigned>(kBonesMax); ++b) {
+            if (!(mesh->usedBones & (1ull << b))) continue;
+            if (g_boneWrittenFrame[b] != g_frames) { neverWritten = true; break; }
+            const unsigned w = g_boneWrittenDraw[b];
+            if (w < oldest) oldest = w;
+            if (w > newest) newest = w;
+        }
+        if (neverWritten) {
+            ++g_skinBoneNeverWritten;          // reads a bone nothing wrote this frame at all
+        } else if (oldest != 0xFFFFFFFFu) {
+            paletteEpoch = newest;
+            const unsigned spread = newest - oldest;
+            if (spread > g_skinWorstSpread) g_skinWorstSpread = spread;
+            // One object's palette arrives as a burst of consecutive calls, so its bones share a
+            // draw index or sit within a draw or two. A wide spread means two objects' bones.
+            if (spread > 4) {
+                ++g_skinMixedPalette;
+                // Counting these was not enough. Rejecting the older epoch stranded ~640
+                // vertices per mixed draw in bind pose, which says the older bones are the
+                // MAJORITY of the mesh and therefore almost certainly legitimate. So name the
+                // draws instead: what they are, where they sit, and how the two epochs split.
+                // If these turn out to be characters rather than vehicles, the whole palette
+                // line of enquiry is finished and the car parts have another cause entirely.
+                if (g_skinMixedReports < 16) {
+                    ++g_skinMixedReports;
+                    unsigned inNewest = 0, inOldest = 0;
+                    for (unsigned b2 = 0; b2 < static_cast<unsigned>(kBonesMax); ++b2) {
+                        if (!(mesh->usedBones & (1ull << b2))) continue;
+                        if (newest - g_boneWrittenDraw[b2] <= kStaleBoneDraws) ++inNewest;
+                        else ++inOldest;
+                    }
+                    const D3DMATRIX obj = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+                    Log("MIXED-PALETTE #%u: ps='%s' verts=%u | objTM t=(%.1f %.1f %.1f) | "
+                        "draw %u of frame %u | epochs: %u bones at draw %u (newest), "
+                        "%u bones up to %u draws older | highest bone %u",
+                        g_skinMixedReports, g_curPS.albedoSampler, numVertices,
+                        obj._41, obj._42, obj._43, g_drawIndexThisFrame, g_frames,
+                        inNewest, newest, inOldest, spread, mesh->maxBone);
+                    // The uploads themselves, newest last. A contiguous block from c52 is an
+                    // object publishing its whole palette; a short range starting elsewhere is
+                    // a partial refresh - or another object's bones landing on top of ours.
+                    for (unsigned h = 0; h < 24; ++h) {
+                        const unsigned slot = (g_paletteHistoryPos + h) % 24;
+                        const PaletteWrite& w = g_paletteHistory[slot];
+                        if (!w.endReg || w.frame != g_frames) continue;
+                        Log("        upload: draw %u regs c%u..c%u (bones %u..%u)%s",
+                            w.draw, w.startReg, w.endReg,
+                            w.startReg > kRegBonePalette
+                                ? (w.startReg - kRegBonePalette) / kRegsPerBone : 0u,
+                            (w.endReg - kRegBonePalette) / kRegsPerBone,
+                            w.startReg == kRegBonePalette ? "  <- starts at c52" : "");
+                    }
+                }
+            } else ++g_skinCleanPalette;
+        }
+    }
+
     const UINT stride = sizeof(SkinnedVertex);
     const UINT need = numVertices * stride;
     // Index i reads at (streamOffset + (baseVertex + i) * stride), so our vertex 0 must land on
@@ -5429,22 +5808,32 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
     // Meeting that here is what lets the game's own index buffer be reused verbatim - no index
     // copy and no rebasing.
     const UINT base = firstVertex * stride;
-    if (static_cast<unsigned long long>(base) + need > kSkinRingBytes) {
+    if (static_cast<unsigned long long>(base) + need > g_skinRingBytes) {
         g_skinRefuseWhy = "mesh does not fit the ring buffer";
         return false;
     }
     if (g_skinRingPos < base) g_skinRingPos = base;
     bool discard = g_skinRingFresh;
-    if (g_skinRingPos + need > kSkinRingBytes) { g_skinRingPos = base; discard = true; }
+    if (g_skinRingPos + need > g_skinRingBytes) {
+        g_skinRingPos = base; discard = true; ++g_skinRingWraps;
+    }
+    if (discard) ++g_skinRingDiscards;
+    if (g_skinRingPos + need > g_skinRingHighWater) g_skinRingHighWater = g_skinRingPos + need;
 
     // D3DLOCK_DISCARD is defined only for a WHOLE-buffer lock - the contract is "I am about to
     // overwrite the entire buffer", and pairing it with a sub-range is not something D3D9
     // promises anything about. So a discard locks (0, 0) and we index into the returned pointer
     // ourselves; only NOOVERWRITE takes the sub-range form.
     void* mapped = nullptr;
+    const LONGLONG tLock = Now();
     const HRESULT lockHr = discard
         ? g_skinVB->Lock(0, 0, &mapped, D3DLOCK_DISCARD)
         : g_skinVB->Lock(g_skinRingPos, need, &mapped, D3DLOCK_NOOVERWRITE);
+    {
+        const double lockMs = MsSince(tLock);
+        if (discard) g_skinLockDiscardMs += lockMs; else g_skinLockKeepMs += lockMs;
+        if (lockMs > g_skinLockWorstMs) g_skinLockWorstMs = lockMs;
+    }
     if (FAILED(lockHr) || !mapped) {
         g_skinRefuseWhy = "lock of the ring buffer failed";
         return false;
@@ -5453,23 +5842,169 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
 
     SkinnedVertex* out = reinterpret_cast<SkinnedVertex*>(
         static_cast<unsigned char*>(mapped) + (discard ? g_skinRingPos : 0u));
-    const float* palette = &g_vsConst[kRegBonePalette][0];
+    // The register this shader actually declares, not the one a character shader used.
+    const UINT boneBase = (g_curVS.boneReg >= 0)
+        ? static_cast<UINT>(g_curVS.boneReg) : kRegBonePalette;
+    if (boneBase != kRegBonePalette) ++g_skinForeignBoneReg; else ++g_skinC52BoneReg;
+    // Name the draws whose shader reads no BLENDINDICES. These are the ones that were being
+    // posed from a stranger's palette; the sampler identifies which mesh so the finding can be
+    // checked against what is visibly wrong on screen rather than taken on trust.
+    if (!g_curVS.usesBlendIndices && g_skinNoBoneDeclReports < 10) {
+        ++g_skinNoBoneDeclReports;
+        Log("NO BONE DECL #%u: ps='%s' verts=%u - this vertex shader declares no "
+            "BLENDINDICES input and places the mesh by objTM alone. boneReg=%d. %s",
+            g_skinNoBoneDeclReports, g_curPS.albedoSampler, numVertices, g_curVS.boneReg,
+            g_settings.skinRequireBoneDecl ? "Left in its bind pose (correct)."
+                                           : "STILL reading c52 (skinRequireBoneDecl=0).");
+    }
+    if (g_skinBoneRegSeen < 8 && boneBase != kRegBonePalette) {
+        ++g_skinBoneRegSeen;
+        Log("BONE REGISTER: ps='%s' declares Bone_weights at c%u, NOT c52 - every draw of this "
+            "shader has been skinned from the wrong constants", g_curPS.albedoSampler, boneBase);
+    }
+    // GROUND TRUTH: is our shadow of the constants what the DEVICE actually holds?
+    //
+    // Every hypothesis so far has assumed g_vsConst mirrors the device. It is built purely from
+    // SetVertexShaderConstantF calls we intercept, so anything that sets constants by another
+    // route - a state block apply, a redundant-call filter of our own, a bridge-side cache -
+    // leaves it stale without any of the previous probes being able to tell.
+    //
+    // The game renders its own cars correctly from the same c52[v.x*3] the disassembly shows, so
+    // at the moment of a car draw the DEVICE must hold the car's palette. If our shadow disagrees,
+    // that is the bug, and no amount of ownership heuristics on a wrong shadow would have found it.
+    //
+    // Read back only for the first few draws: GetVertexShaderConstantF crosses the 32-to-64-bit
+    // bridge and is far too expensive to do per draw.
+    if (g_shadowCheckReports < 12 && !g_curVS.usesBlendWeights && !mesh->verts.empty()) {
+        const unsigned b0 = mesh->verts[0].idx[0];
+        if (b0 < static_cast<unsigned>(kBonesMax)) {
+            float dev4[12] = {}, obj4[12] = {};
+            g_internal = true;
+            const HRESULT h1 = dev->GetVertexShaderConstantF(boneBase + b0 * kRegsPerBone, dev4, 3);
+            const HRESULT h2 = dev->GetVertexShaderConstantF(kRegObjTM, obj4, 3);
+            g_internal = false;
+            if (SUCCEEDED(h1) && SUCCEEDED(h2)) {
+                const float* shadowBone = &g_vsConst[boneBase + b0 * kRegsPerBone][0];
+                const float* shadowObj = &g_vsConst[kRegObjTM][0];
+                float boneDiff = 0.0f, objDiff = 0.0f;
+                for (int e = 0; e < 12; ++e) {
+                    boneDiff = max(boneDiff, std::fabs(dev4[e] - shadowBone[e]));
+                    objDiff = max(objDiff, std::fabs(obj4[e] - shadowObj[e]));
+                }
+                if (boneDiff > 1e-4f || objDiff > 1e-4f) {
+                    ++g_shadowCheckReports;
+                    ++g_shadowMismatch;
+                    Log("SHADOW MISMATCH #%u: ps='%s' bone %u | bone rows differ by %.4f, objTM by "
+                        "%.4f | device bone t=(%.2f %.2f %.2f) shadow t=(%.2f %.2f %.2f) | "
+                        "device objTM t=(%.2f %.2f %.2f) shadow t=(%.2f %.2f %.2f)",
+                        g_shadowCheckReports, g_curPS.albedoSampler, b0, boneDiff, objDiff,
+                        dev4[3], dev4[7], dev4[11],
+                        shadowBone[3], shadowBone[7], shadowBone[11],
+                        obj4[3], obj4[7], obj4[11],
+                        shadowObj[3], shadowObj[7], shadowObj[11]);
+                } else {
+                    ++g_shadowMatch;
+                    if (g_shadowMatch == 1)
+                        Log("SHADOW CHECK: device constants MATCH our shadow on the first vehicle "
+                            "draw (bone %u) - the shadow is not the problem", b0);
+                }
+            }
+        }
+    }
+
+    const float* palette = &g_vsConst[boneBase][0];
+    double cSkin[3] = {}, cBind[3] = {};
+    unsigned cN = 0;
     for (UINT i = 0; i < numVertices; ++i) {
         const BaseVertex& b = mesh->verts[i];
         float m[12] = {};
         float sum = 0.0f;
-        for (int k = 0; k < 4; ++k) {
-            const float wk = b.w[k];
+        // A shader that declares no blendweight input uses exactly ONE bone - index component 0,
+        // implicit weight 1. Blending the other three would mix in bones the game never reads.
+        // A shader with no BLENDINDICES input indexes no palette: 0 influences, so the vertex
+        // falls through to the bind-pose path below and objTM places it - which is exactly and
+        // only what the game's own static variant does.
+        const bool reads = g_curVS.usesBlendIndices || !g_settings.skinRequireBoneDecl;
+        const int influences = !reads ? 0 : (g_curVS.usesBlendWeights ? 4 : 1);
+        if (i == 0) {
+            if (!reads) ++g_skinNoBoneDecl;
+            else if (influences == 1) ++g_skinSingleBone; else ++g_skinFourBone;
+        }
+        for (int k = 0; k < influences; ++k) {
             // Reject on WEIGHT, not index: slot 255 is the "unused" sentinel and would address
             // c817, far outside the 192-register palette.
+            const float wk = (influences == 1) ? 1.0f : b.w[k];
             if (wk == 0.0f) continue;
             const unsigned bone = b.idx[k];
             if (bone >= static_cast<unsigned>(kBonesMax)) continue;
+            // Reject an influence whose bone matrix belongs to a DIFFERENT object.
+            //
+            // The palette shadow persists across draws, so a bone this object never wrote still
+            // holds the previous object's matrix. Measured 2026-08-25: 5 skinned draws a frame
+            // read bones written up to 276 draws apart - two objects' palettes blended into one
+            // mesh. That is the detached car part standing where an NPC's arm is.
+            //
+            // The surviving weights are renormalised below (the blend already divides by `sum`),
+            // so dropping an influence redistributes it across this object's own bones rather
+            // than shrinking the vertex toward the origin. A vertex that loses EVERY influence
+            // falls through to the existing bind-pose path, which keeps it attached to its own
+            // object instead of teleporting it onto someone else.
+            if (g_settings.rejectStaleBones && paletteEpoch) {
+                if (g_boneWrittenFrame[bone] != g_frames ||
+                    paletteEpoch - g_boneWrittenDraw[bone] > kStaleBoneDraws) {
+                    ++g_staleInfluencesRejected;
+                    continue;
+                }
+            }
+            // Is this bone part of THIS object's palette?
+            //
+            // Every upload in the game starts at c52 and runs as long as that object's skeleton
+            // needs, so the palette shadow always holds a prefix belonging to the current object
+            // and a tail left over from previous ones. A vertex bound to a bone in that tail is
+            // posed by another object entirely.
+            //
+            // Multi-call uploads are handled by construction: consecutive constant writes with no
+            // draw between them share a draw index, so the whole upload carries one stamp. This
+            // is what the first "beyond the upload's reach" test got wrong - it compared against
+            // the LAST call's length instead of the upload's stamp.
+            //
+            // Only some vertices of a mesh are affected, which is why the result is a car that
+            // stretches as well as drifts: the bound vertices are dragged and the rest stay put.
+            // The palette in the shadow belongs to a DIFFERENT draw setup, so it is not this
+            // object's. Contribute nothing: the vertex keeps its bind pose and objTM places it,
+            // which leaves the part attached to itself instead of posed onto another object.
+            if (g_settings.paletteSetupScope && g_paletteSetupId != g_setupId) {
+                ++g_paletteOutOfScope;
+                continue;
+            }
+            // Diagnostic, and possibly an acceptable interim state: ignore the bone palette
+            // entirely for single-bone (vehicle) draws and let objTM place the bind pose.
+            //
+            // The clamp above verifies a bone came from the MOST RECENT upload, not that the most
+            // recent upload belongs to this draw's object. When a character's palette lands between
+            // a car's upload and the car's draw, the character's bones carry the current stamp and
+            // pass. Whether that happens depends on draw order, which depends on what is on
+            // screen - which is precisely how the drift was described.
+            //
+            // If cars are stable and correctly placed with the palette ignored, the bones are the
+            // whole problem and nothing else is involved. What is lost is whatever the bones
+            // encode beyond rest position: door swing, damage deformation, wheel spin.
+            if (g_settings.vehicleBonesOff && !g_curVS.usesBlendWeights) {
+                ++g_vehicleBonesSkipped;
+                continue;
+            }
+            if (g_settings.clampBonesToUpload &&
+                (g_boneWrittenFrame[bone] != g_frames ||
+                 g_boneWrittenDraw[bone] != g_lastBoneUploadDraw)) {
+                ++g_staleBoneVerts;
+                continue;   // no influence: falls through to bind pose, which objTM then places
+            }
             const float* r = palette + bone * kRegsPerBone * 4;
             for (int e = 0; e < 12; ++e) m[e] += wk * r[e];
             sum += wk;
         }
         if (sum <= 0.0f) {   // no influence at all: leave the vertex in its bind pose
+            ++g_skinVertsBindPose;
             memcpy(out[i].pos, b.pos, sizeof(b.pos));
             memcpy(out[i].nrm, b.nrm, sizeof(b.nrm));
             out[i].uv[0] = b.uv[0];
@@ -5493,8 +6028,186 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
         for (int r = 0; r < 3; ++r) out[i].nrm[r] = n[r] * ninv;
         out[i].uv[0] = b.uv[0];
         out[i].uv[1] = b.uv[1];
+        for (int r = 0; r < 3; ++r) { cSkin[r] += out[i].pos[r]; cBind[r] += b.pos[r]; }
+        ++cN;
+        ++g_skinVertsTotal;
     }
     g_skinVB->Unlock();
+
+    // THE measurement, after four runs of arguing about palettes: how far did skinning MOVE this
+    // mesh from its rest position? Both centroids are in object space, so objTM cancels and this
+    // is purely what the bone matrices did.
+    //
+    // A car part at rest sits on its own bind pose - a door swings, a wheel spins, nothing
+    // travels far. A part posed by ANOTHER object's bones is displaced by that object's limb
+    // positions, and the displacement changes as that object animates. That is the reported
+    // "parts move around in sync with player or NPC animation", and it is a distance in units
+    // rather than an interpretation of upload ordering.
+    if (cN) {
+        double dd = 0.0;
+        for (int r = 0; r < 3; ++r) {
+            const double e = (cSkin[r] - cBind[r]) / cN;
+            dd += e * e;
+        }
+        const float d = static_cast<float>(std::sqrt(dd));
+        if (d > g_skinWorstDisplace) g_skinWorstDisplace = d;
+        if (d > 3.0f) {
+            ++g_skinDisplaced;
+            if (g_skinDisplaceReports < 16) {
+                ++g_skinDisplaceReports;
+                const D3DMATRIX o = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+                Log("DISPLACED SKIN #%u: ps='%s' verts=%u moved %.1f units from its bind pose "
+                    "| objTM t=(%.1f %.1f %.1f) | bones used %u, highest %u | draw %u frame %u",
+                    g_skinDisplaceReports, g_curPS.albedoSampler, numVertices, d,
+                    o._41, o._42, o._43,
+                    BonesUsedCount(mesh->usedBones), mesh->maxBone,
+                    g_drawIndexThisFrame, g_frames);
+            }
+        } else ++g_skinAtRest;
+
+        // MEASURE THE DRIFT ITSELF, rather than assuming what "correct" looks like.
+        //
+        // The previous target - "a rigid part should end up centred on its origin" - was WRONG.
+        // These bones legitimately place a part at its position ON the car: bone[13] is a 22
+        // degree rotation plus (0, 1.121, -1.440), and the mesh is authored at the origin. An
+        // offset result is normal.
+        //
+        // What is NOT normal is the reported symptom: the render moves while the object's real
+        // position does not. So track, per mesh, the world-space centroid and the objTM it was
+        // computed under. If objTM is UNCHANGED between two frames but the world centroid has
+        // moved, that is the drift, in units, with no assumption about what the right answer is.
+        if (!g_curVS.usesBlendWeights && cN) {
+            const D3DMATRIX o = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+            const float sx = static_cast<float>(cSkin[0]/cN), sy = static_cast<float>(cSkin[1]/cN),
+                        sz = static_cast<float>(cSkin[2]/cN);
+            const D3DVECTOR local = {sx, sy, sz};
+            const D3DVECTOR w = TransformPoint(&local.x, o);
+            // The cached BaseMesh pointer identifies the mesh; entries are stable until the
+            // cache is invalidated, and an invalidation just restarts the comparison.
+            auto& e = g_driftTrack[reinterpret_cast<unsigned long long>(mesh)];
+            if (e.seen && e.frame != g_frames) {
+                const bool objSame = std::fabs(e.obj[0]-o._41) < 1e-4f &&
+                                     std::fabs(e.obj[1]-o._42) < 1e-4f &&
+                                     std::fabs(e.obj[2]-o._43) < 1e-4f;
+                const float dx = w.x-e.world[0], dy = w.y-e.world[1], dz = w.z-e.world[2];
+                const float moved = std::sqrt(dx*dx + dy*dy + dz*dz);
+                if (objSame) {
+                    if (moved > 0.01f) {
+                        ++g_driftMoved;
+                        if (moved > g_driftWorst) g_driftWorst = moved;
+                        if (g_driftReports < 16) {
+                            ++g_driftReports;
+                            const unsigned b0 = mesh->verts[0].idx[0];
+                            const float* r = &g_vsConst[boneBase + b0*kRegsPerBone][0];
+                            Log("DRIFT #%u: ps='%s' verts=%u bone0=%u | objTM UNCHANGED (%.2f %.2f "
+                                "%.2f) but world centroid moved %.3f units",
+                                g_driftReports, g_curPS.albedoSampler, numVertices, b0,
+                                o._41, o._42, o._43, moved);
+                            Log("    was (%8.3f %8.3f %8.3f)  now (%8.3f %8.3f %8.3f)",
+                                e.world[0], e.world[1], e.world[2], w.x, w.y, w.z);
+                            Log("    bone[%u] translate now (%7.3f %7.3f %7.3f), was (%7.3f %7.3f "
+                                "%7.3f)  | palette upload %u bones at draw %u",
+                                b0, r[3], r[7], r[11], e.bone[0], e.bone[1], e.bone[2],
+                                g_lastBoneUploadBones, g_lastBoneUploadDraw);
+                        }
+                    } else ++g_driftStill;
+                }
+            }
+            const unsigned b0 = mesh->verts.empty() ? 0u : mesh->verts[0].idx[0];
+            const float* r = &g_vsConst[boneBase + b0*kRegsPerBone][0];
+            e.seen = true; e.frame = g_frames;
+            e.world[0]=w.x; e.world[1]=w.y; e.world[2]=w.z;
+            e.obj[0]=o._41; e.obj[1]=o._42; e.obj[2]=o._43;
+            e.bone[0]=r[3]; e.bone[1]=r[7]; e.bone[2]=r[11];
+        }
+
+        // Catch the exact failing case and dump every input to it.
+        //
+        // The capture gives a numeric target: a standalone rigid part should end up centred on
+        // its own origin, because objTM already carries its real (physics) position. Measured
+        // 2026-08-25 - a detached bumper sat at local (0, -0.085, 2.075) and a detached door at
+        // (0.958, 0.515, -0.078), i.e. still at their positions ON THE CAR. The bone whose job is
+        // to undo that offset is not doing it.
+        //
+        // Everything upstream is verified: the constants match the device (650k comparisons), the
+        // register layout matches all 882 CTABs, and the transform matches the disassembly. So one
+        // of the three inputs must differ for these draws specifically, and this prints all of
+        // them for the draws that actually come out wrong.
+        if (!g_curVS.usesBlendWeights && g_rigidOffsetReports < 20 && cN) {
+            const double ox = cSkin[0]/cN, oy = cSkin[1]/cN, oz = cSkin[2]/cN;
+            const double off = std::sqrt(ox*ox + oy*oy + oz*oz);
+            const double bx = cBind[0]/cN, by = cBind[1]/cN, bz = cBind[2]/cN;
+            if (off > 1.0) {                       // skinned result is NOT near its own origin
+                ++g_rigidOffsetReports;
+                const unsigned b0 = mesh->verts[0].idx[0];
+                const float* r = &g_vsConst[boneBase + b0 * kRegsPerBone][0];
+                const D3DMATRIX o = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+                Log("OFFSET PART #%u: ps='%s' verts=%u bones=%u bone0=%u",
+                    g_rigidOffsetReports, g_curPS.albedoSampler, numVertices,
+                    BonesUsedCount(mesh->usedBones), b0);
+                Log("    bind centroid   (%8.3f %8.3f %8.3f)", bx, by, bz);
+                Log("    skinned centroid(%8.3f %8.3f %8.3f)   |offset| %.3f  <- should be ~0",
+                    ox, oy, oz, off);
+                Log("    bone[%u] rows    (%7.3f %7.3f %7.3f | %7.3f)", b0, r[0], r[1], r[2], r[3]);
+                Log("                    (%7.3f %7.3f %7.3f | %7.3f)", r[4], r[5], r[6], r[7]);
+                Log("                    (%7.3f %7.3f %7.3f | %7.3f)", r[8], r[9], r[10], r[11]);
+                Log("    objTM translate (%8.3f %8.3f %8.3f) | palette upload was %u bones at "
+                    "draw %u, this draw %u",
+                    o._41, o._42, o._43, g_lastBoneUploadBones, g_lastBoneUploadDraw,
+                    g_drawIndexThisFrame);
+            }
+        }
+
+        // The population every previous test was blind to. A mesh using one or two bones is
+        // posed RIGIDLY - it cannot deform, it can only translate, which is exactly "the mesh
+        // matches the car, is not deformed, but moves". The spread test cannot see it because a
+        // single bone has no spread to measure.
+        // The single-bone population, tested against its own object rather than against a
+        // skeleton-size guess.
+        if (!g_curVS.usesBlendWeights) {
+            const unsigned b0 = mesh->verts.empty() ? 0u : mesh->verts[0].idx[0];
+            if (b0 < static_cast<unsigned>(kBonesMax)) {
+                if (g_boneWrittenObjGen[b0] == g_objGeneration) {
+                    ++g_rigidOwnObject;
+                } else {
+                    ++g_rigidForeignObject;
+                    if (g_rigidForeignReports < 20) {
+                        ++g_rigidForeignReports;
+                        const D3DMATRIX o = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+                        Log("FOREIGN BONE #%u: ps='%s' verts=%u bone %u was written under objTM "
+                            "generation %u but this draw is generation %u (%u objects later) | "
+                            "objTM t=(%.1f %.1f %.1f) | moved %.2f | draw %u frame %u",
+                            g_rigidForeignReports, g_curPS.albedoSampler, numVertices, b0,
+                            g_boneWrittenObjGen[b0], g_objGeneration,
+                            g_objGeneration - g_boneWrittenObjGen[b0],
+                            o._41, o._42, o._43, d, g_drawIndexThisFrame, g_frames);
+                    }
+                }
+            }
+        }
+
+        const unsigned used = BonesUsedCount(mesh->usedBones);
+        if (used <= 2) {
+            ++g_skinFewBones;
+            const unsigned b0 = mesh->maxBone;   // with <=2 bones this is the meaningful one
+            const unsigned upl = g_boneWrittenUploadBones[b0];
+            // A skeleton's size is a fingerprint. A 1-bone part reading from a 40-bone upload is
+            // reading a character's palette, not its own.
+            if (upl > used + 4) {
+                ++g_skinFewBonesForeign;
+                if (g_skinFewBoneReports < 20) {
+                    ++g_skinFewBoneReports;
+                    const D3DMATRIX o = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+                    Log("RIGID PART #%u: ps='%s' verts=%u uses %u bone(s) (idx %u) but that bone "
+                        "came from a %u-BONE upload at draw %u | moved %.2f units | "
+                        "objTM t=(%.1f %.1f %.1f) | draw %u frame %u",
+                        g_skinFewBoneReports, g_curPS.albedoSampler, numVertices, used, b0,
+                        upl, g_boneWrittenDraw[b0], d, o._41, o._42, o._43,
+                        g_drawIndexThisFrame, g_frames);
+                }
+            } else ++g_skinFewBonesOwn;
+        }
+    }
 
     g_internal = true;
     g_origSetStreamSource(dev, 0, g_skinVB, g_skinRingPos - base, stride);
@@ -5522,15 +6235,22 @@ void CreateSkinBuffer(IDirect3DDevice9* dev) {
     // the exact path that must stay cheap.
     if (g_skinVB || g_skinVBTried || !g_settings.convertSkinned) return;
     g_skinVBTried = true;
+    // Clamped: too small and every draw wraps, too large and a DEFAULT-pool allocation this big
+    // may simply fail, which would refuse every skinned draw.
+    {
+        const int mb = (g_settings.skinRingMB < 4) ? 4
+                     : (g_settings.skinRingMB > 256) ? 256 : g_settings.skinRingMB;
+        g_skinRingBytes = static_cast<UINT>(mb) * 1024u * 1024u;
+    }
     // DEFAULT + DYNAMIC + WRITEONLY: the pool D3D9Ex accepts, and the usage that lets
     // NOOVERWRITE/DISCARD locks avoid stalling on the GPU. Not DrawIndexedPrimitiveUP - that
     // path is recorded in sr2-fork.md as a null-pointer crash inside the Remix bridge server.
     g_internal = true;
-    const HRESULT hr = dev->CreateVertexBuffer(kSkinRingBytes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
+    const HRESULT hr = dev->CreateVertexBuffer(g_skinRingBytes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
                                                0, D3DPOOL_DEFAULT, &g_skinVB, nullptr);
     g_internal = false;
     Log("skinning: vertex buffer %s (%u KB, %u-byte vertices)",
-        SUCCEEDED(hr) ? "created" : "FAILED", kSkinRingBytes / 1024,
+        SUCCEEDED(hr) ? "created" : "FAILED", g_skinRingBytes / 1024,
         static_cast<unsigned>(sizeof(SkinnedVertex)));
 }
 
@@ -5933,6 +6653,79 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             "(%u query objects created, setting %s)",
             g_occlusionQueriesSeen / f, g_occlusionForced / f, g_queriesCreated,
             g_settings.forceOcclusionVisible ? "ON" : "off");
+        // Which bone palette each skinned draw was posed by. "own" is the only healthy bucket;
+        // the other three each place geometry using another object's bones.
+        Log("        BONE PALETTE per skinned draw: %.1f own/frame, %.1f BEYOND the upload's "
+            "reach/frame, %.1f from an EARLIER FRAME/frame, %.1f written >16 draws ago/frame "
+            "(highest bone referenced %u, smallest upload seen %u bones)",
+            g_skinPaletteOwn / f, g_skinPaletteBeyondReach / f, g_skinPaletteStaleFrame / f,
+            g_skinPaletteFarUpload / f, g_skinMaxBoneSeen,
+            g_skinMinReachSeen == 0xFFFFFFFFu ? 0u : g_skinMinReachSeen);
+        // The measurement that supersedes the line above. "mixed" is the diagnosis: this mesh's
+        // bones were written at draw indices far enough apart to belong to different objects.
+        Log("        BONE PROVENANCE (per-bone, supersedes the reach test): %.1f clean/frame, "
+            "%.1f MIXED palettes/frame, %.1f reading a bone NOTHING wrote this frame/frame "
+            "(worst spread %u draws)",
+            g_skinCleanPalette / f, g_skinMixedPalette / f, g_skinBoneNeverWritten / f,
+            g_skinWorstSpread);
+        Log("        stale-bone rejection %s: %.1f influences dropped/frame, %.1f vertices left "
+            "in bind pose/frame",
+            g_settings.rejectStaleBones ? "ON" : "off",
+            g_staleInfluencesRejected / f, g_skinVertsBindPose / f);
+        Log("        bone palette register: %.1f draws/frame at c52, %.1f draws/frame ELSEWHERE "
+            "(non-zero means the c52 assumption is wrong for those shaders)",
+            g_skinC52BoneReg / f, g_skinForeignBoneReg / f);
+        Log("        SKIN DISPLACEMENT: %.1f draws/frame at rest, %.1f draws/frame moved >3 units "
+            "from their bind pose (worst %.1f units)",
+            g_skinAtRest / f, g_skinDisplaced / f, g_skinWorstDisplace);
+        // Non-zero means the game DOES refill buffers that bind poses were decoded from, and
+        // every one of those was previously served stale geometry - another character's mesh.
+        Log("        bind-pose cache invalidated by a game write: %u times (%.2f/frame)",
+            g_baseMeshInvalidations, g_baseMeshInvalidations / f);
+        Log("        RIGID PARTS (<=2 bones, can only translate): %.1f/frame, of which %.1f/frame "
+            "read their bone from an upload far larger than their own skeleton",
+            g_skinFewBones / f, g_skinFewBonesForeign / f);
+        // The falsifier for the single-bone fix. Vehicles disassemble to one unweighted bone and
+        // characters to four weighted ones, so both buckets should be populated. All four-bone
+        // means the dcl scan never fired and nothing changed.
+        // If wraps are non-zero the ring is being recycled mid-frame while earlier draws may
+        // still refer to it. High-water says how big it would have to be for that never to happen.
+        Log("        SKIN RING: %u MB, high water %.2f MB, %.2f wraps/frame, %.2f discards/frame",
+            g_skinRingBytes / (1024u*1024u), g_skinRingHighWater / 1048576.0,
+            g_skinRingWraps / f, g_skinRingDiscards / f);
+        // The cost of the ring, separate from the cost of skinning. A DISCARD renames the WHOLE
+        // buffer, so its price scales with skinRingMB and not with how much we write; the keep
+        // (NOOVERWRITE) column is the same work without the rename and is the control.
+        Log("        SKIN RING LOCK: %.2f ms/frame discarding, %.2f ms/frame appending, "
+            "worst single lock %.1f ms",
+            g_skinLockDiscardMs / f, g_skinLockKeepMs / f, g_skinLockWorstMs);
+        Log("        PALETTE SCOPE %s: %.0f vertex influences/frame refused because the palette "
+            "belonged to another draw setup",
+            g_settings.paletteSetupScope ? "ON" : "off", g_paletteOutOfScope / f);
+        Log("        DRIFT (objTM unchanged between frames): %.1f draws/frame STILL, "
+            "%.1f draws/frame MOVED (worst %.3f units)",
+            g_driftStill / f, g_driftMoved / f, g_driftWorst);
+        Log("        SHADER BLEND FORM: %.1f draws/frame four-bone weighted (characters), "
+            "%.1f draws/frame SINGLE unweighted bone (vehicles/rigid attachments)",
+            g_skinFourBone / f, g_skinSingleBone / f);
+        // Separated from the two blend forms on purpose: these draws are not skinned by the
+        // game at all. Non-zero here with the drift gone is the whole explanation.
+        Log("        NO BONE DECL: %.1f draws/frame whose vertex shader reads no BLENDINDICES "
+            "(placed by objTM alone, palette not read) - gate %s",
+            g_skinNoBoneDecl / f, g_settings.skinRequireBoneDecl ? "ON" : "OFF");
+        Log("        RIGID BONE OWNERSHIP: %.1f/frame use a bone written under their OWN objTM, "
+            "%.1f/frame use one written under a DIFFERENT object's",
+            g_rigidOwnObject / f, g_rigidForeignObject / f);
+        Log("        BONE CLAMP %s: %.0f verts/frame bound to a bone OUTSIDE this object's own "
+            "palette upload, of %.0f skinned verts/frame (%.1f%%)",
+            g_settings.clampBonesToUpload ? "ON" : "off",
+            g_staleBoneVerts / f, g_skinVertsTotal / f,
+            g_skinVertsTotal ? (100.0 * g_staleBoneVerts / g_skinVertsTotal) : 0.0);
+        Log("        SHADOW vs DEVICE: %u draws checked, %u matched, %u MISMATCHED",
+            g_shadowMatch + g_shadowMismatch, g_shadowMatch, g_shadowMismatch);
+        Log("        vehicle bones %s: %.0f verts/frame placed by objTM alone",
+            g_settings.vehicleBonesOff ? "IGNORED (diagnostic)" : "in use",
+            g_vehicleBonesSkipped / f);
         // HIDDEN is the important number now: those draws still execute for the engine but are
         // kept out of the ray-traced scene, which is what stops the prepass copy of the world
         // being drawn over the material pass.

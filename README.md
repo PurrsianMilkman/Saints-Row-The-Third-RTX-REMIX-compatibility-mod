@@ -91,14 +91,17 @@ Stated plainly, because a compatibility mod that hides its gaps wastes everyone'
 | **No HUD.** The UI is shader-drawn and never converted, so it disappears with vertex capture off. | open |
 | **Hair renders white.** Neither hair texture carries the colour, and every character colour constant measures (1,1,1). `Hair_Spec_Color1/2` are the remaining candidates. | open |
 | **Player clothing colour** uses a different recipe from the NPC one, with the pattern on a second texture coordinate set. | open — NPC clothing works |
-| **Windshield and door glass move with the camera.** | open, untouched |
 | ~11 draws/frame still have unreadable texcoords — their source vertex buffer is DYNAMIC, so the per-buffer UV conversion cannot cache them. | open — needs a per-draw ring |
+| **Shim time grows across a session**, ~24% → ~44% of frame time, worst-case stalls around 300 ms. It tracks skinned-geometry volume, so it may just be a busier district. | open — largest problem after the sky and the HUD |
 | **Performance.** The occlusion-query hook deliberately answers "visible" to every query, so the game submits more geometry than it normally would. Functionality was prioritised over frame rate. | by design, for now |
 
 Fixed and no longer a concern: z-fighting / doubled world, the crash on fast movement, the black
 sky, white surfaces, frozen character animation, the camera-blocking particle plane, the flat
-untextured world, over-tiled roads, churning geometry hashes, black cars, and objects popping out
-of existence as they entered the frustum.
+untextured world, over-tiled roads, churning geometry hashes, black cars, objects popping out of
+existence as they entered the frustum, and — as of v0.1.1 — car parts and glass drifting in rhythm
+with character animation.
+
+Release history and what changed in each: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## Requirements
 
@@ -160,8 +163,8 @@ disassembles an individual shader.
 
 1. **Convert the sky** and **convert the UI** — the two populations lost when vertex capture was
    turned off. Both are ordinary conversion work.
-2. Hair colour, player clothing colour, glass.
-3. Performance pass, now that functionality is close.
+2. Hair colour and player clothing colour.
+3. Performance: the growing shim time and its stalls.
 4. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
    fallback light.
 5. **The goal: replace assets with the Saints Row: The Third Remastered versions, which are
