@@ -1,4 +1,4 @@
-# Saints Row: The Third — RTX Remix
+# Saints Row The Third RTX REMIX Compatibility Mod
 
 **A compatibility shim that makes the original (2011, DX9) Saints Row: The Third render through
 [NVIDIA RTX Remix](https://github.com/NVIDIAGameWorks/rtx-remix), so the game can be path traced,
