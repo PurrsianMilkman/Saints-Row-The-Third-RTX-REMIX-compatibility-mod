@@ -4,14 +4,17 @@
 [NVIDIA RTX Remix](https://github.com/NVIDIAGameWorks/rtx-remix), so the game can be path traced,
 captured, and eventually re-authored with PBR assets.**
 
-Without this shim, Remix does not path-trace Saints Row: The Third at all. With it, the game is
-path traced.
+Saints Row: The Third never calls `SetTransform`, so RTX Remix has no camera and cannot path-trace
+it. This shim recovers the engine's matrices from vertex-shader constants and gives Remix a scene
+it can trace.
 
-That is a measurement, not a claim: setting `ffp=0` in `sr3-rtx.ini` makes the shim a passive
-observer — it still logs, still injects lights, converts nothing — and with it the world is
-**rasterised**, with no path tracing at all. Remix's capture button does nothing, because there is
-no ray-traced scene to capture. The fixed-function conversion *is* the path-traced world, all of
-it. See [docs/evidence/](docs/evidence/).
+> **Correction, 2026-08-30.** Earlier versions of this README said the fixed-function conversion
+> *was* the path-traced world, on the evidence that `ffp=0` produced a rasterised game. That
+> conclusion was wrong, and it is worth stating plainly because it stood for weeks: the only code
+> publishing a **camera** to Remix lived inside the conversion path, so `ffp=0` removed the camera
+> and the conversion *at the same time*. The A/B had no control. With `cameraOnly=1` — camera
+> published, nothing converted — the world path-traces fine. What Remix actually needed was the
+> camera; the conversion is how draws are filtered down to something it can afford.
 
 ---
 
@@ -35,14 +38,28 @@ and thanks to RTX REMIX and Nvidia!
 
 ---
 
-## Status: playable alpha
+## Status: work in progress
 
-The path-traced world renders, is textured, animates, and is lit. **The sky and the HUD are
-currently missing** — see [Known issues](#known-issues) before you install, so you know what you
-are getting.
+The path-traced world renders, is textured and is lit. **The sky and the HUD are still missing**,
+and characters are mid-rebuild onto a new architecture — see [Known issues](#known-issues) before
+you install, so you know what you are getting.
 
-**Install: [INSTALL.md](INSTALL.md)** · **Credits: [CREDITS.md](CREDITS.md)** ·
-**Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)**
+**Install: [INSTALL.md](INSTALL.md)** · **What changed: [CHANGELOG.md](CHANGELOG.md)** ·
+**Credits: [CREDITS.md](CREDITS.md)** · **Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)**
+
+### The architecture changed in v0.1.2
+
+Characters are no longer faked as fixed-function draws. They are described to Remix directly
+through its **programmatic API** — the shim creates the meshes, names the materials and chooses
+the textures, while the game renders untouched alongside. Ten parts, ~22,000 triangles, correct
+geometry, placement, per-slot textures, customisation colours and hair.
+
+The API is gated behind `exposeRemixApi = True` in `.trex\bridge.conf`, which is why the install
+now has an extra step. `remixapi_InitializeLibrary` is exported by the **32-bit bridge client**
+`d3d9.dll` — the one the game loads, in the game's own process.
+
+This matters beyond characters: it is a route to describing *anything* to Remix directly, rather
+than dressing draws up as fixed function and hoping Remix reconstructs them the way we meant.
 
 ## What it does
 
@@ -55,13 +72,20 @@ Saints Row: The Third is a late-DX9, fully shader-driven engine (Volition Core, 
 with deferred "inferred lighting" and heavy post-processing. It **never calls `SetTransform`**, so
 Remix had no camera at all and was simply rasterising the whole game.
 
-`sr3-rtx.asi` is a D3D9 shim that sits on the device vtable and re-issues every eligible draw as
-fixed function: it recovers the engine's real matrices from vertex-shader constant registers,
-hands them to D3D9 through `SetTransform`, binds the real albedo map to stage 0, draws, and
-restores. Remix then receives unambiguous geometry and path traces it.
+`sr3-rtx.asi` is a D3D9 shim that sits on the device vtable and does two things.
 
-That required reverse-engineering a fair amount of the engine. Some of what had to be established
-along the way:
+**For the world**, it re-issues eligible draws as fixed function: it recovers the engine's real
+matrices from vertex-shader constant registers, hands them to D3D9 through `SetTransform`, binds
+the real albedo map to stage 0, draws, and restores. Remix then receives unambiguous geometry.
+
+**For characters**, since v0.1.2, it skips that entirely and describes them to Remix through the
+programmatic API — meshes, materials and textures, named directly. That sidesteps reconstruction
+altogether, and it is where the project is heading generally.
+
+That required reverse-engineering a fair amount of the engine — including, eventually, the
+renderer itself: the command buffer, the render thread, a 74-opcode dispatch table, and the
+engine's own draw kill-switch, all in [docs/engine-map.md](docs/engine-map.md). Some of what had
+to be established along the way:
 
 - **the matrix registers** — `projTM` (VIEW·PROJ) at c28, `objTM` (world) at c32, `IR_World2View`
   at c48, the 64-bone palette at c52, three registers per bone;
@@ -89,17 +113,19 @@ Stated plainly, because a compatibility mod that hides its gaps wastes everyone'
 |---|---|
 | **No sky.** The `rfg-skybox` family (~50 draws/frame) is passed through rather than converted, and pass-through draws are skipped now that vertex capture is off. | open — needs conversion; the dome is 343 verts one unit from the camera, so it needs care |
 | **No HUD.** The UI is shader-drawn and never converted, so it disappears with vertex capture off. | open |
-| **Hair renders white.** Neither hair texture carries the colour, and every character colour constant measures (1,1,1). `Hair_Spec_Color1/2` are the remaining candidates. | open |
-| **Player clothing colour** uses a different recipe from the NPC one, with the pattern on a second texture coordinate set. | open — NPC clothing works |
+| **The API character stands beside the game's own.** The Remix-API copy is deliberately offset 3 units so the two cannot z-fight while the pipeline is being built. Removing the game's copy is the last step. | by design, for now |
+| **The API character is frozen.** Handing Remix `MeshInfoSkinning` crashed its 64-bit server inside `CreateMesh`, so skinning is off (`remixApiSkinning=0`). | open |
+| **Clothes read too dark.** The recipe is proven correct against both the exe and the shader — a bake computes exactly what the shader produces — so the fault is in how Remix lights these meshes. `clothBrightness` is a tuning knob, not a fix. | open |
+| **Hair has no strand detail** — flat colour only. | open — the colour itself is now correct |
 | ~11 draws/frame still have unreadable texcoords — their source vertex buffer is DYNAMIC, so the per-buffer UV conversion cannot cache them. | open — needs a per-draw ring |
-| **Shim time grows across a session**, ~24% → ~44% of frame time, worst-case stalls around 300 ms. It tracks skinned-geometry volume, so it may just be a busier district. | open — largest problem after the sky and the HUD |
+| **Shim time grows across a session**, ~24% → ~44% of frame time, worst-case stalls around 300 ms. | open |
 | **Performance.** The occlusion-query hook deliberately answers "visible" to every query, so the game submits more geometry than it normally would. Functionality was prioritised over frame rate. | by design, for now |
 
 Fixed and no longer a concern: z-fighting / doubled world, the crash on fast movement, the black
 sky, white surfaces, frozen character animation, the camera-blocking particle plane, the flat
 untextured world, over-tiled roads, churning geometry hashes, black cars, objects popping out of
-existence as they entered the frustum, and — as of v0.1.1 — car parts and glass drifting in rhythm
-with character animation.
+existence as they entered the frustum, car parts and glass drifting in rhythm with character
+animation (v0.1.1), and the black character texture (v0.1.2).
 
 Release history and what changed in each: **[CHANGELOG.md](CHANGELOG.md)**.
 
@@ -123,7 +149,9 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 ├── configs/
 │   ├── sr3-rtx.ini          shim settings — every one documented with the measurement behind it
 │   ├── rtx.conf             the Remix config (texture categorisation, options)
+│   ├── user.conf            Remix quality/performance settings (wins over rtx.conf)
 │   ├── dxvk.conf            d3d9.maxEnabledLights = 64
+│   ├── bridge.conf          exposeRemixApi = True — goes in .trex\, unlocks the Remix API
 │   └── display.remix.ini    Remix-safe in-game display settings (MSAA off, post off)
 ├── tools/               install/deploy/launch scripts and the RE tooling
 │   ├── install-runtime.ps1  download + install the Remix runtime into the game dir
@@ -131,8 +159,13 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 │   ├── pull-conf.ps1        pull the in-game-tuned rtx.conf back into configs/
 │   ├── launch.ps1           launch the DX9 exe
 │   ├── vpp_extract.py       unpack Volition VPP_PC v6 packfiles (format documented in-file)
-│   └── fxo_scan.py          parse .fxo_pc shaders' CTABs -> named constants + registers
-└── docs/                notes, shader map, the full worklog, and docs/evidence/
+│   ├── fxo_scan.py          parse .fxo_pc shaders' CTABs -> named constants + registers
+│   └── fxo_disasm.py        disassemble one shader out of a .fxo_pc
+└── docs/
+    ├── HANDOFF-PROMPT.md    start here if you are picking the project up
+    ├── YOUR-INSTRUCTIONS.md current state, engine facts, and the dead ends not to retry
+    ├── engine-map.md        the renderer: command buffer, opcodes, dispatch table
+    └── worklog.md           the run-by-run history (~11,000 lines)
 ```
 
 Not in the repo, by design: the game copy, the Remix runtime, and extracted game assets (`re/`) —
@@ -161,9 +194,11 @@ disassembles an individual shader.
 
 ## Roadmap
 
-1. **Convert the sky** and **convert the UI** — the two populations lost when vertex capture was
-   turned off. Both are ordinary conversion work.
-2. Hair colour and player clothing colour.
+1. **Finish the API character** — get skinning past Remix's server crash so it animates, solve the
+   lighting gap that makes clothes read dark, then remove the game's own copy and drop the
+   diagnostic offset.
+2. **Convert the sky** and **convert the UI** — the two populations lost when vertex capture was
+   turned off.
 3. Performance: the growing shim time and its stalls.
 4. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
    fallback light.

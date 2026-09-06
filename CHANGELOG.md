@@ -1,5 +1,92 @@
 # Changelog
 
+## v0.1.2 — 2026-09-04
+
+The architecture changed, and a conclusion that stood for weeks turned out to be wrong.
+
+### The founding premise was disproven
+
+Every earlier release said the fixed-function conversion **was** the path-traced world, on the
+strength of an A/B: set `ffp=0`, the shim converts nothing, and the world comes back rasterised.
+
+**That A/B had no control.** The only code publishing a **camera** to Remix lived inside the
+conversion path, so `ffp=0` removed the camera and the conversion at the same time — and Remix
+cannot trace anything without a camera. Two variables moved and one was credited.
+
+`cameraOnly=1` settles it: publish the camera, convert nothing, and the world path-traces. What
+Remix needed was the camera. The conversion is how the draw list is filtered down to something
+Remix can afford to build — unfiltered, it builds geometry for every draw and exhausts Vulkan
+memory at 33.5 GB.
+
+### Characters are now built through Remix's programmatic API
+
+Rather than dressing character draws up as fixed function and hoping Remix reconstructs them
+correctly, the shim now describes them to Remix directly — creating the meshes, naming the
+materials and choosing the textures — while the game renders untouched alongside.
+
+Ten parts, ~22,000 triangles, with correct geometry, placement, per-slot textures, customisation
+colours and hair.
+
+This needs `exposeRemixApi = True` in `.trex\bridge.conf`, which is a **new install step**.
+Without it `remixapi_InitializeLibrary` returns `rc=11 NOT_INITIALIZED`.
+
+Contract details that cost a run each, recorded so nobody pays twice:
+
+- `alphaTestType` mirrors `VkCompareOp`, so **0 means NEVER** — a zeroed extension struct makes
+  geometry invisible while it still emits light. Use 7 (ALWAYS).
+- **The hash is the identity.** Re-registering a changed material under an old hash is silently
+  ignored and returns the *old* object, with every return code still reporting SUCCESS.
+- `MeshInfoSurfaceTriangles` holds *pointers*; the arrays must outlive `CreateMesh` or the mesh
+  renders as holes.
+- SR3's character slots are **triangle strips** — `prims + 2` indices, not `prims * 3`.
+- `SetupCamera` and `dxvk_RegisterD3D9Device` are unimplemented, and unnecessary: the API defaults
+  to the game's own device and camera.
+
+### Fixed: the black character texture
+
+SR3 composites each character into a single 2048×1024 **dynamic** texture by locking each mip
+surface individually. Two independent causes each blacked it out — running with vertex capture
+off, and the shim skipping the composite quads.
+
+### Customisation colours, verified from the executable
+
+Colours are the 8-bit swatch **divided by 255** — read out of the exe at `0x008FCE60`, where the
+divisor decodes to exactly 255.0. No linear conversion and no hidden scale. Parameters are bound
+**by name**, so registers differing between shader variants (`Pattern_Map` at s0 or s2,
+`Diffuse_Color` at c11 or c14) was never a bug. The `Pattern_Map` turns out to be a 32×32 uniform
+selector; the visible detail comes from the `Diffuse_Map`.
+
+### The renderer is reverse-engineered
+
+`docs/engine-map.md` now documents SR3's command buffer, its render thread, a 74-opcode dispatch
+table with per-opcode sizes, and the engine's own draw kill-switch at `0x03395EA4` — which is the
+mechanism that makes `forceOcclusionVisible` load-bearing rather than a workaround.
+
+### Known issues
+
+Still missing: **the sky** and **the HUD**.
+
+New, all specific to the API character pipeline:
+
+- **The API character is frozen.** Handing Remix `MeshInfoSkinning` crashed its 64-bit server
+  inside `CreateMesh`, so skinning is off.
+- **Clothes read too dark.** The recipe is proven correct against both the exe and the shader, so
+  the fault is in how Remix lights these meshes. `clothBrightness` is a tuning knob, not a fix.
+- **The API character stands 3 units beside the game's own**, deliberately, so the two cannot
+  z-fight while the pipeline is built. Removing the game's copy is the last step.
+- Hair has flat colour with no strand detail — the colour itself is now correct.
+
+### Routes closed — do not reopen
+
+- **GPU bake through the Remix device.** Crashed Remix's server twice at the same address, even
+  with the draw hidden inside an occlusion query.
+- **Any texture tag that hides a vertex-captured draw.** Confirmed from Remix's own binary: it
+  declines a draw for exactly three reasons — occlusion query, unsupported topology, no camera.
+- **`GetRenderTargetData` on the game's render targets.** Froze SR3 twice. On our own targets it
+  is fine.
+
+---
+
 ## v0.1.1 — 2026-08-26
 
 The car-part drift is fixed. That was the bug that consumed the most sessions on this project, and

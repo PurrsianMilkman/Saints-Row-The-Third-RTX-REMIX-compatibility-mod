@@ -30,3 +30,11 @@ docs/evidence/cloth/
 *.dmp
 # Screenshots are not published in this repository.
 docs/evidence/*.png
+
+# Per-change source backups. Git history already holds these, and they run to tens of MB.
+src/sr3-rtx/sr3rtx.cpp.before-*
+src/sr3-rtx/sr3rtx.cpp.EXPERIMENT-*
+configs/*.bak
+# Build intermediates and scratch
+build/*.map
+mc_dis.txt

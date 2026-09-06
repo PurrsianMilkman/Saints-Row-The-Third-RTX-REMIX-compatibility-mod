@@ -126,3 +126,397 @@ derive from section raw addresses and never depended on the base — so only the
 
 Worth keeping as a rule: verify a static map against the live process before writing to it. The
 check cost a few lines and caught an error that would have written a hook into arbitrary code.
+
+---
+
+# ADDENDUM 2026-08-29 — SR3 is a COMMAND-BUFFER renderer, and the engine has its own draw kill-switch
+
+*Produced with radare2 6.1.0 (`tools/vibe-re/tools/radare2-6.1.0-w64`) + pefile against
+`SaintsRowTheThird.exe`. No runs, no patching — static only.*
+
+## The wrapper functions have ZERO direct callers
+
+Scanning every `E8 rel32` in `.text` (12.7 MB) for calls to the DrawIndexedPrimitive wrapper at
+**`0x0049D650`** returns **0 hits**. The wrapper is never called directly. It is reached through a
+function-pointer table, and it reads its arguments out of a struct rather than off the stack:
+
+```asm
+0x0049d650  push esi
+0x0049d651  mov  esi, [0x2e5d650]        ; COMMAND-BUFFER READ POINTER
+0x0049d657  push 0x3393c30
+0x0049d65c  call 0x4ad930
+0x0049d661  cmp  byte [0x3395ea4], 0     ; <-- the engine's own DRAW KILL-SWITCH
+0x0049d668  jne  0x49d6a5                ;     set => skip the draw entirely
+0x0049d66a  ...  args from [esi+4] .. [esi+0x18]
+0x0049d68a  mov  eax, [ecx + 0x148]      ; vtable slot 82 = DrawIndexedPrimitive
+0x0049d690  call eax
+0x0049d692  add  dword [0x2e5d650], 0x1c ; commands are 28 BYTES
+```
+
+| global | meaning |
+|---|---|
+| `0x02E5D650` | command-buffer read pointer, advanced by the command's own size (0x1C for a draw) |
+| `0x03171B68` | the `IDirect3DDevice9*` |
+| `0x03395EA4` | **byte. Non-zero suppresses the draw** |
+
+## The render command set — 74 opcodes, dispatch table at `0x013509F8`
+
+Each entry is a handler; 16 of the 74 are the unimplemented stub `0x004BF550`. Identified by the
+device method the handler actually dispatches (`mov eax,[ecx+off]` immediately followed by
+`call eax` — the loose "any `[reg+off]`" pattern is worthless here, exactly as this document
+already warns):
+
+| op | handler | command | | op | handler | command |
+|---|---|---|---|---|---|---|
+| 10 | `0x0049CB30` | SetDepthStencilSurface | | 33 | `0x0049D3E0` | SetVertexDeclaration |
+| 11 | `0x0049CB60` | Clear | | 34 | `0x0049D410` | SetIndices |
+| 12 | `0x0049CC00` | Clear | | 35 | `0x0049D440` | SetStreamSource |
+| 14 | `0x0049CD10` | SetViewport | | 36 | `0x0049D4A0` | SetTexture |
+| 16 | `0x0049CDF0` | SetViewport | | 37 | `0x0049D510` | **DrawPrimitive** |
+| 17 | `0x0049CF90` | SetScissorRect | | 41 | `0x0049D5D0` | **DrawPrimitiveUP** |
+| 19 | `0x0049D010` | SetSamplerState | | 42 | `0x0049D650` | **DrawIndexedPrimitive** |
+| 24,25 | `0x0049D1C0/210` | SetVertexShaderConstantF | | 43 | `0x0049D6C0` | **DrawIndexedPrimitiveUP** |
+| 26 | `0x0049D250` | SetVertexShaderConstantB | | 50 | `0x0049D760` | GetBackBuffer |
+| 27,28 | `0x0049D2A0/2F0` | SetPixelShaderConstantF | | 51 | `0x0049D7C0` | StretchRect |
+| 29 | `0x0049D330` | SetPixelShaderConstantB | | 55,56 | `0x0049D890/950` | **GetRenderTargetData** |
+| 31 | `0x0049D380` | SetVertexShader | | 57 | `0x0049DA20` | SetRenderState |
+| 32 | `0x0049D3B0` | SetPixelShader | | 58 | `0x0049DA60` | SetGammaRamp |
+
+`SetRenderTarget` is op 9 (`0x0049CB00`, from the original table above).
+
+**Note ops 55/56/72 — the engine issues `GetRenderTargetData` as a render command.** That is a
+GPU->CPU readback in the command stream, and it is the mechanism behind the character-texture bake.
+
+## The kill-switch, and why forceOcclusionVisible is load-bearing
+
+**All FOUR draw handlers test the same byte** before submitting — `0x49D573`, `0x49D5E3`,
+`0x49D663`, `0x49D6D3`. Two sites write it:
+
+```asm
+0x004ad598  mov byte [0x3395ea4], bl     ; render-state reset, clears it with a block of globals
+...
+0x0047ceb6  test bl, bl
+0x0047ceb8  sete cl
+0x0047cebb  mov byte [0x3395ea4], cl     ; SET when a visibility test returned FALSE
+```
+
+`bl` there is 1 only if the call at `0x0047C800` returned non-zero. That function reads
+thread-local state (`fs:[0x2c]`), walks a context at `[esi+0x674]`, and does floating-point work
+over a 0x5D4-byte frame before returning a bool — a visibility determination.
+
+So, at instruction level: **SR3 decides per-object whether it is visible, and if not it sets one
+global byte that makes every draw command a no-op.** That is the engine's own culling, and it is
+exactly the behaviour recorded in YOUR-INSTRUCTIONS.md:
+
+> "SR3 does its own GPU occlusion culling and reads the depth prepass back ... Capture-off IS a
+>  global skip."   capture ON 5330 draws/frame -> capture OFF 1426 draws/frame.
+
+and the user's statement that everything in the frustum gets culled because the game believes the
+camera is occluded. `forceOcclusionVisible=1` answers the occlusion query so this test passes and
+the byte stays clear. **It is not a workaround for capture-off; it is what keeps the engine's own
+kill-switch off.** Removing it on 2026-08-29 was wrong and was reverted.
+
+## What this changes
+
+1. The engine's passes are **commands in a buffer**, not call-stack contexts. Attributing a draw to
+   a pass by return address cannot work past the dispatcher; the pass identity lives in the
+   command stream.
+2. There is a single, engine-owned place where drawing is suppressed. Anything the shim does to
+   suppress draws is a SECOND mechanism layered on one the engine already has.
+3. `GetRenderTargetData` is a first-class render command, which is consistent with the character
+   bake performing a readback and with the observation that reading a Remix-owned render target
+   hangs.
+
+## The dispatcher, found 2026-08-30 — a render THREAD consuming a command RING
+
+One site in `.text` references the dispatch table base: **`0x0049DEDC`**. It sits inside a
+consumer loop at `0x0049DE20`.
+
+### Outer loop: take the next command block off a ring
+
+```asm
+0x0049de20  mov  ecx, 0x339385c
+            call 0xfc0c80              ; wait on a sync object -> this is a CONSUMER THREAD
+0x0049de35  cmp  word [0x339389e], 0   ; ring entry count
+            jbe  empty
+0x0049de3f  mov  eax, [0x339389c]      ; ring READ INDEX
+            mov  ecx, [0x33938a0]      ; ring BASE
+            and  eax, 0xffff
+            lea  eax, [eax + eax*2]    ; *3
+            lea  esi, [ecx + eax*8]    ; base + index*24  -> 24-byte descriptor
+0x0049de59  mov  eax, [esi]            ; descriptor+0  = command block pointer
+            mov  edx, [esi + 4]        ; descriptor+4  = block size
+            add  edx, eax
+            mov  [0x2e5d648], eax      ; block START
+            mov  [0x2e5d64c], edx      ; block END
+            mov  [0x2e5d650], eax      ; read pointer := start
+            call GetCurrentThreadId
+            mov  [0x2e5d658], eax      ; owning thread id
+```
+
+### Inner loop: execute the block, one opcode at a time
+
+```asm
+0x0049ded2  mov  esi, dword [eax]              ; OPCODE = first dword of the command
+            cmp  esi, 0x4a                     ; 74 - the table size
+            jge  done
+            mov  ecx, [esi*4 + 0x13509f8]      ; handler = table[opcode]
+            call ecx
+            mov  eax, [0x2e5d650]              ; the HANDLER advanced the pointer itself
+            mov  [0x2e5d644], esi              ; LAST OPCODE EXECUTED, kept in a global
+            cmp  eax, [0x2e5d64c]
+            jb   loop
+```
+
+A command is `[opcode][args...]`, and each handler advances `0x2e5d650` by its own size — 0x1C for
+a draw, which is the opcode plus DrawIndexedPrimitive's six arguments.
+
+### The complete submission map
+
+| address | meaning |
+|---|---|
+| `0x013509F8` | opcode dispatch table, 74 entries |
+| `0x0049DE20` | render-thread consumer loop (outer) |
+| `0x0049DED2` | opcode dispatch loop (inner) |
+| `0x0339385C` | sync object the render thread waits on |
+| `0x0339389C` | ring read index (16-bit) |
+| `0x0339389E` | ring entry count |
+| `0x033938A0` | ring base; entries are **24 bytes** |
+| `0x02E5D648` | current command block START |
+| `0x02E5D64C` | current command block END |
+| `0x02E5D650` | command read pointer |
+| `0x02E5D658` | thread id that owns the current block |
+| `0x02E5D644` | the PREVIOUSLY dispatched opcode (see correction below) |
+| `0x03395EA4` | draw kill-switch (all four draw handlers test it) |
+| `0x03171B68` | the `IDirect3DDevice9*` |
+
+All valid verbatim at runtime: `RELOCS_STRIPPED`, no `DYNAMIC_BASE`, image base `0x400000`,
+confirmed live on 2026-08-15.
+
+### What this settles
+
+**SR3 has a dedicated render thread.** The game thread produces command blocks into a ring; this
+thread consumes them. That is the direct explanation for something this project measured but never
+explained - *"the game locks vertex buffers from more than one thread"*, 272 buffer locks a frame
+off the render thread, and a crash dump proving it. The producer fills buffers while the consumer
+submits.
+
+**A draw's PASS IDENTITY is the command block it belongs to.** Every D3D9 call the shim sees comes
+from a handler running inside one block, and the block is identified by `[0x02E5D648]` - readable
+at any draw, no heuristics, no sampler guessing, no render-target inference. Two draws in the same
+block are in the same submission unit; two draws in different blocks are not.
+
+That is the classification axis every rule in this shim has been approximating. `screenSpaceMode`,
+`skipDeferredGBuffer`, `compositeToTexturePass` and the prepass tests are all attempts to recover,
+from the flattened D3D9 stream, information the engine has already written down at a fixed address.
+
+## The ring descriptor fields — traced 2026-08-30, and they carry NO pass identity
+
+Measured first: `16.9 blocks/frame` over 6,321 frames, 12-138 draws each. Then the addresses:
+
+    0x02D4A4D0  0x02D4E4D0  0x02D524D0  0x02D564D0  0x02D5A4D0  ...
+
+**Exactly 0x4000 apart.** These are fixed-size **16 KB command buffers from a pool**; a new block
+begins when the previous one FILLS. Block identity is allocation granularity, not a pass boundary,
+and the claim in the previous section that "the block a draw belongs to IS its pass identity" is
+**wrong** - draws in a block are only temporally adjacent.
+
+The remaining three descriptor fields were traced to see whether any of them tags the block:
+
+| field | what the dispatcher does with it | verdict |
+|---|---|---|
+| `+8` | `mov [0x3171b60], ebx` after the block finishes | **write-only.** One reference in the whole 12.7 MB image - the store itself. Nothing reads it |
+| `+0xc` | `mov [0x3171b64], edx` after the block finishes | **write-only**, same - one reference, the store |
+| `+0x10` | `if (edi) { ecx = edi; call 0xdd80f0 }` | a completion callback, signalled when the block is done |
+
+And `0x0049E1C0`, called with the descriptor before the loop, computes `(desc - ringBase)/24` and
+compares a 16-bit field in a parallel array at `0x033938A4` against the ring read index
+`0x0339389C` - ring bookkeeping, locating the neighbouring slot. Not a label either.
+
+### Conclusion: SR3 does not tag its render passes
+
+The engine's command stream carries the opcode, the arguments, the block bounds and a completion
+callback. **There is no per-block pass or context id.** A pass boundary in this engine is exactly
+what it is at the D3D9 level - a `SetRenderTarget` command (op 9) - and the shim already sees that.
+
+So the hoped-for shortcut does not exist, and this is worth recording as a closed question rather
+than left as a promising direction. What the disassembly DID settle stands:
+
+- the renderer is a command buffer consumed by a dedicated thread, which explains the
+  multi-threaded buffer locking measured months earlier;
+- `GetRenderTargetData` is a render command (ops 55/56/72), so engine-side readbacks are real;
+- one global byte `0x03395EA4` disables all four draw commands, written from a visibility test -
+  the engine's own culling, and why `forceOcclusionVisible` is load-bearing.
+
+### The one capability the command buffer offers that D3D9 does not
+
+The read pointer `0x02E5D650` and end `0x02E5D64C` bound a block that is ALREADY BUILT. Commands
+can therefore be walked AHEAD of execution: at any draw, the rest of the block - including the next
+`SetRenderTarget` - is readable. That is lookahead the streaming D3D9 view cannot provide, and it
+would let a draw be classified by the pass it is IN and where that pass ENDS, rather than by
+guessing from its samplers.
+
+Whether that is worth building is a separate question: the shim already knows the CURRENT render
+target, and lookahead only adds knowledge of the pass's extent.
+
+## Per-opcode command sizes — extracted 2026-08-30, and the block is now walkable
+
+Each handler advances the read pointer itself, so the sizes live in the handlers rather than in a
+table. Extracted statically from every handler's own `add`/`mov` on `0x02E5D650`:
+
+| size | opcodes |
+|---|---|
+| 4 | 0, 1, 2, 5, 6, 38, 62 |
+| 8 | 3, 4, 8, 10, 15, 21, 31, 32, 33, 34, 52, 53 |
+| 0x0C | **9 (SetRenderTarget)**, 16, 18, 22, 23, **37 (DrawPrimitive)**, 54, 57, 66, 73 |
+| 0x10 | 19, 25, 28, **36 (SetTexture)**, 40, **55 (GetRenderTargetData)** |
+| 0x14 | 11, 14, 17 |
+| 0x18 | **35 (SetStreamSource)** |
+| 0x1C | **42 (DrawIndexedPrimitive)**, 68 |
+| 0x20 | 12, 50 |
+| 0x34 | 51 |
+| 0x604 | 58 (SetGammaRamp) |
+
+Payload-carrying commands compute their own size from a count inside the command:
+
+| opcode | size |
+|---|---|
+| 24, 27  `SetVertex/PixelShaderConstantF` | `0x0C + count*16`, count at `+8` |
+| 26, 29  `SetVertex/PixelShaderConstantB` | `0x0C + count*4`, count at `+8` |
+| 20 | `0x18 + [+0x14]` |
+| 41  `DrawPrimitiveUP` | `0x14 + [+0x10]` |
+| 61 | `0x08 + [+4]` |
+| 67 | `0x18 + [+0x10]` |
+
+Unresolved: 7, 43 (`DrawIndexedPrimitiveUP`, `0x24 + two registers`), 56, 60, 72. A walk that meets
+one of these STOPS rather than guessing - a wrong size desynchronises everything after it, which is
+a worse failure than a short answer.
+
+### Why this is worth having
+
+The block bounded by `[0x02E5D648, 0x02E5D64C)` is **already built** when the render thread begins
+executing it. So at any draw the remainder of the block is readable, and that turns rule 1 -
+
+> "A draw whose RESULT the engine reads can never be SKIPPED, only hidden or passed through."
+
+- from an inference into a lookup. `GetRenderTargetData` is opcodes 55/56/72. **If a block contains
+one, the engine reads back what that block drew and nothing in it may be removed.** Three separate
+rules have blacked out the world by getting exactly this wrong from D3D9-level guessing.
+
+Shipped as `scanCommandBlocks`, walking each block once, bounded by the end pointer and a 4096
+command guard.
+
+
+
+## Correction, 2026-08-30: `0x02E5D644` holds the PREVIOUS opcode
+
+Measured over ~10,800 frames and 17.2 million draws. Read at the top of every draw hook, this
+global never once held a draw opcode. Across every block listing the range seen is **20..35** -
+`SetStreamSource` (35), `SetVertexShaderConstantF` (24), ops 20 and 34 - and **never 37, 40, 41 or
+42**, which are the four draw opcodes themselves.
+
+So the dispatcher updates it at the *end* of a loop iteration, not before the handler runs. During
+a draw it names the command that preceded the draw, which is why the listing's "opcodes a..b"
+column reads as a range of setup commands rather than as draw opcodes.
+
+This does not affect the block-start pointer at `0x02E5D648`, which was and remains the
+currently-executing block.
+
+## The lookahead walk, validated 2026-08-30
+
+    200,839 blocks walked | 132,204,771 commands | 0 walks stopped early
+
+Zero early stops means `CommandSize()` covers every opcode SR3 emits during gameplay and the walk
+never desynchronised. The opcodes left unresolved by static analysis (7, 43, 56, 60, 72) are never
+emitted in play, so they cost nothing. The reader can be trusted as a source of facts.
+
+### Finding: the engine never reads back a render target during gameplay
+
+    0 GetRenderTargetData (opcodes 55/56/72) in 132,204,771 commands
+    0 blocks contain a readback
+
+The rule "a draw whose result the engine reads can never be skipped" is **true and vacuous**.
+Nothing is read back, so it constrains nothing and cannot serve as a draw filter. Closed by
+measurement; do not re-derive.
+
+The useful corollary: the character atlas is **not** built by readback. The same run measured
+texture `LockRect` 2, **surface `LockRect` 36**, `UpdateTexture` 0, `UpdateSurface` 0,
+`StretchRect` 0, `ColorFill` 0. It is a CPU-to-GPU upload per mip surface, then sampled on the
+GPU. The constraint on skipping a draw is GPU-side *sampling*, not CPU readback.
+
+### Finding: the engine declares its own pass structure, ahead of execution
+
+    797,612 SetRenderTarget (opcode 9) = ~74 per frame
+
+Op 9 is 0x0C bytes and falls inside the same validated walk. Because a block is fully built before
+the render thread executes it, every draw can be attributed to the render target the **engine**
+names for it, before it runs. That is the pass identity `screenSpaceMode`, `hiddenPassMode`,
+`skipDeferredGBuffer` and every prepass heuristic have been reconstructing from samplers and shader
+output counts - each of which has blacked out the world at least once.
+
+Note that for the *camera* question this lookahead is not needed: `g_rt0Width/Height` from the
+`SetRenderTarget` hook already gives the same fact per draw, at no extra bridge cost.
+
+
+## SR3's render-pass class hierarchy, recovered from RTTI (2026-08-31)
+
+The exe ships MSVC RTTI, so the renderer's whole class tree is named in the binary. Resolved
+TypeDescriptor -> CompleteObjectLocator -> vtable for each. **These are static addresses in a
+RELOCS_STRIPPED image based at 0x400000, so they are valid verbatim** - but verify the module base
+at runtime before trusting any of them (the rule from the earlier base-mismatch catch).
+
+| class | vtable | what it is |
+|---|---|---|
+| `rl_d3d_base_render_pass` | `0x012A1780` | the ordinary scene pass |
+| `rl_d3d_shadow_render_pass` | `0x012A1AEC` | shadow map generation |
+| `rl_d3d_xray_render_pass` | `0x012A1550` | the see-through-walls pass |
+| `rl_d3d_motion_blur_mask_render_pass` | `0x012A1514` | motion-blur mask |
+| `rl_d3d_batched_pass` | `0x012A17B8` | batched draws |
+| `rl_d3d_render_to_texture_pass` | (base `rl_render_to_texture_pass`) | render-to-texture |
+| `rl_composite_pass` | `0x01293ACC` | composite |
+
+Renderers, same treatment: `rl_d3d_scene_renderer` `0x012A142C`, `rl_d3d_terrain_renderer`
+`0x012A170C`, `rl_d3d_particle_renderer` `0x012A010C`, `rl_d3d_primitive_renderer` `0x012A1058`,
+`rl_d3d_floating_decal_renderer` `0x012A16A4`, `rl_d3d_reflected_light_renderer` `0x012A1658`,
+`rl_d3d_raycast_renderer` `0x012A161C`, `rl_d3d_render_texture_manager` `0x0129FC80`.
+
+Abstract bases sit at `0x0125D0CC` (`rl_base_render_pass`), `0x01293958` (`rl_shadow_render_pass`),
+`0x0125D060` (`rl_xray_render_pass`), `0x0125D03C` (`rl_motion_blur_mask_render_pass`).
+
+### The catch: passes do not run on the render thread
+
+This taxonomy is real but it is **not directly readable at draw time**. SR3's passes execute on the
+main thread and *record* commands; the render thread later executes those command blocks through the
+74-opcode table, and that is where every D3D9 call the shim sees comes from. So at a draw hook the
+stack contains the dispatcher, not `rl_d3d_shadow_render_pass::execute`. The pass classes cannot be
+used as a per-draw identity without a way to carry pass identity into the command stream - and the
+ring descriptors were already traced and carry none.
+
+**What IS available at draw time and is engine-stated: the bound render target.** See below.
+
+### `D3DPERF_BeginEvent` - a dead end, do not chase it
+
+The exe imports `D3DPERF_BeginEvent`, `D3DPERF_EndEvent`, `D3DPERF_GetStatus` and
+`D3DPERF_SetOptions` from `d3d9.dll`. That looks like named GPU pass markers, which would be an
+ideal zero-risk pass identity. **It is not: all four have ZERO call sites.** Scanned every
+`call dword [IAT slot]` in `.text` against each import's IAT address (`0x0101C518`, `0x0101C514`,
+`0x0101C510`, `0x0101C51C`) - none. They are pulled in by a static library and never called. The
+retail build emits no markers.
+
+## The render target IS the pass identity, and it is available per draw
+
+From the camera census of the 2026-08-31 run, one frame, every distinct camera with its target:
+
+| render target | projection | handedness | draws | what it is |
+|---|---|---|---|---|
+| 2560x1440 | perspective | upright | 5,613 | **the main scene** |
+| 4096x4096 | ortho | upright | 8 / 7 / 165 | shadow cascades |
+| 512x288 | perspective | MIRRORED | 765 | reflection |
+| 400x288 | perspective | MIRRORED | 22 / 207 | reflection |
+| 400x288 | perspective | upright | 14 | reflection setup |
+| 128x128 | ortho | upright | 3 | probe |
+
+Across the run: 9,581,420 draws on the accepted camera against 2,190,420 declined for a
+non-back-buffer target - 18.6% of draws are off-screen passes. `g_rt0Width/Height` already carries
+this from the `SetRenderTarget` hook at no extra bridge cost, and it needs no shader names and no
+render-target indices, both of which are recorded dead ends.

@@ -20,6 +20,12 @@ dxvk.conf
 user.conf
 ```
 
+Copy this one into the `.trex` folder (it unlocks the Remix API, which characters need):
+
+```
+.trex\bridge.conf
+```
+
 Run the game. Go to **Options > Display**.
 
 Set everything to **Off** except **Lighting Detail**. Set **Scene Detail** to whichever performs
@@ -35,6 +41,7 @@ sr3-rtx.ini
 rtx.conf
 dxvk.conf
 user.conf
+.trex\bridge.conf
 ```
 
 Then restore your `display.ini` backup.
