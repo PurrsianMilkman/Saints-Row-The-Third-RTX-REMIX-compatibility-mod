@@ -5918,3 +5918,5153 @@ while skinned vertices go 211k -> 354k/frame and decoded meshes 78 -> 181. It tr
 geometry volume, so it may be nothing but a busier district - but `worst 300 ms` is a visible
 stall and this is now the largest open problem. Next up, with the HUD and the sky.
 
+---
+
+## 2026-08-27 - NPC heads: four hypotheses killed before a single run
+
+User reports three faults at once: heads **misplaced** ("as if not attached and/or skinned - when
+the head moves, the neck is separate"), **mis-textured**, and sometimes **doubled, two heads on one
+character, z-fighting**.
+
+Three symptoms, and one wrong bind pose would cause all three - a bind pose carries the geometry,
+the UVs and the identity of the mesh together. That is the hypothesis worth aiming at. Everything
+below is what was checked first, at no cost in runs, because each would have been a cheaper answer.
+
+### Eliminated without running the game
+
+| hypothesis | how it died |
+|---|---|
+| The new `skinRequireBoneDecl` gate is leaving heads unskinned | `NO BONE DECL` names only `Grime_MapSampler` and one 7-vertex `Decal_MapSampler`. No `Diffuse_MapSampler`. Heads never reach the gate. |
+| Weight/index components are crossed in the four-bone blend | Disassembled `ir_sr3npcskinfull_c`: `mova a0, r1.yxzw` looks crossed, but the `mul`/`mad` order pairs `v4.y` with `a0.x`(=3*v5.y) and `v4.x` with `a0.y`(=3*v5.x). weight[k] does pair with index[k]. The swizzle is scheduling, not semantics. |
+| Head bones exceed our palette bound | `kBonesMax = 64`, palette is `float3x4[64]`, highest bone referenced is 58. No clamping. |
+| Head vertices are falling through to bind pose | `vertices left in bind pose/frame` is **0.0** in every report before the gate turns on, and afterwards tracks `NO BONE DECL` exactly. No character vertex loses its influences. |
+| The cache keys on a raw VB pointer, so a freed buffer's address collides | Already closed: `BaseMesh::owner` AddRefs the buffer, with the 2026-08-18 use-after-free recorded in the comment. |
+
+Also confirmed from the shaders: character skin is `ir_sr3npcskinfull_c`/`_mc`, **four-bone
+weighted**, palette at c52, position `blend -> objTM -> projTM` with no scale or bias on `v0`. The
+worklog's older claim that "a head is a rigid single-bone attachment" is **wrong** for these
+shaders and should not be reasoned from again.
+
+### What the frame dump already shows
+
+One NPC at `at(138.0 13.5 76.4)`, 19 converted skinned draws, two vertex windows (v=704 and
+v=799), and a run of ten tiny draws over the same 704-vertex window:
+
+    7348 CONVERT v=799 p=1071  Diffuse_MapSampler tex0=1647FA40
+    7349 CONVERT v=704 p=7     Diffuse_MapSampler tex0=1647FA40
+    7351 CONVERT v=704 p=1     ...
+    7360 CONVERT v=799 p=67    Diffuse_MapSampler tex0=1647FA40
+
+Ten draws of 1-7 triangles each, every one of which CPU-skins all 704 vertices because
+`dedupSkinned=0`. That is not a correctness bug but it is a large share of the performance
+problem, and it is worth returning to.
+
+### The instrument, so the next run is decisive
+
+The frame dump now carries skinning detail per draw, computed **only on the dump frame** (a
+bounding box over every skinned vertex is exactly the per-vertex cost this path cannot afford
+every frame):
+
+    | skin first=N vb=P cached|DECODED bind=WxHxD at(x y z) moved M bones=N[lo..hi]
+
+`bind` is the mesh's size **in its own space**, which is what identifies it: a head is a
+head-sized box in every pose, so a head draw whose bind box measures a whole body is reading
+another mesh's bind pose. `moved` is bind centroid -> posed centroid. Between them:
+
+| reading | meaning |
+|---|---|
+| head-sized `bind`, small `moved`, neck bones | the mesh is right and the bones are right - look elsewhere |
+| head-sized `bind`, large or wrong `moved` | right mesh, wrong bones |
+| **body-sized or wrong-sized `bind`** | **wrong mesh - the cache hypothesis, and it explains all three symptoms** |
+| two draws, same `first`+`vb`, one `at()` | the doubled head, and whether the two copies share a bind pose |
+
+`dumpFrame` lowered 1800 -> 60, because that value also sets the delay after **F9** re-arms the
+dump. The bug has to be caught while a specific bad head is on screen, so the aimed dump needs to
+land about a second after the key, not 45 seconds.
+
+### The aimed dump, and a reading of mine that was wrong
+
+F9 dump at frame 3786, 367 skinned draws carrying the new detail. Heads are identifiable at last:
+**`ps='Blend_MapSampler'`, own vertex buffer, ~1426 vertices, 3-5 bones, bind box ~0.19x0.30x0.23
+centred at y~1.6-1.68** - a head-sized box at head height. Bodies are `Diffuse_MapSampler` /
+`IR_GBuffer_DSF_DataSampler`, ~1.23x1.79x0.34, 47-58 bones.
+
+**RETRACTED.** I first read the dump as "37 of 63 head draws have a body-sized bind pose, so they
+are reading another mesh's geometry" - the wrong-mesh hypothesis, apparently confirmed. It is an
+artifact of my own instrument. `bind` measures the draw's whole vertex WINDOW, not the triangles
+it draws, and **45 of 72 windows serve more than one draw**: one window of 7977 vertices serves 36
+draws of a single character (body, head, decals, all sub-ranges picked by StartIndex). For those
+the box describes the character, not the draw, and says nothing about either.
+
+Restricted to windows that serve exactly one draw shape - where the window IS the mesh - 51 draws
+survive, 34 of them head-sized. Only two characters have both a clean head window and a clean body
+window, and in both the head moved much further from its bind pose than the body did (+1.58 and
++0.51). Suggestive, n=2, not a finding.
+
+**This is the third time on this project that a probe firing has been mistaken for a defect. The
+discipline that catches it is asking what the number is actually measuring before believing it.**
+
+### Eliminated this session
+
+| hypothesis | how it died |
+|---|---|
+| `skinRequireBoneDecl` leaves heads unskinned | `NO BONE DECL` names only `Grime_MapSampler` and one 7-vertex decal |
+| weight/index components crossed | `mova a0, r1.yxzw` is compensated by the `mul`/`mad` order; weight[k] pairs with index[k] |
+| head bones exceed the palette | `kBonesMax=64`, highest referenced 62 |
+| head vertices fall through to bind pose | `vertices left in bind pose` is 0.0 before the gate exists and tracks it exactly after |
+| VB pointer reuse collides in the cache | `BaseMesh::owner` AddRefs; closed 2026-08-18 |
+| **stale bind pose from a refilled buffer** | `Hook_VBLock` demonstrably fires (it counts 2042 instance discards) and `bind-pose cache invalidated by a game write: 0`. The game never rewrites those buffers, so the cache is valid |
+| weights decoded at the wrong scale | declared `ubyte4` (raw 0..255, e.g. `[46 180 28 0]`); the shader divides by the weight sum and so do we, so scale cannot matter |
+
+Skinned declaration, now recorded properly (two variants, identical in the fields that matter):
+
+    pos float3@0 | normal ubyte4n@12 | tangent ubyte4n@16
+    BLENDWEIGHT ubyte4@20 | BLENDINDICES ubyte4@24 | texcoord short2@28 [+ short2@32]
+    stride 32 (one texcoord) or 36 (two)
+
+Unused influences are `index 255, weight 0`; the shader multiplies `c52[3*255]` by zero and we skip
+it. Same answer.
+
+### The last unverified link, now instrumented
+
+Everything in the chain has been checked against ground truth except one thing: **whether a head
+draw reads the head's palette.** The constants match the device (189,458 draws, 0 mismatches), the
+bind pose is valid, the arithmetic matches the disassembly - so if the GPU gets it right from the
+same inputs, the remaining difference has to be *which* palette is live.
+
+A head is 3-5 bones. The body beside it is 47-58. **Both index the same c52, and every upload in
+this game starts at bone 0.** So a head drawn without an upload of its own reads the body's bones
+0..4 - the pelvis and spine. A head posed by the pelvis follows the body's core animation and parts
+company with the neck, which is the reported symptom stated exactly.
+
+The dump line now carries, for the bones each mesh actually uses:
+
+    pal=<bones in newest upload>@d<draw> .. <bones in oldest>@d<draw> gens=<distinct objects>
+
+| reading | meaning |
+|---|---|
+| head with `pal=5@dN..5@dN gens=1` | its own upload - hypothesis dead |
+| **head with `pal=47@d...` or `gens>1`** | **reading the body's palette - confirmed, and the fix follows** |
+
+Supporting signal already in the log: `MIXED-PALETTE` reports a draw reading *8 bones at draw 4388
+(newest) and 55 bones up to 5 draws older*, `1.2 MIXED palettes/frame`, `worst spread 94 draws`,
+and `SKIN DISPLACEMENT ... worst 8.1 units`.
+
+### The doubled head, found: a prepass into a target that cannot hold colour
+
+Aimed F9 dump, NPC standing ~5 units in front of the player at `(79.1 145.8 61.7)`.
+
+**The palette hypothesis is dead, and cleanly.** Every head-sized mesh reads its OWN upload:
+a 5-bone mesh reads `pal=5@d315 .. 5@d315 gens=1`, a 4-bone mesh reads `4@d1461`, and in every
+case the upload is the immediately preceding draw, one object generation. Heads are not being
+posed by anybody else's skeleton.
+
+**What the dump showed instead.** The frame has two 2560x1440 render targets carrying character
+geometry:
+
+    === RENDER TARGET 14F28B68  2560x1440 fmt=34  ===   D3DFMT_G16R16      463 SKIP, 4 CONVERT
+    === RENDER TARGET 14F2E3F8  2560x1440 fmt=113 ===   A16B16G16R16F      the material pass
+
+The four survivors in the G16R16 target:
+
+     290 CONVERT v=7977 ps='Diffuse_MapSampler' rank=100 at(79.1 145.8 61.7) vb=4A4EDBF0
+     316 CONVERT v=1426 ps='Blend_MapSampler'   rank=70  at(78.2 145.7 62.9) vb=3B574948
+
+and the same meshes again, later, in the HDR material pass:
+
+    1461 CONVERT v=7977 ps='Blend_MapSampler'   rank=100 at(79.1 145.8 61.7) vb=4A4EDBF0
+    1486 CONVERT v=1426 ps='Blend_MapSampler'   rank=100 at(78.2 145.7 62.9) vb=3B574948
+
+**Same vertex buffer, same objTM, both converted.** Remix path-traces every character twice.
+
+### Why every existing rule let these through
+
+The prepass tests are all about SAMPLERS: `shader samples nothing`, `stipple with no colour`,
+`only normal/stipple/depth samplers`. These four draws carry `Diffuse_MapSampler` at rank 100 -
+a real colour texture, top of the albedo ranking - so every sampler-based test passes them.
+
+**D3DFMT_G16R16 has two channels. No blue, no alpha. Nothing can render an albedo into it.**
+The pass is a prepass by the shape of its destination, and no amount of looking at the pixel
+shader could say so. 463 of its 467 draws were already being skipped for a different reason,
+which is why this never showed up as a target-level anomaly - only 4 leaked, and 4 duplicated
+characters is exactly what "sometimes two heads on one character" looks like.
+
+### The fix
+
+`FormatColourChannels()` plus `skipNonColourTargets=1`: a draw into a target with fewer than
+three colour channels takes the same `HiddenDisp` path as the other prepasses. Channels are
+measured once per **target change** in `Hook_SetRenderTarget`, next to the existing UI test -
+never per draw, because `GetDesc` is a bridge round trip.
+
+Unknown formats answer 4. This rule may only ever REMOVE a draw, so anything it does not
+recognise has to fall on the side of leaving it alone.
+
+Skipping rather than hiding is safe on this game's own terms: 463 siblings already are, and the
+depth readback the engine genuinely reads is answered by the occlusion-query hook.
+
+    non-colour render target (fewer than 3 channels...): N draws/frame hidden
+
+If N is 0 nothing took this path and it fixed nothing. The run log reported `converted -> target
+14F28B68 fmt=34 : 12 draws/frame` before the fix, so N should land near 12.
+
+**What this predicts:** the doubling and the z-fighting go. Whether it also fixes the misplaced
+and mis-textured heads depends on whether those were ever separate faults - two coincident copies
+of a head, posed from two different palettes taken ~1200 draws apart in the frame, would read as
+one head sitting wrong and wearing the wrong texture. That is a prediction, not a claim.
+
+### The head fix worked. The rule that delivered it was wrong anyway.
+
+User: *"heads did not swap and there was no head zfighting"* - the doubling is gone.
+
+And: *"the game now seems to stop submitting everything once looking at the horizon or down.
+only renders when looking up."* That was mine.
+
+    non-colour render target (fewer than 3 channels...): 707.8 draws/frame hidden
+    FFP converted 214/frame (11.8%)        <- was 653/frame (30.1%)
+
+I predicted ~12 draws/frame. It hid **707**. The frame dump says where they went:
+
+    14EB50D0 2560x1440 fmt=34   2181 draws  - 2180 of them hidden by this rule
+    14EBDB98 2560x1440 fmt=113  1463 draws
+
+**That G16R16 surface is not a prepass target. It receives 2,181 draws - the world.** SR3 is a
+deferred renderer and binds MULTIPLE render targets: the 2-channel normal/depth buffer goes to
+slot 0 and a colour target alongside it. So the question I asked - *can slot 0 hold colour?* - is
+not the question I claimed to be asking, which was *does this draw write colour?* Those differ
+exactly on the G-buffer pass, i.e. on all the world geometry. Looking up at the sky kept working
+because there is almost nothing there to lose.
+
+### What was actually wrong with the reasoning
+
+The principle stands: *nothing can render an albedo into a two-channel surface.* What does not
+follow is that the DRAW writes no colour, because the draw is not writing to one surface. I took a
+true statement about a surface and applied it to a draw, and never checked whether this game binds
+more than one target - in a renderer whose G-buffer is the reason that surface exists at all.
+
+The evidence was there before I shipped: the dump groups draws by slot 0 only, and the fmt=34
+group held 467 draws in one frame and 2,181 in another. **467 draws is not a prepass either.** I
+read '463 SKIP, 4 CONVERT' as "the rules already handle this target" instead of asking why a
+depth prepass would contain the whole visible world.
+
+### Corrected
+
+`g_rtChannels[4]` / `g_rtBound[4]`, filled for every slot in `Hook_SetRenderTarget`, and
+`AnyColourTarget()`. The rule now fires only when **no bound slot** can hold colour. Both
+questions are answered from ONE `GetDesc` per target change - the previous edit had added a
+second, on the hook this file itself names as a hitch candidate.
+
+New counter, so the next run distinguishes the two populations instead of leaving it to me:
+
+    non-colour render target ...: N draws/frame hidden
+    of which: M draws/frame had a non-colour target at slot 0 but a COLOUR target elsewhere
+
+N should be ~12 (the duplicate character prepass). M is the MRT G-buffer pass, which must never be
+hidden, and was ~700/frame when the rule was wrong.
+
+### The lesson, which is the same one as last time
+
+The car-part fix was verified across all 1,693 shaders before shipping, and it was right first
+time. This one was shipped on a single frame's dump and a principle that sounded clean. **The
+sweep is what makes the difference, not the quality of the argument.** The equivalent check here
+was one line - how many draws go to this target, and does that number look like a prepass - and
+the answer, 467, was already on screen.
+
+### The corrected rule restored the world - and gave the heads back
+
+    non-colour render target ...: 0.4 draws/frame hidden
+    of which: 653.4 draws/frame had a non-colour target at slot 0 but a COLOUR target elsewhere
+    converted -> target 14DE5260 fmt=34 : 11 draws/frame
+
+World renders again (653 draws/frame correctly spared), and the rule now hides almost nothing -
+**so the previous build fixed the heads only by destroying the G-buffer pass wholesale.** The 11
+character draws still converting into the fmt=34 pass have a colour target bound alongside, so
+the render target cannot separate them from world geometry. Render target was the wrong axis.
+
+### The right axis: the same draw, submitted twice
+
+Two aimed dumps, strict identity - same vertex count, triangle count, shader, bound texture AND
+position:
+
+| dump | converted | identical groups | redundant copies |
+|---|---|---|---|
+| frame-1 | 993 | 53 | **94** |
+| frame-2 | 938 | 48 | **83** |
+
+Byte for byte, from the dump:
+
+       d7  CONVERT v=17601 p=494 zw=1 zt=1 blend=1 cw=0xf ps='Diffuse_MapSampler' tex0=48097178
+     d3296 CONVERT v=17601 p=494 zw=1 zt=1 blend=1 cw=0xf ps='Diffuse_MapSampler' tex0=48097178
+
+Every field the dump records is equal. The rasteriser resolves those into one surface; a path
+tracer gets two, in the same place.
+
+**Only 4 of the 94 were skinned.** `dedupSkinned` existed, its key was already correct and
+complete - buffer, vertex range, INDEX range, triangle count, pose, objTM, bound albedo, built
+over four previous failures - and it was gated to skinned draws and switched OFF. The mechanism
+to fix this has been in the codebase the whole time, aimed at 4% of the problem and disabled.
+
+That the key separates real sub-ranges is checkable in the same data:
+
+     d916 v=7977 p=309 tex=162B8288  at(75.7 145.7 51.2) vb=44D83928
+    d4271 v=7977 p=739 tex=3B982D60  at(75.7 145.7 51.2) vb=44D83928
+
+Same mesh, same character, same position - different triangle count and different texture, so not
+merged. That is the distinction four earlier versions of this key got wrong.
+
+### What changed
+
+`dedupAll=1` extends the identical test to rigid draws, and `dedupSkinned` is back ON. Two
+additions the generalisation required:
+
+**The instance transform is folded in.** An instanced draw's objTM is identical across the whole
+batch - every one reports `at(0.0 0.0 -1024.0)` - so without it the key cannot tell two instances
+of a street prop apart and would delete one. `InstanceWorld` is a cache lookup and never locks.
+
+**If an instanced draw's placement cannot be read, the dedup declines to judge it.** A missed
+duplicate is a second surface; a wrong merge is a missing object. Those are not symmetric, so the
+unreadable case refuses rather than guesses.
+
+`kMaxSkinFrameKeys` 512 -> 2048: it was sized for ~94 skinned draws a frame and now has to hold
+~1,000 converted ones. At 512 the table would have filled part way through every frame and every
+later duplicate would have gone unnoticed **while the counter still reported successes**. That
+failure is now counted:
+
+    DEDUP: N draws/frame hidden ... (K keys held, M/frame did not fit - non-zero means MISSED)
+    DEDUP declined on P draws/frame: instanced, and their placement could not be read
+
+### On the 94
+
+The dump does not record `startIndex`, so the offline key is WEAKER than the shipped one - two
+draws differing only in index range look identical to my analysis and will be kept apart by the
+real key. **94 is therefore an upper bound on what will be hidden, not a prediction.** The error
+is in the safe direction, which is the point.
+
+### The heads: SR3 morphs them, and we were reading only the base mesh
+
+Dedup landed - `DEDUP: 12.6 draws/frame hidden`, table never overflowed, so most of my offline 94
+differed in index range and were correctly kept apart. It did not fix the heads, because the
+character's two passes carry different materials and are not exact duplicates.
+
+The clue that cracked it was the user's: **"heads are also slightly placed lower than they should
+be."** A small, consistent positional offset is not a palette fault or a cache fault. It is a
+missing term.
+
+Sweeping every vertex shader for inputs the shim ignores turned up `dcl_position1` - a SECOND
+position stream - in the `_ms` and `_mc` variants. **`m` is for morph.** Disassembling
+`ir_sr3npcskinfull_mc`:
+
+    def c0, 0.000122070313, 2, -1, 3          c0.x = 1/8192
+    dcl_position v0 / dcl_position1 v4 / dcl_normal v2 / dcl_normal1 v5
+    mov r1.xyz, v4
+    mad r1.xyz, r1, c0.x, v0        <- position = v0 + v4/8192, BEFORE the bone blend
+    dp4 r2.x, r2, r1                <- then the bones, then objTM
+
+**SR3's character customisation is a base mesh plus a per-character delta in stream 2**, declared
+`POSITION1` as `short4` with `NORMAL1` as `ubyte4n` beside it - both present in the vertex
+declaration we dumped days ago and never read. SHORT4 is not normalised, so the components arrive
+as raw integers and 1/8192 puts the delta in world units.
+
+Reading only `v0` renders every NPC with the SAME base head. That is, in one cause:
+
+| symptom | why |
+|---|---|
+| wrong heads | the head is the base head, not that character's |
+| heads change | each NPC's own delta is what is missing, so each is wrong differently |
+| slightly too low | the delta is a position offset and it is not being added |
+| not textured properly | the UVs were authored for the morphed surface, not the base one |
+
+### The fix
+
+`ShaderInfo::usesMorph` from the dcl stream (POSITION, usage index 1, input register), and the
+delta applied in `GetBaseMesh` before the bone blend, where the shader applies it. `NORMAL1`
+replaces `NORMAL0` on those draws - lighting the morphed surface by the shape it no longer has
+would be its own bug.
+
+**The morph stream is part of the mesh's IDENTITY, so it is folded into the bind-pose cache key.**
+Two NPCs share one base head buffer and differ only in their deltas; a key built from stream 0
+alone would serve the first NPC's decoded face to every one after it - which is "heads change"
+all over again, introduced by the fix for it.
+
+### Swept before shipping
+
+| shaders declaring dcl_position1 | reads blendindices | defines 1/8192 | count |
+|---|---|---|---|
+| morph, skinned | yes | **yes** | **384** |
+| morph, rigid | no | yes | 330 |
+| `rl_particle_*` | no | no | 52 |
+
+**Every skinned shader that reads the morph stream uses the 1/8192 scale - 384 of 384, zero
+exceptions.** The 52 without it are all particle shaders, which are not skinned and never reach
+`GetBaseMesh`. The morph is additionally skipped unless the declaration says SHORT4, so an
+unexpected format falls back to the base mesh rather than being misdecoded, and a morph stream
+that cannot be read is counted rather than refused - the fallback is exactly today's behaviour.
+
+    MORPH: N draws/frame use a shader that reads the morph stream | K meshes decoded WITH their
+           morph delta, U could not be read
+
+N non-zero with K zero means every one is still rendering the base mesh. `applyMorph=0` reverts.
+
+### Note
+
+This is the second bug today whose cause was an input the shim never read, found by asking what
+the shader declares that we do not. The first was `dcl_blendindices` (car parts). Both were
+invisible to every runtime probe because the shim cannot measure what it does not know exists.
+
+### The morph never fired
+
+    MORPH: 33.9 draws/frame use a shader that reads the morph stream
+         | 0 meshes decoded WITH their morph delta, 12 could not be read
+
+The shader detection works - 33.9 of ~70 skinned draws a frame use a `_mc`/`_ms` variant. **Every**
+attempt to read the morph stream failed, so nothing on screen changed and the heads are still the
+base mesh. The falsifier written into the ini caught this exactly as intended: `N` non-zero with
+`K` zero means the fix never ran.
+
+`g_morphUnread` was one counter for five different causes - stride, GetDesc, DYNAMIC, range, lock -
+which is the same mistake as counting "draws hidden" without recording which ones. Split now, and
+the first eight failures log their numbers:
+
+    MORPH UNREAD #N: <cause> | ps='...' verts=N | stream 2 vb=P stride=S offset=O size=B
+                     | first=F posType=T@X nrmType=T@X
+    MORPH UNREAD by cause: A stride, B desc, C DYNAMIC, D out of range, E lock
+
+The sampler is in there because one thing is still unproven: that HEAD draws use the morph variant
+at all. 33.9 draws a frame do; whether the heads are among them is an assumption until this line
+names them.
+
+**The disassembly is not in doubt** - `mad r1.xyz, v4, c0.x, v0` is what the `_mc` shaders
+compute, and 384 of 384 skinned morph shaders define the 1/8192 scale. What is in doubt is whether
+the shim can reach that data, and whether the meshes that need it are the ones that look wrong.
+
+### Why it never fired, and the two things that answered at once
+
+    MORPH UNREAD by cause: 0 stride, 0 desc, 10 DYNAMIC, 0 out of range, 0 lock
+    MORPH UNREAD #2: buffer is DYNAMIC | ps='Blend_MapSampler' verts=1426 | stream 2
+                     vb=037C13D8 stride=12 offset=95724 size=5242880 | posType=7@0 nrmType=8@8
+
+**The morph buffer is DYNAMIC**, and the decoder refuses to read-lock DYNAMIC buffers - correctly,
+since that is write-combined memory behind the 32->64-bit bridge. Ten of ten failures, one cause,
+no ambiguity.
+
+And the same line settled the assumption I had flagged as unproven: **`ps='Blend_MapSampler'
+verts=1426` is the head.** Heads do use the morph variant.
+
+The buffer's shape is now known exactly: ONE 5 MB dynamic buffer, stride 12, one contiguous block
+per character, and the STREAM OFFSET selects the character - 0, 17112, 34224, 95724, 112836,
+129948, where 17112 = 1426 verts x 12. POSITION1 is SHORT4 at 0, NORMAL1 is UBYTE4N at 8.
+
+### Rebuilt on the machinery that already existed for this
+
+SR3's instance streams are dynamic too, and this shim has snooped them since 2026-08-16:
+registering a buffer with `InstanceBufferData` makes `Hook_VBLock`/`Hook_VBUnlock` copy the game's
+own writes, and a `fresh` map records which bytes have actually been written since the last
+discard. The morph now uses the same path. No lock, no bridge traffic, and the freshness test
+comes free - left-over bytes from a previous occupant of an offset would morph a face by a
+stranger's data, which is the failure this whole session has been chasing in other forms.
+
+**The morph is applied per DRAW now, not baked into the bind pose.** The first version put it in
+`GetBaseMesh` and folded the morph buffer into the cache key. That was wrong in a way worth
+recording: the bind pose is cached because the base mesh is static, while the morph lives in a
+buffer the game rewrites - so baking it in would have required invalidating the cache on every
+write to a per-frame buffer, and served one NPC's face to the next the moment it went stale. The
+base mesh stays the base mesh; the delta is added in the skinning loop where the shader adds it.
+
+    MORPH APPLIED: N draws/frame skinned WITH the delta | U draws found no snooped buffer,
+                   S stride refusals, V vertices/frame fell back (not written yet)
+
+N is the number that matters. U should fall to near zero after the first sight of each character -
+a snooped buffer holds nothing until the game next fills it.
+
+## 2026-08-28 - the morph landed, and took two bugs with it
+
+    MORPH APPLIED: 30.6 draws/frame skinned WITH the delta | 37 draws found no snooped buffer,
+                   0 stride refusals, 0 vertices/frame fell back
+
+User: *"the heads are in the right place"*. The position delta is correct and the snoop reaches
+every draw that needs it. Two consequences followed.
+
+### 1. The normal is a DELTA too, and I substituted it
+
+    mad r0.yzw, v5.xxyz, c0.y, c0.z     n_morph = v5*2 - 1
+    mad r1,     v2,      c0.y, c0.z     n_base  = v2*2 - 1
+    mad r0.yzw, r0,      c0.y, r1.xxyz  n = n_base + 2*n_morph
+    nrm r1.xyz, r0.yzww
+
+`NORMAL1` does not replace `NORMAL0`. It is added, doubled, exactly as the position delta is
+added - and I read the first two instructions, saw `v5` expanded, and assumed replacement without
+reading the third. The result lights every morphed surface by a vector the game never computes:
+"something looks weird with the normals", on heads and on player skin.
+
+Now `n_base + 2*n_morph`, normalised before the blend as the shader does - with four bones pulling
+in different directions, normalising before and after are not the same vector.
+
+### 2. The crash was mine, and the project could not read its own crash dumps
+
+The shim writes `sr3-rtx-crash.dmp` and has since long before this session. Nothing could turn an
+address in it into a line of source, because **the build produced no map and no symbols**. That is
+now fixed in `build.ps1` (`/MAP`), the map is deployed beside the .asi, and the first thing it did
+was resolve this:
+
+    exception 0xc0000005 at 0x74b598ee  params=['0x0', '0x0']
+    eip=0x74b598ee  eax=0x1050 ecx=0x1050 esi=0x00000000 edi=0x44252040
+    -> sr3-rtx.asi + 0x198ee = CopyUpLargeMov+0xa   (the CRT's memcpy)
+    -> memcpy(dst=0x44252040, src=NULL, count=4176)
+
+**4176 = 348 vertices x the 12-byte morph stride.** The faulting call is the snoop:
+
+    if (!g_internal && g_pendingLock.vb == self && g_pendingLock.ptr) {
+        ...
+        if (c.data.size() < end) c.data.resize(end);          // opaque to the optimiser
+        memcpy(c.data.data() + ..., g_pendingLock.ptr, ...);  // RE-READS the global
+
+The pointer is tested, then `resize` forces the compiler to re-read it from the global before the
+memcpy. `Hook_VBUnlock` is not called from one thread. Another thread running `g_pendingLock = {}`
+inside that window - which sets `ptr` to null - is a null source of exactly this shape.
+
+**The window had always been there and had never mattered.** Only instance streams were snooped,
+and the game fills those on the render thread. Registering the morph buffer put a stream the game
+writes elsewhere through the same single global slot. The bug was latent; the change made it
+reachable.
+
+Fixed by snapshotting the pending lock into locals and clearing the global before any other call,
+so nothing is read from it after the null test.
+
+### Method note
+
+Three of today's findings came from reading the shader properly and one from failing to: I stopped
+at `mad r0.yzw, v5.xxyz, c0.y, c0.z`, which looked like a complete expansion, and did not read the
+line that consumed it. **The instruction that uses a value says what it means; the one that
+produces it does not.**
+
+And a crash handler that writes dumps nobody can read is not a crash handler. `/MAP` costs nothing
+and turned "the game crashes at random" into a register dump and a line, in one pass.
+
+### Crash pass: the game locks vertex buffers from more than one thread
+
+User asked for the car-part mechanisms to be audited for crash risk. The timeline says those are
+not where the crashes started:
+
+| dumps | vs. the car-part fix (08-26 14:10) |
+|---|---|
+| 08-25 18:31, 18:34, 23:30 x2 | **before it** |
+| 08-27 12:57 x2, 22:47 | after |
+| 08-28 00:57, 00:59 | after |
+
+Four crashes predate that patch. What the 08-28 dump proves, though, is the thing that explains
+all of them.
+
+**The game locks vertex buffers from more than one thread.** That is not an inference from
+timing: `memcpy(dst, NULL, 4176)` in `Hook_VBUnlock` requires the source pointer to become null
+between the null test and the `memcpy` two lines later, and single-threaded it cannot. Everything
+below follows from that, and had been unguarded since the snoop was written.
+
+### Three races, all on state the render thread reads
+
+**1. Deferred invalidation.** `Hook_VBLock` called `InvalidateBaseMeshes`, which erases from
+`g_baseMeshes` and calls `Release()` on the buffers those entries pin - while the render thread
+holds a `const BaseMesh*` into that same map for the whole length of a skinning loop. An erase
+from the other thread frees the vertices out from under it. Lock requests are now queued and
+drained on the render thread at the top of the next draw, before anything takes such a pointer.
+
+**2. Snoop buffer pointer stability.** `InstanceBufferData` hands the render thread
+`c.data.data()`, and the morph read walks it vertex by vertex for the length of a draw. The
+unlock path could `resize()` that vector from another thread and leave the pointer dangling. The
+vector is now sized ONCE to the buffer's full declared size and never grown; the unlock path
+clamps instead of resizing. A use-after-free becomes at worst a torn read of bytes the `fresh`
+map already guards.
+
+**3. Map access under a lock.** `g_instCache` is inserted into by the render thread and read and
+written by the locking thread. Both sides now take one critical section, entered on buffer
+lock/unlock and once per instanced or morphed draw - not per draw in general.
+
+### Two out-of-bounds reads found by inspection in the same pass
+
+**The bone palette had no upper bound.** `boneReg` comes from the shader's constant table as a
+raw 16-bit register number, and `palette + bone * 12` indexes from it into a 1024-float array.
+The palette is 64 bones x 3 registers, so any register above c64 reads past the end. Every shader
+in this game declares it at c52 and the report has always said `0.0 draws/frame ELSEWHERE` -
+which is precisely why nothing caught it. Now bounded by what actually fits, with a named report
+if it ever binds.
+
+**The morph offset arithmetic was 32-bit.** `base + i*stride` against a UINT size: a wrapped
+value turns an out-of-range offset into one that passes the bounds test. Now 64-bit throughout,
+and a base beyond the buffer refuses the morph rather than reading.
+
+Also capped the comment-block skip in the dcl walk against `end` - a corrupt length would have
+walked the pointer far past the buffer before the loop condition noticed.
+
+### Note on what is proven and what is not
+
+Race 1 and the palette bound have never been observed firing (`invalidations: 0`, `ELSEWHERE:
+0.0`). They are hardening, not fixes for a diagnosed fault. The only crash actually diagnosed is
+the null-source memcpy, and that one is fixed. The right way to tell whether the rest mattered is
+a run that tries to crash - which is what the user offered.
+
+    VB LOCK HOOK: N invalidations deferred to the render thread
+
+Non-zero means the queue is doing work that used to happen inline on the wrong thread.
+
+### The freeze and the Runtime Error were the crash fix, not the crash
+
+The build that shipped the thread-safety work also pre-sized every snooped buffer to its full
+DECLARED size - `data` and the parallel `fresh` map, so twice over - to make `data()` stable for
+a reader holding it across a draw. Measured cost of that idea: **2,390 instanced draws a frame**
+across many buffers, each now reserving its whole declared size instead of growing to the few
+hundred KB the game actually writes. In a 32-bit address space shared with the game, Remix's
+client and a 24 MB skinning ring.
+
+The machine paged, then:
+
+    Microsoft Visual C++ Runtime Library
+    This application has requested the Runtime to terminate it in an unusual way.
+
+That message is `std::terminate`, not an access violation - an **unhandled `std::bad_alloc`**
+out of `vector::assign`. Which is its own finding: **a shim must degrade, not abort the process
+it is a guest in.** Refusing a mesh costs one pass-through draw; throwing costs the session.
+
+### What replaced it
+
+Pointer stability was the wrong solution to the right problem. Readers now **copy out** what they
+need under the lock (`SnoopCopy`) instead of borrowing a pointer into a vector another thread can
+resize. A draw's morph slice is `numVertices x 12` - 17 KB for a head, 96 KB for a body - into
+one reused buffer, so the allocation happens once and never again. Instance transforms copy 16
+bytes per row. Memory is back to grow-to-what-was-written, plus:
+
+- a **96 MB ceiling** on everything the snoop holds, with refusals counted;
+- `try`/`catch` on every growth path, so an allocation failure refuses a draw instead of killing
+  the game;
+- the same guard on `GetBaseMesh`'s bind-pose allocation, the largest in the skinned path.
+
+### A silent break, caught before shipping
+
+Removing the accessor that handed out pointers also removed the thing that REGISTERED instance
+buffers for snooping - registration was a side effect of the getter. Nothing would have failed
+loudly; ~1,400 instanced draws a frame would simply have stopped converting. Now an explicit
+`RegisterSnoop` call, named for what it does.
+
+    VB LOCK HOOK: N invalidations deferred | snoop holds X MB of 96 MB, R writes refused on
+                  budget, F allocations failed
+
+R or F non-zero means the ceiling is doing work and the numbers say how much headroom is left.
+
+### Method note
+
+Two builds in a row shipped a fix whose cost I had not measured: hiding draws by render-target
+slot without asking how many draws that target receives, and reserving buffer memory without
+asking how many buffers there are. **The answer was one grep away both times** - `2,390 instanced
+draws/frame` was already in the report.
+
+### Crash hunt: 26,400 frames, no crash
+
+User flew, drove fast, blew up cars, played a long session. Nothing crashed. The safety nets say
+why they did not have to:
+
+    VB LOCK HOOK: 7,185,052 invalidations deferred | snoop holds 2.7 MB of 96 MB,
+                  0 writes refused on budget, 0 allocations failed
+    instancing: 1,234 converted from the instance stream/frame, 0 refused/frame
+    MORPH APPLIED: 34.7 draws/frame skinned WITH the delta
+
+Memory is 2.7 MB against a 96 MB ceiling - the freeze build had been reserving whole declared
+buffer sizes to reach the same end. Instancing is intact, which is the check that mattered after
+`RegisterSnoop` replaced the accessor that used to register buffers as a side effect.
+
+**7.2 million deferred invalidations - 272 a frame - is also the proof, at scale, that the game
+locks vertex buffers off the render thread.** That was inferred from one null pointer in one
+crash dump; it is now a measured rate.
+
+### Three things the run found
+
+**1. Every one of those 7.2 million invalidations was wasted.** `bind-pose cache invalidated by a
+game write: 0 times`, and the UV buffers report `0 invalidated by the game` too. The game relocks
+a handful of dynamic buffers constantly and we hold nothing for any of them. Now coalesced: the
+same pointer queued twice between drains is one entry, and the scan stays short precisely because
+of that.
+
+**2. The dedup key table was overflowing.** `13.7/frame did not fit - non-zero means duplicates
+were MISSED`. 2048 was sized for ~1,000 converted draws a frame; this scene runs 1,288 converted
+out of 3,915. Raised to 8192. **The falsifier written into that line when the table was built is
+what caught it** - without it the DEDUP counter would have gone on reporting successes while
+silently missing everything past the cap.
+
+**3. A counter that lied.** `MORPH: ... 0 meshes decoded WITH their morph delta` has read a
+permanent 0 since the morph moved out of `GetBaseMesh` into the per-draw path. It was measuring a
+variable nothing increments any more. Removed - `MORPH APPLIED` is the live one. A counter that
+lies is worse than no counter, and this project has now been burned by that twice in two days.
+
+### The largest open problem is no longer correctness
+
+    TIMING: frame 50.9 ms avg (20 fps), worst 701 ms | shim 32.01 ms avg (62.9% of frame)
+    draws 3,915/frame, FFP converted 1,288/frame, 170 skinned/frame, 126,372 skinned verts/frame
+    SKINNING: 1,434 meshes decoded, 410 cached, 1 cache flushes
+    SKIN RING: 24 MB, high water 24.00 MB, 0.33 wraps/frame
+
+**The shim is 63% of frame time at 20 fps.** Some of that is a heavier scene than any measured
+before - draws are double and converted draws 2.6x what earlier runs showed - but it is
+superlinear, and two numbers point at where to look: the bind-pose cache has decoded 1,434 meshes
+to hold 410, having flushed once, so it is re-decoding meshes it evicted; and each decode is a
+read-lock across the 32->64-bit bridge. The ring is saturated again at 24 MB.
+
+Correctness work outstanding: the head z-fighting, and whether the normal delta fix landed.
+
+### Heads: geometry is fixed, and the texture is a specular mask
+
+User: *"correct head, properly placed, but not the correct texture"*, plus wrong texturing on
+some body parts and no way to tell whether the tint is wrong on the head, the body or both.
+That is a material fault, not a transform one - the morph work is done.
+
+### The head is not drawn by the shader I had been reading
+
+Head draws report `ps='Blend_MapSampler'`, which never matched `ir_sr3npcskinfull_c` - that
+declares `Diffuse_Map` at rank 100. Ranking per SHADER INDEX rather than per file (a .fxo_pc
+holds ten) finds it: **`ir_sr3npcskinfull_mc` shader[6] and [7]**, whose only colour-ranked
+sampler is `Blend_Map`.
+
+    shader[6]  texld_pp r0, v4.zwzw, s1        Normal_Map
+               mad_pp  oC0.xy, r0, c1.x, c1.x  <- writes the NORMAL
+               texld_pp r1, v4, s4             Blend_Map
+               mad_pp  oC2.z, r1.x, r0.x, c12.x  <- ONE scalar, into a fresnel term
+               ... oC1, oC2 data
+
+    shader[8]  mul_pp  oC0, r2, c37            <- Tint_color; the MATERIAL pass
+               samples Diffuse_Map, Sphere_Map_1/2, IR_LBuffer
+
+**Shader[6] outputs no colour at all.** It is the deferred G-buffer pass. `Blend_Map` is a
+specular mask, and the albedo ranker scores it 70 and hands it to Remix as the head's base
+colour. A correctly placed head wearing a specular mask is exactly what was reported.
+
+### The same is true of the world, in a way that is easy to misread
+
+    ir_at_bbsimple1_c[6]   texld_pp r0, v4, s0        <- samples Diffuse_Map
+                           texld_pp r0, v4.zwzw, s1   <- OVERWRITES r0 with Normal_Map
+                           mad_pp  oC0.xy, r0, ...    <- writes the NORMAL
+
+The diffuse load is DEAD - overwritten before use. So "this shader samples a colour map" does not
+mean it produces colour, and any rule built on the sampler list alone will get this wrong. Swept:
+**1,343 pixel shaders write three render targets, 1,880 write one**, and 196 of the three-target
+ones sample a map the ranker would score.
+
+### Measured, not acted on
+
+A rule that hides the G-buffer pass would be the third attempt at removing SR3's duplicate
+geometry. The first keyed on render-target slot 0 and hid the whole city; the second (dedup)
+caught only 12 draws a frame because the two passes are not identical. **Both shipped without
+asking how large the population was.** So this build only counts it:
+
+    DEFERRED G-BUFFER PASS (pixel shader writes >1 render target, so it outputs no colour):
+    N draws/frame, of which M/frame are CONVERTED | single-target draws converted S/frame
+    | their albedo samplers: ...
+
+`M` is what a rule would remove and `S` is what would remain. If S is large and M small, hiding
+the G-buffer pass is safe and likely fixes the wrong texture AND the surviving z-fighting - two
+coincident copies of every object is what a deferred renderer looks like to a path tracer. If M
+is most of the converted geometry, the material pass is not being converted and hiding this would
+repeat the first failure exactly.
+
+The sampler list in that line says which materials are affected, which is what decides whether
+the tint question is about heads, bodies, or the whole G-buffer population.
+
+### The measurement, and the rule it justified
+
+    DEFERRED G-BUFFER PASS (writes >1 render target, so outputs no colour): 399.7 draws/frame,
+    of which 8.0/frame are CONVERTED | single-target draws converted 271.4/frame
+    | their albedo samplers: Diffuse_MapSampler, Diffuse_mapSampler, Blend_MapSampler
+
+**M = 8, S = 271.** Existing rules already hide 392 of the 400; eight leak through, and they
+match `converted -> target ... fmt=34 : 8 draws/frame` exactly - the same draws, found by two
+independent routes. `Blend_MapSampler` in that sampler list is the heads.
+
+So every affected object gets a correct material copy AND a specular-mask copy on top of it.
+One cause, two symptoms: the wrong texture, and the z-fighting that survived the dedup work.
+
+Compare with the first attempt at this, which keyed on render-target slot 0: it hid **707
+draws/frame** and took the city with it. Same intent, same target population in the frame dump,
+and a factor of 88 between them - which is the whole argument for counting first.
+
+`skipDeferredGBuffer=1` shipped. Falsifier:
+
+    ...of which H draws/frame HIDDEN by skipDeferredGBuffer (gate ON)
+
+H should land near 8. Near 0 means nothing took the path; the world darkening or objects
+vanishing means S was not the material pass and the rule is wrong.
+
+### What this does not address
+
+The tint question is still open in one respect: `mul oC0, r2, c37` is `Tint_color`, applied in
+the material pass. Whether the shim reproduces that constant correctly for heads and for bodies
+is a separate question from which pass gets converted, and it is the next thing to read if the
+colour is still wrong once the duplicate is gone.
+
+### The rule was right. Hiding was the wrong verb, and it was the second time.
+
+Z-fighting gone, heads stopped changing - the diagnosis held. Then the world went black except
+looking up, exactly as it had on 2026-08-27.
+
+    ...of which 693.2 draws/frame HIDDEN by skipDeferredGBuffer (gate ON)
+    SKIPPED entirely 1418/frame        (was 1205)
+    FFP converted 194/frame (11.8%)    (was 285, 22.7%)
+
+**I predicted 8 draws a frame and hid 693.** The probe measured how many G-buffer draws were
+CONVERTED (8) - it did not measure how many EXIST (400-693). Putting the test at the top of
+Classify applied it to all of them, and `HiddenDisp` with `hiddenPassMode=2` means SKIP.
+
+SR3's material pass reads that buffer back through `IR_GBuffer_DSF_DataSampler` and
+`IR_LBufferSampler`. Skipping the pass that fills it leaves the deferred lighting sampling
+nothing - a black world, except where nothing deferred is on screen, which is the sky.
+
+**The rule I broke is written in this file, directly above `hiddenPassMode`:** *a draw whose
+RESULT the engine reads can never be skipped, only hidden.* It is the same rule that took four
+sessions to learn when vertex capture was the blocker, and I had re-read it this week.
+
+### The fix is placement, not the test
+
+The test moved to the END of Classify and returns `Disp::PassThrough`:
+
+- every earlier rule has already had its say, so draws they skip are still skipped - no change
+  in submission cost, no change in what the engine gets;
+- only the handful that would otherwise have been CONVERTED reach it;
+- pass-through submits them to the device exactly as before, so the engine's own buffers are
+  untouched, and with vertex capture off Remix never sees them.
+
+That is what "do not convert this" should always have meant here. Hiding and skipping are about
+what REMIX sees; the engine's own passes are not ours to remove.
+
+    ...of which H draws/frame passed through instead of converted
+
+H near 8 is right. Hundreds means it is running too early again.
+
+### Method note
+
+Twice now the same shape: a correct diagnosis, a correct test, and a disposition that took the
+game's own rendering with it. The counter that would have caught it before shipping is not "how
+many draws would this rule affect" but **"how many draws does this rule change the disposition
+OF, and from what to what"** - which is a different question and the one I keep not asking.
+
+### The pass-through fix worked exactly as designed, and the world was still black
+
+    ...of which 9.2 draws/frame passed through instead of converted (gate ON)
+    SKIPPED entirely 971/frame        (back to normal from 1418)
+
+H = 9.2, precisely the 8 predicted. Skips back to normal. The disposition fix was correct - and
+the world was still black, because **the premise underneath it was wrong.**
+
+The frame dump names the nine:
+
+      7 PASS v=17601 p=494  Diffuse_MapSampler inst=1  <- terrain
+    149 PASS v=1879  p=19   Diffuse_MapSampler inst=1
+    559 PASS v=792   p=1599 Diffuse_MapSampler inst=1
+    797 PASS v=1426  p=8    Diffuse_MapSampler inst=1
+
+**SR3's visible world geometry IS the G-buffer pass.** Terrain and every large instanced mesh
+reach Remix only through it; the material pass is per-object and does not carry them. Nine draws
+a frame - but the nine that matter. Not converting them is not converting the world.
+
+### Why "produces no colour" was true and still useless
+
+Terrain's G-buffer shader is structurally identical to the head's:
+
+    ir_bbterrain1_s[5]   texld r2, v5, s1 / texld r2, v2, s0   <- both dead, r2 never read
+                         mad   oC0.xy, r0, c6.x, c6.x          <- the NORMAL
+
+So *this pass outputs no colour* is true of both and separates nothing. What separates them is
+not in the shader at all:
+
+- **what the game BINDS.** On a world draw the texture at that stage is the object's real colour
+  map, so converting terrain from this pass looks right. On a character draw it is a specular
+  mask - a head wearing the wrong texture.
+- **whether a material-pass copy exists.** Characters have one; terrain's only converted copy is
+  this pass.
+
+Skinned tracks both, and is now the gate. The sweep says the population is `ir_sr3npcskinfull_*`
+(8 shaders) with the 8 terrain shaders excluded - the two families that share the
+multi-target-plus-Blend_Map signature.
+
+### Method note, third time
+
+I read a shader correctly, drew a correct conclusion about that shader, and applied it to a
+population I had not characterised. "No colour is produced by this pass" was never the question.
+The question was **"what would Remix lose if this draw stopped converting"**, and the answer
+differs per draw for reasons that are not in the shader.
+
+### CONFIRMED: z-fighting and head-swapping gone, world intact
+
+User: *"the zfighting and headswapping seams to be gone."* And the world came back:
+
+    frame 9600 | draws 2965/frame | FFP converted 938/frame (31.6%)
+    ...of which 6.1 SKINNED draws/frame passed through instead of converted (gate ON)
+    MORPH APPLIED: 32.4 draws/frame skinned WITH the delta
+    DEDUP: 39.7 draws/frame hidden, 0.0/frame did not fit
+    snoop holds 2.0 MB of 96 MB, 0 writes refused, 0 allocations failed
+    TIMING: frame 34.4 ms avg (29 fps) | shim 20.22 ms avg (58.8% of frame)
+
+6.1 draws a frame, character-shaped, against 938 converted. Conversion is back to 31.6% - the
+same share as before any of this - so nothing else was taken with it.
+
+## Where the character work ended up
+
+Four separate faults, four separate causes, found over two days:
+
+| symptom | cause | fix |
+|---|---|---|
+| detached car parts drifting with animation | shim read "skinned" from the vertex DECLARATION; the game reads it from the SHADER, and `_s` variants declare no `dcl_blendindices` but share the declaration | `skinRequireBoneDecl` |
+| heads misplaced, slightly low, wrong shape | SR3 morphs characters: `pos = v0 + v4/8192` from a second vertex stream the shim never read | `applyMorph` |
+| heads wrongly lit | the morph NORMAL is a delta too - `n_base + 2*n_morph`, not a replacement | in the same path |
+| heads wrongly textured, z-fighting, swapping | the character G-buffer pass was converted with `Blend_Map` - a specular mask - as its albedo, on top of the correct material copy | `skipDeferredGBuffer`, skinned only |
+
+Every one was found by disassembly, and every one was an INPUT the shim did not know existed -
+a declaration bit, a vertex stream, a shader output signature. None was visible to any runtime
+probe, because a probe cannot measure what the code has no concept of.
+
+
+## 2026-08-28b - the tint question, half of it closed without a run
+
+Picked up the last correctness item on the open list: *the material pass ends `mul oC0, r2, c37`
+where c37 is `Tint_color`, and whether the shim reproduces that per-object constant for heads and
+bodies was never established.*
+
+Hash-verified the deployed build against `build/` and `configs/` first - all six matched the
+2026-08-28 baseline.
+
+### The standing claim was overstated, and the shim's own log disproves it
+
+Written in `ConstantAlbedo` since 2026-08-20:
+
+    // Measured 2026-08-20: Tint_color is (5.0, 5.0, 5.0) on every character material in the game
+
+It is not. The same log that produced that line also contains:
+
+    CHAR CONST #5: first='Damage_Normal_MapSampler'    | Tint_color(c37) = (0.000 0.000 0.000 1.000)
+    CHAR CONST #6: first='Dual_Paraboloid_Map_BackSam' | Tint_color(c37) = (0.000 0.000 0.000 1.000)
+    CHAR CONST #7: first='Dirt_Rust_MapSampler'        | Tint_color(c37) = (0.000 0.000 0.000 0.000)
+
+Four character draws read 5.0 and three vehicle draws read 0.0. "Every character material in the
+game" was **four draws in one frame**, because `ProbeCharacterConstants` reports once per distinct
+`firstSampler` name and stops at 12. That is the same shape as the hair finding - *"Hair_Spec_Color
+never captured, the probe's slots fill first"* - and the same shape as the two counters this file
+already records as having lied.
+
+### Tint_color is a terminal exposure scale. Settled by sweep, not by a run.
+
+Disassembled `ir_sr3npcskinfull_mc` shader[8], the character material pass:
+
+    texld_pp r2, v4, s0        ; Diffuse_Map                     <- the albedo
+    mul_pp   r2, r2, c0        ; * Diffuse_Color
+    mul_pp   r3.xyz, r2, r5    ; * sphere/blend
+    mul_pp   r1.xyz, r1, r3    ; * lighting
+    ...
+    mad_pp   r0.xyz, r2, c1.x, r0    ; + self-illumination
+    lrp_pp   r2.xyz, v3.w, c38, r0   ; fog lerp
+    mul_pp   oC0, r2, c37            ; * Tint_color              <- AFTER the fog
+
+`Tint_color` is applied after the fog lerp, to the fully lit and fogged result. An albedo tint
+that also tints the fog is not an albedo tint.
+
+Swept all 846 disassembled files rather than generalising from one shader, which is what the last
+three regressions on this project were:
+
+| how Tint_color is consumed | count |
+|---|---|
+| `mul` | 2,025 |
+| `rcp` - dividing BY it, to undo it | 945 |
+| `mad`/`mov`/`add`, **all on `.w`**, car-glass opacity | 147 |
+| last use is the shader's FINAL instruction | 1,681 / 1,944 |
+| last use within 3 instructions of the end | 1,927 / 1,944 |
+
+The 945 reciprocals are the strongest single piece of evidence: `ir_at_window_reflectmask_*` does
+`rcp r3.xyz, c37.xyz` to remove Tint_color from a value it reads back out of a buffer, then
+re-applies it at the end. You take the reciprocal of an exposure scale. You never do that to a
+material colour.
+
+**So discarding `Tint_color` is correct, and it needed no run to establish.** The shim's behaviour
+was already right; only its recorded reason was wrong, and a wrong reason in a comment is what a
+future session reasons from. Corrected in place.
+
+### The per-object albedo tint is a different constant
+
+The albedo multiply in that shader is `mul_pp r2, r2, c0` - **`Diffuse_Color`** - applied to the
+diffuse sample immediately after it is loaded. Swept for which constant scales a
+diffuse/blend/pattern sample across the corpus:
+
+| constant | shader entries |
+|---|---|
+| **Diffuse_Color** | **215** |
+| Base_Color | 12 |
+| Tint_color | **1** (of the 1,944 that declare it) |
+
+`SetupTextureStages` binds the map with `SELECTARG1`/`TEXTURE` whenever one exists, so
+`mul r2, r2, c0` never happens on a converted draw. `Diffuse_Color` is already reflected
+(`colourConstRank = 100`) and is used only when NO map is bound.
+
+That matters for characters specifically because the head's diffuse map is a shared 2048x1024
+atlas (`CHAR TEX #3: s0 Diffuse_MapSampler 3BA466D0 2048x1024`). If many NPCs share one head
+texture, per-character skin tone cannot be coming from the texture, and `Diffuse_Color` is the
+only constant in that shader that can colour the albedo.
+
+### What is NOT established, and the probe that answers it
+
+`Diffuse_Color` has been observed exactly twice, both `(1.000 1.000 1.000 1.000)`, by the probe
+whose sampling limit is the subject of this entry. Neither observation is confidently the head's
+material pass - one reports `c14`, the other is the G-buffer pass that `skipDeferredGBuffer` now
+passes through.
+
+**If it is white everywhere, applying it changes no pixel and the tint question closes with no
+code change.** That is a runtime question, so `diffuseColorProbe=1` measures the DISTRIBUTION -
+not a sample, which is the mistake being corrected here:
+
+    DIFFUSE_COLOR (the game multiplies its diffuse map by this; we bind the map raw, so it is
+    DROPPED): N draws/frame carry it (S skinned)
+      NON-WHITE X draws/frame (Y skinned) | K distinct values seen
+        (1.000 1.000 1.000) x N draws   <- white, a no-op
+
+Read-only: it changes no disposition, binds nothing, and cannot turn the world black.
+
+`NON-WHITE 0.00` closes the question. Non-zero SKINNED is the missing per-object tint, and the
+same line states how many draws a fix would affect - the number this project has twice shipped a
+rule without measuring.
+
+### A bug in the probe, caught before shipping
+
+The first version popped the top-8 buckets by zeroing them. The frame report runs on
+`g_frames == 60 || g_frames % 600 == 0` - **every 600 frames, not once** - so the table would have
+been emptied by the first report and every later one would have printed a confident, near-empty
+distribution. Sorted through an index copy instead.
+
+That is the third time on this project that an instrument would have shipped measuring something
+other than its name, and the first time it was caught by checking rather than by a wasted run.
+
+### Deployed
+
+    sr3-rtx.asi  5c68effd54ab7225c6e8fb205c205b95
+    sr3-rtx.map  e2ccc84af150a3124f2b7229e8566217
+    sr3-rtx.ini  16f4a87b9badb47279103ccd6abcaf90
+    rtx.conf     0872ecaa9ff251c4b34a71759cb7ca8d   (unchanged)
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5   (unchanged)
+    user.conf    8b361562e85c86ab88ab2fe61495b335   (unchanged)
+
+Key verified present in `[sr3-rtx]`. No behavioural switch changed.
+
+### The tint question was the wrong question. The characters are BLACK.
+
+User, asked to characterise the wrongness precisely rather than answer "is it wrong":
+
+> 1. my own player skin is black and has none of the tattoes.
+> 2. the hair of my player and npcs are also not colored correctly. Only the top of the player is
+>    colored correctly.
+> 3. npcs are inconsistent. the head skin color does not match the body skin at times.
+> 4. some npc clothes are not textured properly.
+
+Black skin with no tattoos is not a mis-scaled tint. It is an albedo that never arrived, and one
+mechanism explains all four symptoms.
+
+### SR3 bakes each character into a render target, and we were skipping the bake
+
+The frame dump names it. The player is 54 draws at `at(96.9 145.7 29.7)`, and **36 of them -
+d4140-d4176, v=7977 - are bound to ONE albedo, `tex0=3BA8F080`**, which `ALBEDO BOUND` reports as
+
+    2048x1024 fmt=22 mips=9 pool=0 usage=0x200      <- D3DUSAGE_RENDERTARGET
+
+Skin, tattoos and clothing are one GPU-composited atlas. The quads that FILL it are screen-space
+(no `projTM`) and their source is often a rank-0 sampler, so they land in the `post/composite
+quad` branch - and `hiddenPassMode=2` turns that branch into **SKIP**. Skipped, the atlas is never
+written.
+
+### The evidence is Remix's own captures, not my reasoning
+
+`captures/textures/` holds every texture Remix resolved. Three are 2048x1024:
+
+| texture | mean RGB | near-black |
+|---|---|---|
+| `8E4C8047F62D947A` | (230.6, 175.4, 142.2) | 0.0% |
+| `C2A50BD931666EDF` | (4.2, 3.4, 3.7) | 94.5% |
+| `E881A25E37E37B19` | (0.0, 0.0, 0.0) | **100%** |
+
+and they split cleanly by DATE:
+
+    captures 2026-08-13 .. 08-18  (11 of them)   8E4C8047F62D947A   mean 182.7
+    capture  2026-08-23                          E881A25E37E37B19   mean   0.0
+
+The atlas was a real character face until 08-18 and pure black on 08-23 - which is when
+`hiddenPassMode=2` and capture-off landed.
+
+The linkage was checked rather than assumed, because a black 2048x1024 texture could equally be
+an unused slot in a character-atlas pool, and "a probe firing is not a defect" is a mistake this
+project has made three times. Opened with `pxr`:
+
+    /RootNode/Looks/mat_E881A25E37E37B19/Shader  diffuse_texture = @../textures/E881A25E37E37B19.dds@
+    -> 72 meshes bound to it, bboxes 0.07-0.46 units (hands, head pieces, character sub-parts)
+
+72 character sub-meshes are being path-traced with a 100% black albedo.
+
+### Rule 1, for the fourth time
+
+**A draw whose RESULT the engine reads can never be SKIPPED, only hidden or passed through.** The
+engine reads this one as a texture. The rule is written above `hiddenPassMode` in the source and
+this is the fourth build to break it.
+
+### The fix, and the population measured BEFORE shipping it
+
+The test is the TARGET, not the source: *a quad drawing into a surface that is not the size of the
+screen is not compositing the screen.* Counted off the existing frame dump first - the step this
+project keeps skipping:
+
+| composite quads in that frame | count | disposition |
+|---|---|---|
+| targeting 2560x1440 surfaces (resolve chain, back buffer) | 357 | unchanged |
+| targeting smaller off-screen surfaces | **41** | SKIP -> **PASS** |
+
+357 untouched matters: *"skipping the composite quad freezes the image"* is a recorded dead end
+and this must not reopen it. And pass-through costs nothing at the path tracer, because with
+`rtx.useVertexCapture = False` Remix refuses shader-driven draws outright - the same fact
+`skipDeferredGBuffer` already rests on.
+
+`compositeToTexturePass=1`. Falsifier:
+
+    composite into an off-screen texture (engine reads it back as a texture, so it must never be
+    SKIPPED): N draws/frame passed through instead - gate ON
+
+N near 41 is right. 0 means the rule did nothing and the black is something else. Hundreds means
+it is catching the resolve chain and the rasterised frame will repaint the world - back it out.
+
+### What was learned about the question I had been asking
+
+`Tint_color` and `Diffuse_Color` were both real findings and neither was the fault. The tint
+question was answerable only because the user was asked to describe the wrongness instead of
+confirm it - "wrong colour" and "black with no tattoos" point at completely different mechanisms,
+and I had spent a build on the first reading of it.
+
+### Deployed
+
+    sr3-rtx.asi  9fcb3cc5b322f962896e36840d7e69a8
+    sr3-rtx.map  8d5e95b6c262199fedb8b6bd0b97db8a
+    sr3-rtx.ini  725c295908402e39b381a79d300c810d
+    rtx.conf     0872ecaa9ff251c4b34a71759cb7ca8d   (unchanged)
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5   (unchanged)
+    user.conf    8b361562e85c86ab88ab2fe61495b335   (unchanged)
+
+### compositeToTexturePass: fired exactly as measured, fixed nothing, REVERTED
+
+    composite into an off-screen texture ...: 35.9 draws/frame passed through instead - gate ON
+    frame 10800 | draws 1565/frame | FFP converted 419/frame (26.8%)
+
+User: *"it is basically just like before but now the npc heads look darker as if they have a dark
+tint or low exposure."*
+
+The instrument was honest - 35.9 against a prediction of ~41, on exactly the population counted
+off the frame dump. The rule did what it said. **It was still the wrong rule**, and the reason is
+one I had already written down in the same commit without acting on it:
+
+**The character atlas is composited at SPAWN. It appears in no steady-state frame dump.** Neither
+the 08-28 17:40 dump (frame 1335) nor the 18:52 dump (frame 1399) contains a single 2048x1024
+render target. So the 35.9 draws/frame this rule passed through were the post chain - the blur,
+the 640x360 targets and the auto-exposure reduction - and never the draws it was written for.
+
+Passing the exposure/luminance chain through is not free: the engine's own auto-exposure resumed
+running, and NPC heads went darker. Measured worse, fixed nothing, so .
+
+### What this does and does not eliminate
+
+It does NOT clear the atlas hypothesis. The rule never met the atlas composite, so nothing about
+it was tested. What it eliminates is the *steady-state* composite population as the cause.
+
+Still standing, and still only circumstantial:
+
+    captures 2026-08-13 .. 08-18   atlas 8E4C8047F62D947A   mean 182.7
+    capture  2026-08-23            atlas E881A25E37E37B19   mean   0.0
+    + 72 character sub-meshes bound to a material whose diffuse_texture IS the black file
+
+The missing measurement is the obvious one and I should have asked for it before writing a rule:
+**what does the atlas look like TODAY?** That is one Remix capture, no build, and it splits the
+problem cleanly - a black atlas means the composite really is being lost and the rule needs to
+find the spawn-time draws; a correct atlas means the albedo is fine and the black skin is
+happening downstream in Remix's material assignment.
+
+`rtx.captureShowMenuOnHotkey = False` and `rtx.captureHotKey = CTRL, SHIFT, P` so it is one key.
+
+### Method note
+
+Third build this week whose population was counted correctly and whose *timing* was not. "How
+many draws does this rule change, and from what to what" was answered - 41, correctly. The
+question not asked was **"are the draws I care about in the frame I measured?"** They were not,
+and the dump said so before the build: no 2048x1024 target in it.
+
+### Deployed
+
+    sr3-rtx.asi  9fcb3cc5b322f962896e36840d7e69a8   (unchanged - the rule is ini-gated)
+    sr3-rtx.map  8d5e95b6c262199fedb8b6bd0b97db8a
+    sr3-rtx.ini  c888bb46380dc6e999eff04afe881185   compositeToTexturePass=0
+    rtx.conf     80ea312f4ede5ccc9db3cfa7ec910aa6   one-key capture
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5
+    user.conf    8b361562e85c86ab88ab2fe61495b335
+
+### The atlas IS black today, and the reason is that Remix only hashes UPLOADS
+
+User took a Remix capture with a dark-headed NPC beside them. Measured with `pxr` + PIL:
+
+    capture_2026-08-28_19-13-46.usd
+      mat_E881A25E37E37B19  diffuse_texture 2048x1024  mean 0.0  100% near-black
+
+So the atlas is black NOW, on the current build, with `compositeToTexturePass` reverted. Same
+hash as the 08-23 capture, because an all-zero image always hashes the same - which also explains
+why "the atlas went black on 08-23" looked like a clean date split. It is not a date split at all;
+it is the same empty texture every time.
+
+The shim is binding the right thing. From this run's own log:
+
+    CHAR TEX #6: s0 Diffuse_MapSampler 3B3F5DD8 2048x1024 fmt=22 levels=9   <- bound as albedo
+    ALBEDO BOUND #5: ... 2048x1024 fmt=22 mips=9 pool=0 usage=0x200
+
+`usage=0x200` is `D3DUSAGE_RENDERTARGET`, and the answer was already written in this file, above
+the cloth generator:
+
+    // Staged through SYSTEMMEM and copied up with UpdateTexture: ... UpdateTexture is also the
+    // upload Remix hashes - which is what gives each outfit a stable, replaceable texture hash.
+
+**Remix hashes the content the game UPLOADS.** A render target is written by the GPU and never
+uploaded, so Remix has no pixels for it and builds the material from zeroes. Nothing about the
+composite draws was ever wrong; the texture was never readable by Remix in the first place.
+
+### The fix
+
+`rtAlbedoCopy=1`: when the albedo is a `D3DPOOL_DEFAULT` + `D3DUSAGE_RENDERTARGET` texture, read
+it back with `GetRenderTargetData` and re-upload it with `UpdateTexture`, then bind the copy.
+
+Cost control, because this project has already killed the game once by allocating per draw:
+
+- ONE readback per distinct texture, cached by pointer - the player binds the same atlas 36 times
+  a frame, and `GetLevelDesc` alone is a bridge round trip;
+- at most one readback per FRAME across all textures - `GetRenderTargetData` of 8 MB is a full
+  GPU sync;
+- the source is `AddRef`d, because a cache holding a D3D pointer without one is the exact
+  use-after-free fixed on 2026-08-18;
+- a 64 MB ceiling with refusals counted, and every allocation in `try`/`catch`;
+- a BLANK readback is never cached - a character's atlas is composited at spawn, so the first
+  sight of one can legitimately precede its content. `rtAlbedoRetries=240` bounds the retrying.
+
+### The falsifier separates the two causes for good
+
+    RENDER-TARGET ALBEDO ...: N copies made, B blank readbacks, F failed, ...
+      last readback mean = M of 255
+
+| reading | meaning |
+|---|---|
+| M > 0 | the pixels WERE on the GPU and only Remix lacked them - this fix is right |
+| M = 0 | the game never wrote the atlas, so the composite draws really are lost and `compositeToTexturePass` was the right idea aimed at the wrong frames |
+| N=0, B=0, bound 0/frame | no render-target albedo was seen and this path did nothing |
+
+That is the measurement `compositeToTexturePass` should have been gated on. It was shipped on a
+date correlation between two captures, and the correlation was an artefact of content hashing.
+
+### Deployed
+
+    sr3-rtx.asi  fa1985f8994d209f3e7f9a6b2f46070b
+    sr3-rtx.map  e39ec495dd28c69d5aeb3ca633586834
+    sr3-rtx.ini  5ae85c84fb211e184050641d0e7f531e
+    rtx.conf     80ea312f4ede5ccc9db3cfa7ec910aa6
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5
+    user.conf    8b361562e85c86ab88ab2fe61495b335
+
+`rtAlbedoCopy=1  rtAlbedoRetries=240  compositeToTexturePass=0`
+
+### The copy never ran: I misread the usage flag
+
+    COMPOSITED ALBEDO ...: 0 copies made, 0 blank readbacks, 0 failed | 0.0 draws/frame bound
+      no readback has run yet - no render-target albedo has been seen
+
+**`D3DUSAGE_RENDERTARGET` is 0x1. `0x200` is `D3DUSAGE_DYNAMIC`.** I read `usage=0x200` off the
+albedo report and called it a render target twice, in the source, the ini and to the user. The
+character atlas is a DYNAMIC, CPU-written texture. The rule matched nothing and did nothing, and
+the ONLY reason that is known rather than guessed at is the third falsifier branch, which was
+written to say exactly this.
+
+### D3DPOOL_DEFAULT + D3DUSAGE_DYNAMIC identifies nothing either
+
+Every albedo descriptor this game binds, from one run:
+
+    1024x1024 DXT1  mips=9  pool=0 usage=0x200
+    1024x512  DXT5  mips=8  pool=0 usage=0x200
+    512x512   DXT5  mips=8  pool=0 usage=0x200
+    256x128   DXT1  mips=6  pool=0 usage=0x200
+    128x256   DXT5  mips=6  pool=0 usage=0x200
+    2048x1024 fmt=22 (X8R8G8B8) mips=9 pool=0 usage=0x200      <- the character atlas
+    512x256   fmt=21 mips=1 pool=0 usage=0x0                   <- our own generated cloth
+
+**Every one is DEFAULT + DYNAMIC, and the world is textured correctly.** So that pair cannot be
+the discriminator. What separates the atlas is the FORMAT: all streamed art is DXT1/DXT5, and the
+atlas is the only UNCOMPRESSED albedo in the game, because it is composited at runtime rather
+than loaded from disk.
+
+Corrected test: DEFAULT pool, uncompressed X8R8G8B8/A8R8G8B8, DYNAMIC or RENDERTARGET, >= 256x256.
+A render target is resolved with `GetRenderTargetData`; a dynamic texture is read-locked directly,
+which the cloth generator already proves works on DEFAULT pool under DXVK (8 of 8, none failed).
+
+Added `textures matched` - the population counter the first version had no equivalent of. T=0 now
+says "the rule never recognised the atlas", which is the failure that just happened.
+
+### Hair: a probe that cannot be crowded out
+
+User reports hair white and the wrong colour, twice. `ir_sr3pchair_c` shader[8]:
+
+    Hair_Parameters c1 | Hair_Spec_Alpha c2 | Hair_Spec_Color1 c3 | Hair_Spec_Color2 c4
+    Dob_Map s0 | Diffuse_Map s1
+
+and it builds its colour through a chain of `cmp` selects over those constants before the fog
+lerp and `mul oC0, r6, c37`. That is a per-texel recipe of the same shape as the clothing one -
+fixed function cannot express it and the honest answer is a generated texture, as it was for
+cloth. It cannot be designed without the runtime values, and this project has failed to capture
+them since 2026-08-19 with the note *"Hair_Spec_Color1/2 never captured - the probe's slots fill
+first"*.
+
+`ProbeHairMaterial` is keyed on the SHADER declaring `Hair_Spec_Color1`, not on a sampler name,
+so it cannot lose the race. Read-only, 6 reports, logs c0-c4 and the bound stages.
+
+### Also worth recording: the user says the CAPTURE disagrees with the screen
+
+*"the capture is inconsistent with what i see ingame. the top of my outfit looks okay ingame but
+not in capture."* So a Remix capture is not a faithful record of the live frame, and the
+capture-derived evidence in the previous two entries is weaker than it was presented as. The
+black 2048x1024 material in the capture is still real - Remix built it - but "the capture shows X"
+must not again be treated as "the screen shows X".
+
+### Deployed
+
+    sr3-rtx.asi  1b94e58ebd70e6f4a23cdb0348df2f0f
+    sr3-rtx.map  75637d4be19fe70a67911c406a3e99de
+    sr3-rtx.ini  97b8c5e154eeae4dafc9b74c806faf8b
+    rtx.conf     80ea312f4ede5ccc9db3cfa7ec910aa6
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5
+    user.conf    8b361562e85c86ab88ab2fe61495b335
+
+## 2026-08-29 - the atlas reads back as zeros, and that has two meanings
+
+    COMPOSITED ALBEDO ...: 1 textures matched, 0 copies made, 240 blank readbacks, 0 failed
+      last readback mean = 0.0 of 255
+
+**The format discriminator is right.** `textures matched = 1` - DEFAULT pool + uncompressed +
+dynamic + >=256x256 picks out exactly the character atlas and nothing else, against a world where
+every other albedo is DXT1/DXT5 with the identical pool and usage flags. That was the part most
+likely to be wrong and it is not.
+
+**The readback is all zeros, 240 times.** The falsifier as written says that means the game never
+wrote the atlas. That is one reading and the counter cannot separate it from the other:
+
+| reading | consequence |
+|---|---|
+| (a) the atlas genuinely holds nothing | the composite draws really are being lost; resume that hunt |
+| (b) the read is blind | `D3DPOOL_DEFAULT` + `D3DUSAGE_DYNAMIC` locked READONLY has UNDEFINED contents in D3D9 - it is write-only memory from the CPU side, and zeros mean "unreadable" |
+
+(b) is not a technicality. This file already records the same fact about vertex buffers - *"the
+decoder refuses to read-lock DYNAMIC buffers - correctly, since that is write-combined memory
+behind the 32->64-bit bridge"* - and the game samples this very texture to draw characters that
+are NOT black in its own rasterised output. So the content almost certainly exists.
+
+**Writing the falsifier with only two branches was the mistake.** "M = 0 means the game never
+wrote it" assumed the read was trustworthy, which is the same class of error as reading
+`usage=0x200` as RENDERTARGET: a measurement believed without a control.
+
+### The control, and it needs no build
+
+`charTexDump=1` decodes every named stage of the probed character materials through the SAME
+`LockRect(0, &lr, nullptr, D3DLOCK_READONLY)` call and writes each to
+`chartex-<tag>-<w>x<h>.raw`. The DXT art textures in those same draws are the control:
+
+| dumps | conclusion |
+|---|---|
+| DXT stages have content, the 2048x1024 atlas is black | the atlas has no CPU-readable content - the copy has to go through the GPU (render a quad sampling it into our own target, then GetRenderTargetData) |
+| everything is black | the read path is blind and nothing measured through it can be trusted, including the 240 blank readbacks |
+| the atlas has content | the readback loop has a bug, not the texture |
+
+Only `sr3-rtx.ini` changed; the .asi is untouched.
+
+    sr3-rtx.ini  e2338e61d50988a51f8210cfe1ce6cda
+
+### The control answered: the READ was blind, not the texture
+
+`charTexDump=1`, which decodes every named character stage through the same
+`LockRect(0, &lr, nullptr, D3DLOCK_READONLY)` the copy used:
+
+| dump | format | mean | |
+|---|---|---|---|
+| Pattern_Map 32x32 | DXT1 | 85.0 | content |
+| Sphere_Map 128x128 | DXT1 | 202.7 | content |
+| Dob_Map 512x512 | DXT1 | 132.2 | content |
+| Specular_Map 64x64 | DXT1 | 106.3 | content |
+| **Diffuse_Map 2048x1024** | **fmt=22** | **0.0** | **BLACK** |
+| **Normal_Map 1024x512** | **fmt=21** | **0.0** | **BLACK** |
+
+20 of 24 stages decoded with real content. **Every DXT texture reads back correctly and both
+UNCOMPRESSED ones read as zeros.** The decisive one is the NORMAL MAP: a character's normal map
+is not empty - the game shades characters with it - so this is a blind READ.
+
+D3D9 leaves the contents of a `D3DPOOL_DEFAULT` + `D3DUSAGE_DYNAMIC` surface UNDEFINED under a
+READONLY lock; it is write-only memory from the CPU side. The 240 blank readbacks measured
+nothing about the atlas.
+
+**So the falsifier I wrote was wrong in the same way twice over.** "M = 0 means the game never
+wrote it" had only two branches, and the missing third - "the read cannot see it" - is the one
+that was true. A measurement believed without a control, which is what reading `usage=0x200` as
+RENDERTARGET was as well.
+
+### The read now goes through the GPU
+
+`StretchRect` the source into a render target we own, then `GetRenderTargetData` to resolve that.
+A render target resolve has DEFINED contents, so if the pixels exist on the GPU this sees them,
+and a zero mean now really does mean the atlas is empty.
+
+New failure mode, counted rather than assumed: D3D9 says a StretchRect source should be a render
+target or offscreen plain surface, and an ordinary texture level may be refused. `StretchRect
+refusals` non-zero means this route is closed and the copy has to be done by drawing a quad
+instead.
+
+### Hair, captured for the first time since 2026-08-19
+
+`ProbeHairMaterial` fired - keyed on the shader rather than a sampler name, so it could not be
+crowded out:
+
+    HAIR #1: albedoStage=1 rank=100 first='Diffuse_MapSampler'
+          Hair_Spec_Color1(c3) = (0.490 0.510 0.522 0.000)
+          Hair_Spec_Color2(c4) = (0.153 0.153 0.161 0.000)
+          c1 (Hair_Parameters) = (0.000 0.000 0.000 0.030)
+          c2 (Hair_Spec_Alpha) = (0.300 0.000 0.000 0.000)
+          s0 Dob_MapSampler     512x512 DXT1
+          s1 Diffuse_MapSampler 256x256 DXT1   <- bound as albedo
+
+**Both hair colours are achromatic greys.** They are SPECULAR colours, as their names say, and
+carry no hair colour at all - so the long-standing theory that hair is white because we discard
+`Hair_Spec_Color1/2` is dead.
+
+Looking at the two textures settles where hair colour is not:
+
+- `Dob_Map` is a hair STRAND mask - white strands on a flat green field.
+- `Diffuse_Map`, the one ranked 100 and bound as albedo, is a NORMAL/FLOW map - a grey field with
+  magenta and green lobes. Binding it as base colour is the documented "shoes have normals but
+  they are the wrong colour" trap, and it is what hair is being drawn with.
+
+So hair's albedo is a normal map, and neither of its own textures carries colour. Where the
+colour actually comes from is the next question, and it is NOT the constants.
+
+### Deployed
+
+    sr3-rtx.asi  0cbae28588d562dc294335911c80077f
+    sr3-rtx.map  79dfef155cbb2eba3dc2f94ca885cccb
+    sr3-rtx.ini  231e44e6478c7bbfe51963de37e4a018
+    rtx.conf     80ea312f4ede5ccc9db3cfa7ec910aa6
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5
+    user.conf    8b361562e85c86ab88ab2fe61495b335
+
+### The GPU copy succeeded and still read zero - so the copy path gets a control too
+
+    COMPOSITED ALBEDO ...: 1 textures matched, 0 copies made, 240 blank readbacks,
+                           0 StretchRect refusals, 0 failed
+      last readback mean = 0.0 of 255
+
+StretchRect returned S_OK. GetRenderTargetData returned S_OK. The mean is still zero. Read
+literally, by the falsifier as written, the character atlas is genuinely empty.
+
+**Not accepted, because "it returned S_OK" is not evidence that it moved pixels**, and that is
+the same shape as the three readings this project has already got wrong in a row:
+
+| reading believed | what was actually true |
+|---|---|
+| `usage=0x200` is D3DUSAGE_RENDERTARGET | it is D3DUSAGE_DYNAMIC; the rule matched nothing |
+| 240 blank LockRect readbacks mean the game never wrote it | a READONLY lock of a DYNAMIC default surface has UNDEFINED contents |
+| a black atlas in the 08-23 capture but not the 08-18 ones is a date correlation | an all-zero image always hashes the same, so it was the same empty texture twice |
+
+Every one of those was missing a CONTROL - a case whose answer is known in advance.
+
+### The control
+
+`SelfTestCopyPath` runs the identical path over a source this shim fills itself, matched to the
+atlas in the properties that matter: `D3DPOOL_DEFAULT`, `D3DUSAGE_DYNAMIC`, uncompressed, written
+by `LockRect` and never by the GPU. 256x256, once, everything released.
+
+    step 1  ColorFill -> GetRenderTargetData     (tests the RESOLVE alone)
+    step 2  StretchRect(dynamic) -> resolve      (tests reading a DYNAMIC default texture)
+
+| step 2 | conclusion |
+|---|---|
+| near the written mean (~127) | the path works, and the character atlas really IS empty |
+| 0.0 with step 1 fine | StretchRect cannot read a DYNAMIC default texture, and every zero this path has reported is meaningless |
+
+Step 1 separates the resolve from the copy, so a failure names which half is at fault instead of
+leaving it to be guessed at. The target is cleared to black between the steps so a no-op
+StretchRect cannot inherit step 1's colour and look like a success.
+
+### Deployed
+
+    sr3-rtx.asi  124f3bc5d49b1701f4588f096faf385f
+    sr3-rtx.map  f6f14c59a1cf6e8647c87642181584ea
+    sr3-rtx.ini  231e44e6478c7bbfe51963de37e4a018   (unchanged)
+    rtx.conf     80ea312f4ede5ccc9db3cfa7ec910aa6   (unchanged)
+    dxvk.conf    1c745b9305a5954d75994fa3408325c5   (unchanged)
+    user.conf    8b361562e85c86ab88ab2fe61495b335   (unchanged)
+
+### The control passed, so the atlas really is empty - and that is a paradox
+
+    COPY PATH SELF-TEST (control for the COMPOSITED ALBEDO zero):
+        wrote a DEFAULT+DYNAMIC 256x256 source by LockRect, expected mean 126.7
+        step 1  ColorFill -> GetRenderTargetData      mean 126.7  hr=0x00000000
+        step 2  StretchRect(dynamic) -> resolve       mean 126.7  hr=0x00000000
+
+Both steps returned exactly the value written. **StretchRect reads a D3DPOOL_DEFAULT +
+D3DUSAGE_DYNAMIC texture correctly**, so the 0.0 measured for the character atlas is real and not
+another blind read. This is the first number in this whole investigation that has survived a
+control.
+
+The paradox that leaves: `ir_sr3npcskinfull_mc` shader[8] does `texld_pp r2, v4, s0`, and s0 IS
+that atlas. An empty atlas means SR3's OWN rasterised characters are black too. Either something
+fills it that we are removing, or character colour never came from this texture.
+
+### The experiment, and it returns a number rather than a judgement
+
+`hiddenPassMode=0` for one run: every hidden pass PASSES THROUGH, so the shim removes no draw
+from the engine at all while still converting. Then read `last readback mean`:
+
+| M | conclusion |
+|---|---|
+| > 0 | a draw the shim was SKIPPING fills the atlas - bisect from here (`screenSpaceMode=0` next), and the fix is a disposition, exactly as rule 1 says |
+| 0 | nothing we skip is responsible, and character colour is not coming from this texture at all |
+
+`rtAlbedoRetries` 240 -> 3000, because at 240 the retry loop gives up after ~10 seconds and the
+atlas may be composited late.
+
+This is the A/B that this project's own notes say should be proposed after the SECOND failed
+hypothesis rather than the fifth. It is well past the second.
+
+    sr3-rtx.ini  6dd2191246598992f9b3b70052526f18   (hiddenPassMode=0, rtAlbedoRetries=3000)
+    everything else unchanged
+
+### Nothing the shim skips is responsible. The atlas theory is dead.
+
+    SKIPPED entirely 0/frame
+    COMPOSITED ALBEDO ...: 1 textures matched, 0 copies made, 580 blank readbacks,
+                           0 StretchRect refusals, 0 failed
+      last readback mean = 0.0 of 255
+
+`hiddenPassMode=0` took effect - **the shim removed no draw from the engine at all** - and the
+character texture was still empty after 580 GPU readbacks, through a path whose control returned
+126.7 of an expected 126.7.
+
+So the chain is closed on that side:
+
+| eliminated | by |
+|---|---|
+| Remix cannot hash a render target | it is not a render target - `usage=0x200` is DYNAMIC |
+| the readback is blind | control: StretchRect of a DEFAULT+DYNAMIC texture read back exactly |
+| a draw we SKIP fills it | `SKIPPED entirely 0/frame`, still empty after 580 reads |
+| `Tint_color` / `Diffuse_Color` | terminal exposure scale; ~90% white on skinned draws |
+
+And the charTexDump control adds the detail that kills the last version of the theory: the
+character's **normal map is empty too**. `Normal_Map 1024x512 fmt=21 mean 0.0`. A black normal map
+would wreck character shading, and that is not what is on screen.
+
+### The check that has never been made
+
+Every remaining explanation assumes SR3's own rendering of characters is correct. **That has never
+been verified.** The user only ever sees Remix's output. `ffp=0` makes the shim inert - it is the
+first line of `Classify` - so the game renders itself with nothing converted:
+
+| characters at ffp=0 | conclusion |
+|---|---|
+| correctly coloured | the pixels exist and BOTH our read and Remix's copy miss them - a DXVK/Remix texture-residency problem, not a conversion bug, and not something the shim can read around |
+| black | the content is lost before anything this shim does, and every theory built on "the game draws them fine" collapses |
+
+This is the same experiment the "costliest failure" section records as the one that should be
+proposed after the SECOND failed hypothesis. It is now the seventh, and the reason it kept being
+skipped is that each new measurement looked decisive on its own.
+
+    sr3-rtx.ini  restored to hiddenPassMode=2; ffp still 1 and documented for the A/B
+
+## 2026-08-29 - THE CHARACTER FAULT IS NOT IN THE SHIM
+
+    settings: ffp=0 ...
+    frame 6000 | draws 2733/frame | FFP converted 0/frame (0.0%)
+
+User, with the shim inert: *"still black / wrong"*.
+
+`ffp=0` returns at the first line of `Classify`, so every draw passes through untouched and
+nothing is converted or path-traced. **The player's skin is black anyway.** Every character-
+material theory of the last several sessions rested on "the game draws them fine and we lose it",
+and that premise is false.
+
+This is the experiment the "costliest failure" section names as the one to run after the SECOND
+failed hypothesis. It was run after the seventh, and it took two minutes.
+
+### What the evidence now says, all of it eliminated with controls
+
+| finding | how it was established |
+|---|---|
+| the character texture is 2048x1024 X8R8G8B8, DEFAULT + **DYNAMIC** (`usage=0x200`) | the albedo report; `0x200` is DYNAMIC, not RENDERTARGET (0x1) |
+| it is EMPTY on the GPU | StretchRect into our own RT + GetRenderTargetData reads mean 0.0 |
+| that read is sound | control: the same path on a DEFAULT+DYNAMIC texture we filled ourselves returned 126.7 of an expected 126.7 |
+| its NORMAL map is empty too | charTexDump: 1024x512 fmt=21 mean 0.0, while every DXT texture in the same draws decodes correctly |
+| Remix sees the same thing | its capture holds the texture as an all-zero image, with 72 character sub-meshes bound to it |
+| nothing the shim SKIPS causes it | `hiddenPassMode=0`, `SKIPPED entirely 0/frame`, still empty after 580 readbacks |
+| **the shim is not involved at all** | `ffp=0`, still black |
+
+### The mechanism that fits, and the one-line test
+
+A DYNAMIC texture is written by locking it with `D3DLOCK_DISCARD`. On most real drivers DISCARD
+hands back the same memory, so a game that composites a texture across SEVERAL discard locks -
+base skin, then tattoos, then clothing - keeps its earlier writes by luck. DXVK honours DISCARD
+properly and genuinely throws the contents away, so every pass but the last is lost.
+
+That fits the symptom nothing else fitted: *"the top of my outfit looks okay ingame but not in
+capture"* and *"only the top of the player is colored correctly"*. The LAST region written
+survives; everything composited before it does not. Black skin, missing tattoos and a head whose
+tone does not match the body are the same fault seen on different pieces.
+
+`d3d9.allowDiscard = False` makes DISCARD preserve contents. Remix's own binary notes it also
+disables `rtx.useBuffersDirectly`, which costs nothing here - `rtx.conf` already sets that False.
+
+FALSIFIER: skin and tattoos return. If nothing changes, the next question is whether SR3 renders
+characters correctly under plain DXVK with no Remix at all, which would separate DXVK from Remix.
+
+### Method note - seven runs on a false premise
+
+Every measurement in this investigation was believed one step too early:
+
+| believed | actually |
+|---|---|
+| `usage=0x200` is RENDERTARGET | it is DYNAMIC; the first copy rule matched nothing |
+| 240 blank LockRect reads mean "never written" | a READONLY lock of a DYNAMIC default surface is UNDEFINED |
+| a black atlas on 08-23 but not 08-18 is a date correlation | an all-zero image always hashes the same - the same empty texture twice |
+| the atlas is the character's albedo and we skip its composite | `compositeToTexturePass` fired on exactly the measured population and changed nothing |
+| the game draws characters correctly | **it does not** |
+
+The pattern is the same every time: a reading with no control. The three that DID have controls -
+the shader sweeps, `SelfTestCopyPath`, and `ffp=0` - were all correct first time.
+
+    dxvk.conf  a671126c3ab60716b86352d43e1f6bc7   d3d9.allowDiscard = False
+    everything else unchanged
+
+### allowDiscard: a real negative, and the date split was real after all
+
+`d3d9.allowDiscard = False` changed nothing. Verified PARSED first, per the rule in this file:
+
+    [11:22:02.612] info:    d3d9.allowDiscard = False
+
+So the DISCARD-composite theory is dead on its own terms rather than on a typo.
+
+**And I was wrong to throw away the date correlation.** On 2026-08-28 I dismissed it as an
+artefact because an all-zero image always hashes the same. That explains why the BLACK atlases
+collapse onto one hash. It does not explain why the POPULATED one stopped appearing - and it did:
+
+    8E4C8047F62D947A   2048x1024   mean 182.7   in captures 08-13, 08-15, 08-16 x4, 08-17 x2, 08-18
+
+Decoded and looked at, it is unmistakably the character atlas: skin, a face with makeup, arms,
+legs, an eye, and the TATTOOS including the fleur-de-lis on the chest. Remix had the correct
+character texture, with tattoos, for that whole week.
+
+### The variable that changed in the window
+
+    rtx.conf.before-vertexcapture-off.bak   08-20 22:58   rtx.useVertexCapture = True
+    rtx.conf                                              rtx.useVertexCapture = False
+
+| captures | useVertexCapture | atlas |
+|---|---|---|
+| 08-13 .. 08-18 | **True** | populated, 182.7, tattoos present |
+| 08-23 .. today | **False** | all zeros |
+
+and Remix's own log says what capture-off does to shader draws:
+
+    [RTX-Compatibility-Info] Skipping draw call with shader usage as vertex capture is not enabled.
+
+If SR3 composites the character texture with shader-driven draws, capture-off means Remix never
+runs them and the texture is never built. That fits every measurement taken since: the texture is
+empty on the GPU, its normal map is empty too, nothing the SHIM skips matters, and `ffp=0` does
+not help - because the shim was never the thing removing those draws. **Remix was.**
+
+### The A/B
+
+`rtx.useVertexCapture = True` for one run, nothing else changed. `d3d9.allowDiscard` reverted to
+default so the test has exactly one variable.
+
+| character | conclusion |
+|---|---|
+| skin and tattoos return | capture-off is the cause. The fix is NOT to leave capture on - that reintroduces everything capture-off solved - but to find why Remix drops those specific draws and keep them |
+| still black | capture-off is not it either, and the next split is plain DXVK with no Remix at all, which separates DXVK from Remix |
+
+    rtx.conf   d7e9c7ec79bc7208166f00ba8a56565a   useVertexCapture = True
+    dxvk.conf  b74c42d68f2d4209cbd14f034cc683dc   allowDiscard reverted
+
+### Vertex capture is not the cause either
+
+    [11:27:57.705] info:    rtx.useVertexCapture = True
+    grep -c "vertex capture is not enabled"  ->  0
+
+Capture was genuinely on and Remix stopped skipping shader draws - the skip line disappears
+entirely from its log. The character is still black. So the correlation with the 08-20 capture-off
+change was coincidence, and that theory joins the others.
+
+Restored to False, and `d3d9.allowDiscard` left at default. Neither is a fix and neither should
+sit in the config pretending to be one.
+
+### Everything reachable from inside the stack is now eliminated
+
+| layer | ruled out by |
+|---|---|
+| the shim's conversion | `ffp=0`, `FFP converted 0/frame`, still black |
+| the shim's skipping | `hiddenPassMode=0`, `SKIPPED entirely 0/frame`, still empty |
+| Remix vertex capture | `useVertexCapture=True`, skip line gone, still black |
+| DXVK discard semantics | `d3d9.allowDiscard=False`, verified parsed, no change |
+| our readback being blind | control returned 126.7 of an expected 126.7 |
+| `Tint_color` / `Diffuse_Color` | terminal exposure scale; ~90% white on skinned draws |
+
+And the screenshots from the era when it worked (08-17, 08-18) turn out to show a pause menu and
+an empty room - neither contains a character, so they cannot date the regression either.
+
+### The split that is left
+
+**Does SR3 render the character correctly with no Remix at all?** The game loads
+`d3d9.dll` (863 KB, the Remix bridge client), which hosts `.trex/d3d9.dll` (190 MB, the renderer)
+inside `NvRemixBridge.exe`. Renaming the client makes Windows' own D3D9 load instead, and
+`dinput8.dll` (Ultimate ASI Loader) still loads the shim, which `ffp=0` keeps inert.
+
+| character without Remix | conclusion |
+|---|---|
+| correctly textured | the Remix/DXVK stack loses it, and the 08-13..08-18 captures prove it CAN work - bisect `rtx.conf` from `rtx.conf.before-vertexcapture-off.bak` |
+| still black | the game, its mods or its settings are the cause, and none of the Remix-side work applies. Note the install carries loose character mods - `default female diffuse.str2_pc`, four `Female *.str2_pc`, `customization_items.xtbl`, `character_color_pool.xtbl` - plus ZMenu and Ultimate ASI Loader |
+
+This should have been proposed at the same time as `ffp=0`. `ffp=0` bounded the shim; it did not
+bound the renderer, and I treated it as though it had.
+
+    sr3-rtx.ini  52170c27cfc0f13c42c47616885635ea   ffp=0
+    rtx.conf     80ea312f4ede5ccc9db3cfa7ec910aa6   capture restored to False
+    dxvk.conf    b74c42d68f2d4209cbd14f034cc683dc   allowDiscard reverted
+
+## 2026-08-29 - WITHOUT REMIX THE CHARACTER IS CORRECT
+
+User, with `d3d9.dll` renamed away and `ffp=0` - plain SR3 on Windows' own D3D9, no DXVK, no
+Remix, shim inert: **"character is textured correctly"**.
+
+That settles the layer, and it clears everything below it:
+
+| cleared | |
+|---|---|
+| the game, its save and its character | renders correctly |
+| the loose character mods | `default female diffuse.str2_pc`, the four `Female *.str2_pc`, `customization_items.xtbl`, `character_color_pool.xtbl` - all present and fine |
+| SR3's display settings | unchanged and fine |
+| the shim | already cleared by `ffp=0`, twice |
+
+**The Remix/DXVK stack loses the character texture**, and the 08-13..08-18 captures prove it can
+carry it - `8E4C8047F62D947A`, mean 182.7, skin, face, arms, legs and the tattoos. So this is a
+regression inside the Remix configuration between 08-18 and 08-23.
+
+**And the date correlation I threw away on 08-28 was right.** I dismissed it because an all-zero
+image always hashes the same - true, and it explains why the black atlases collapse onto one hash,
+but it never explained why the POPULATED one stopped appearing. I used a correct observation to
+discard the evidence it did not actually address.
+
+### The bisect
+
+The Remix runtime itself has not changed (`.trex/d3d9.dll` dated 06-04), so the variable is
+configuration. `rtx.conf` restored wholesale from `rtx.conf.before-ui-collision-fix.bak`
+(08-18 12:59), the closest saved state to the last capture that held a populated atlas
+(08-18 12:53). Current config preserved as `rtx.conf.before-0818-restore.bak`.
+
+| character | next |
+|---|---|
+| textured | it IS an rtx.conf setting - bisect the ~25 differing keys, halving each run |
+| still black | not rtx.conf. Then `dxvk.conf` (`d3d9.maxEnabledLights = 64` was added 08-23, inside the window) or `user.conf`, both one-line tests |
+
+Note `rtx.useVertexCapture = True` comes back with this config, so expect doubled geometry and
+z-fighting. Irrelevant to the question being asked.
+
+    rtx.conf  bed7387df8d4e294e019ac76a823b352   restored from 08-18
+
+### Not rtx.conf either - so it is not configuration at all
+
+The 08-18 config restored wholesale: still black. `user.conf` is nothing but path-tracing quality
+settings, and `dxvk.conf` held one line. So no combination of Remix settings is responsible.
+
+**And the "it worked on 08-18" claim needs qualifying.** A capture is a single frame. The
+populated atlas may have been captured during character CUSTOMISATION - where the game certainly
+composites and displays that texture - rather than in gameplay. So it may never have been correct
+in-game, and the regression window I built the bisect on may not exist. The date evidence was
+weaker than I twice presented it, in both directions.
+
+What is solid is mechanical and does not depend on any timeline:
+
+    without Remix  -> the game's writes to that texture land, character correct
+    with Remix     -> the writes do not land, texture is all zeros
+
+### The remaining candidate reachable by configuration
+
+`d3d9.apitraceMode = True` backs mapped resources with CACHED system memory instead of
+write-combined. That is the memory-type difference which would explain BOTH halves of what was
+measured: the game's writes going missing, and our own reads of that texture returning zeros
+while every DXT texture in the same draws read back correctly.
+
+FALSIFIER: skin and tattoos return.
+
+If it does not, configuration cannot reach this, and the remaining route is for the SHIM to hook
+`IDirect3DTexture9::LockRect`/`UnlockRect`, snoop the game's own writes to that texture, and
+re-upload them through `UpdateTexture` - which is the path Remix hashes. That is the same snoop
+architecture already proven on the morph and instance streams, applied to a texture instead of a
+vertex buffer. It is a real subsystem, not a switch.
+
+    rtx.conf   80ea312f4ede5ccc9db3cfa7ec910aa6   restored to the working current config
+    dxvk.conf  949d8f64cd6692a8dceca1ca52950e7b   apitraceMode added
+
+### Configuration is exhausted
+
+    [11:51:21.336] info:    d3d9.apitraceMode = True
+
+Parsed, no effect. Reverted - cached memory costs performance and bought nothing.
+
+**Where the character-texture fault stands, with everything eliminated by a control or an A/B:**
+
+| layer | verdict | how |
+|---|---|---|
+| the game, save, character, mods, display settings | FINE | renders correctly with `d3d9.dll` renamed away |
+| the shim's conversion | not involved | `ffp=0`, twice |
+| the shim's skipping | not involved | `hiddenPassMode=0`, `SKIPPED entirely 0/frame` |
+| `rtx.conf` | not involved | 08-18 config restored wholesale |
+| `user.conf` | not involved | path-tracing quality settings only |
+| `dxvk.conf` | not involved | `allowDiscard`, `apitraceMode`, both parsed, both inert |
+| Remix vertex capture | not involved | `useVertexCapture=True`, skip line gone |
+| our own readback | sound | control returned 126.7 of an expected 126.7 |
+
+**The fault is inside DXVK/Remix and configuration cannot reach it.** SR3's writes to its
+2048x1024 X8R8G8B8 `D3DPOOL_DEFAULT` + `D3DUSAGE_DYNAMIC` character texture land on native D3D9
+and do not land under the Remix stack. Its 1024x512 normal map is lost the same way, while every
+DXT texture bound in the same draws survives.
+
+### The only route left, and it is a subsystem
+
+Hook `IDirect3DTexture9::LockRect`/`UnlockRect`, snoop the game's own writes to that texture at
+the CPU boundary - BEFORE DXVK loses them - and re-upload them through `UpdateTexture`, which is
+the path Remix hashes. Same architecture as the morph and instance stream snoop, applied to a
+texture.
+
+It should be started with a PROBE, not the whole thing: hook the lock pair, log which textures are
+locked, at which level, with what size, and whether the character atlas is among them.
+
+| probe result | consequence |
+|---|---|
+| the game locks that texture | the snoop is viable and the data is reachable at the CPU boundary |
+| it never locks it | the game fills it another way and the probe names which call, which decides everything after |
+
+That probe is bounded. The full snoop is not, and the morph stream - the closest precedent - took
+parts of two sessions.
+
+**Not started.** Put to the user against the alternative: park the character texture as a Remix
+limitation and move to PERFORMANCE, the documented largest problem at ~57% of frame time, which
+this session has not touched.
+
+    dxvk.conf  61d3fb899588a0e703ee016ce96acbb8   both negatives recorded, apitraceMode reverted
+
+## 2026-08-29 - starting the snoop, with the probe that decides its shape
+
+User: fix the skin; performance later.
+
+The route is settled by elimination: snoop SR3's own writes to its character texture at the CPU
+boundary - before DXVK loses them - and re-upload through `UpdateTexture`, the path Remix hashes.
+Same architecture as the morph and instance stream snoop, applied to a texture.
+
+It cannot be written without knowing WHICH call the game uses, so that is all this build does.
+
+### The probe
+
+Hooks the four device entry points that can fill a texture, plus the texture's own lock pair:
+
+    IDirect3DDevice9   30 UpdateSurface   31 UpdateTexture   34 StretchRect   35 ColorFill
+    IDirect3DTexture9  19 LockRect        20 UnlockRect
+
+and counts only calls whose destination has the atlas's shape. Report:
+
+    TEXTURE FILL PROBE (how does the game write the character texture?): N atlas texture(s)
+    tracked | LockRect N, UpdateTexture N, UpdateSurface N, StretchRect N, ColorFill N
+      LockRect levels seen = 0x..., flags OR = 0x...
+
+Whichever is non-zero is the entry point to snoop. All zero means the game fills it by a route
+none of these cover - equally worth knowing, and far cheaper to learn now than after building a
+subsystem aimed at the wrong call. "N atlas texture(s) tracked = 0" is the third branch: the
+classifier never matched, and every count is then meaningless.
+
+### Two things this build had to get right
+
+**The texture vtable is patched ONCE.** Every `IDirect3DTexture9` shares one vtable, so a second
+patch would store our own hook as the "original" and the hook would call itself. Guarded by a
+static.
+
+**No container is mutated from a foreign thread.** The game locks resources from more than one
+thread - proven by a crash dump, then measured at 272 buffer locks a frame off the render thread.
+So the candidate pointers live in a FIXED array written only on the render thread and scanned
+without a lock. Mutating a map from the locking thread is the bug that already crashed this
+project once.
+
+    sr3-rtx.asi  715b85fadb10bbbe1e324f623a6781cf
+    sr3-rtx.map  22e26abe1a3fa43393e1bb4e5ffc3612
+
+### The probe killed the planned subsystem before it was written
+
+    TEXTURE FILL PROBE: 1 atlas texture(s) tracked
+      | LockRect 0, UpdateTexture 0, UpdateSurface 0, StretchRect 860, ColorFill 14
+
+**`LockRect 0`.** The game never touches that texture from the CPU, so there is no CPU-boundary
+write to snoop and the whole planned subsystem - hook LockRect, copy the game's write, re-upload -
+would have found nothing to copy. That is exactly what a bounded probe is for, and it cost one
+short run instead of two sessions.
+
+SR3 composites the character texture **on the GPU, with StretchRect**.
+
+### But the count was contaminated, and it is fixed before being used
+
+`IsAtlasSurface` matched any uncompressed surface >= 256x256 - which is also the 2560x1440 back
+buffer and every HDR target. So "StretchRect 860" counted the whole frame's blits, not writes to
+the character texture. Corrected to walk the surface back to its parent with
+`GetContainer(__uuidof(IDirect3DTexture9))`, which is exact, and the reference it returns is
+released immediately so the probe cannot pin every texture in the game.
+
+Fourth time a counter has measured something other than its name on this project, and the first
+time it was caught before anything was built on it.
+
+### What the re-run has to answer
+
+    TEXTURE FILL PROBE ...: LockRect N, UpdateTexture N, UpdateSurface N, StretchRect N, ColorFill N
+      of those StretchRects, M FAILED
+    TEXTURE FILL #k: StretchRect INTO the character texture | hr=... | src WxH fmt/pool/usage ...
+
+| reading | meaning |
+|---|---|
+| StretchRect still large, M = 0 | the game composites by GPU blit and DXVK reports success while writing nothing - the shim can shadow those blits into a render target it owns, which is a LEGAL destination, and hand Remix that instead |
+| M > 0 | DXVK is refusing the game's own composite outright, and the hr in the detail lines names why |
+| StretchRect now 0 | the 860 were all back-buffer blits, none of these calls touch the atlas, and the fill route is still unidentified |
+
+A D3DPOOL_DEFAULT + D3DUSAGE_DYNAMIC texture surface is not a legal StretchRect destination under
+the D3D9 spec - destinations are meant to be render targets or offscreen plain surfaces. Native
+drivers allow it; DXVK may well not. That would explain every measurement at once: the game's
+writes never land, the texture reads back as zeroes through a read path that is proven sound, and
+none of it involves the shim.
+
+    sr3-rtx.asi  e65720f921c86d1c2391a4b7e202a73a
+    sr3-rtx.map  b2464c9305ebce5054be012bd0523034
+
+### All five zero - and the probe was hooking after the event
+
+    TEXTURE FILL PROBE: 1 atlas texture(s) tracked
+      | LockRect 0, UpdateTexture 0, UpdateSurface 0, StretchRect 0, ColorFill 0
+
+With the precise `GetContainer` test, nothing touches the character texture. The earlier
+"StretchRect 860" was entirely back-buffer blits, as suspected - so tightening it before building
+on it was worth the run.
+
+**But zero across the board does not mean "no route". The probe had a timing hole.** The texture
+vtable was patched, and the candidate recorded, at the first character DRAW. SR3 composites a
+character's texture when it SPAWNS - at load - long before that character is ever drawn. The hook
+was being installed after the event it existed to observe, so every count was taken from the wrong
+side of it.
+
+That is the same error as the compositeToTexturePass rule, which measured a population correctly
+in a frame that could not contain the draws it was written for. Counting the right thing at the
+wrong TIME has now cost two runs.
+
+### Fixed at the earliest point a texture can exist
+
+Both the vtable patch and the candidate list move to `Hook_CreateTexture`, which runs from device
+creation. Nothing can be written to a texture before it is created, so nothing can now happen
+before the hook is in place. Candidates are classified from the creation parameters directly - no
+`GetLevelDesc`, no guessing - and each is named:
+
+    ATLAS CANDIDATE #N created: WxH levels=L fmt=F pool=P usage=0xU
+
+The array is 32 entries with an overflow counter, so "the shape test matches more than the
+character atlas" reports itself instead of silently truncating.
+
+    sr3-rtx.asi  7f88ae59d25013bb9391c1aad0d1547b
+    sr3-rtx.map  56255685ce8b166a1afe8e61805fd3e7
+
+### The overflow counter caught the shape test tracking the wrong textures
+
+    ATLAS CANDIDATE #3 created: 2048x1024 levels=9 fmt=21 pool=0 usage=0x1
+    955 candidates did not fit the 32-entry array
+    LockRect 16, StretchRect 1908, ColorFill 14   (pitches 5120/3072/1024 - 1280-wide surfaces)
+
+`usage=0x1` is `D3DUSAGE_RENDERTARGET`. Every candidate the filter caught was a render target,
+because it accepted DYNAMIC *or* RENDERTARGET at any size >= 256 - and the game creates hundreds.
+The array filled with the first 32 and the character atlas never entered it, so those LockRect and
+StretchRect counts describe other textures entirely. The pitches confirm it: 5120 bytes is a
+1280-wide surface, not the 2048-wide atlas.
+
+**The falsifier written into that line is what caught it** - "the shape test is matching more than
+the character atlas" - exactly as the DEDUP table overflow line did on 2026-08-28. Two for two on
+falsifiers that report their own saturation.
+
+### Tightened to the signature the albedo report actually prints
+
+    bound on character draws:  2048x1024 fmt=22 mips=9 pool=0 usage=0x200
+
+fmt 22 is `D3DFMT_X8R8G8B8`, 0x200 is `D3DUSAGE_DYNAMIC`. The flood was fmt=21 with usage=0x1, so
+requiring DYNAMIC and explicitly EXCLUDING RENDERTARGET, at >= 1024x512, separates them cleanly.
+
+And a second line that the previous two builds lacked: **every large uncompressed texture is now
+logged at creation whatever its usage**, so if the atlas is created with parameters the filter
+rejects, it appears here instead of vanishing silently.
+
+    BIG TEXTURE #N created: WxH levels=L fmt=F pool=P usage=0xU
+
+| next run shows | meaning |
+|---|---|
+| an ATLAS CANDIDATE at 2048x1024 fmt=22 usage=0x200, then non-zero fill counts | the entry point is named and the interception can be built |
+| BIG TEXTURE lines but no matching ATLAS CANDIDATE | the atlas is created with different parameters than it later reports - which is itself the anomaly |
+| neither | the texture is not created through `IDirect3DDevice9::CreateTexture` at all |
+
+    sr3-rtx.asi  3db1ffcbb19e5e621e43e61fb1666031
+    sr3-rtx.map  b8703721c5d2e1604e448cd3519bb3e6
+
+### The atlas is now definitely identified, and none of the five calls touches it
+
+    BIG TEXTURE #14 created: 2048x1024 levels=9 fmt=22 pool=0 usage=0x200
+    ATLAS CANDIDATE #4 created: 2048x1024 levels=9 fmt=22 pool=0 usage=0x200
+    ALBEDO BOUND #5: ps='Blend_MapSampler' rank=100 -> 2048x1024 fmt=22 mips=9 pool=0 usage=0x200
+
+    TEXTURE FILL PROBE: 7 atlas texture(s) tracked (no overflow)
+      | LockRect 1, UpdateTexture 0, UpdateSurface 0, StretchRect 0, ColorFill 0
+    TEXTURE FILL #1/#2: LockRect ... pitch=5120
+
+The tightened filter tracks 7 textures with no overflow, and the character atlas is provably among
+them - its creation line and its albedo-bound line carry the same signature. The one LockRect
+recorded has **pitch 5120**, which is a 1280-wide surface (`BIG TEXTURE #11`), not the 2048-wide
+atlas. So the atlas is created, bound as the character's albedo, and written by NONE of
+`IDirect3DTexture9::LockRect`, `UpdateTexture`, `UpdateSurface`, `StretchRect` or `ColorFill`.
+
+### The gap that leaves, and it was mine
+
+**`IDirect3DSurface9::LockRect` is a different vtable from `IDirect3DTexture9::LockRect`.** A game
+that calls `GetSurfaceLevel(0)` and locks THAT surface never touches the texture method at all,
+and the probe was blind to it. That is the commonest way to write a mip level in D3D9 and it
+should have been in the first version.
+
+Added: slots 13/14 on `IDirect3DSurface9`, patched from any texture's level-0 surface (the vtable
+is shared, like the texture and vertex-buffer ones). The hook uses the same `GetContainer` walk,
+so it fires only for a surface belonging to a tracked atlas.
+
+    | texture LockRect N, SURFACE LockRect N, UpdateTexture N, UpdateSurface N, StretchRect N,
+      ColorFill N
+
+If SURFACE LockRect is non-zero, that is the write to intercept and the interception can finally
+be built. If it is zero as well, the remaining route is `SetRenderTarget` plus draws - which would
+be a surprise on a texture created without `D3DUSAGE_RENDERTARGET`, and would say the game is
+doing something D3D9 does not sanction, which is itself a fine explanation for DXVK losing it.
+
+    sr3-rtx.asi  15db7188578bdf4e3500c62b1d2000c2
+    sr3-rtx.map  4f79a1e8aa7d09cd1a0f0d5ed8d24b6e
+
+## 2026-08-29 - the fill route found, and the snoop built against it
+
+    TEXTURE FILL PROBE: 7 atlas texture(s) tracked
+      | texture LockRect 1, SURFACE LockRect 18, UpdateTexture 0, UpdateSurface 0,
+        StretchRect 0, ColorFill 0
+    TEXTURE FILL #3: SURFACE LockRect | flags=0x0 pitch=8192 whole   <- 2048 wide, mip 0
+    #4 pitch=4096  #5 2048  #6 1024  #7 512  #8 256                  <- the rest of the chain
+
+**SR3 fills the character atlas by taking each mip level's SURFACE with `GetSurfaceLevel` and
+locking THAT.** `IDirect3DSurface9::LockRect` is a different vtable from
+`IDirect3DTexture9::LockRect`, which is exactly why three earlier probes reported zero. Whole
+surface, `flags=0` - a plain preserving write, the full mip chain.
+
+That gap was mine, and it is the commonest way to write a mip level in D3D9.
+
+### The snoop
+
+Takes the pixels at the CPU boundary, where they demonstrably exist, and re-uploads them through
+SYSTEMMEM + `UpdateTexture` - the path Remix hashes, as the cloth generator's own note says. Bound
+in preference to the game's texture in `RemixReadableAlbedo`.
+
+Design decisions worth keeping:
+
+- **Mip 0 only.** Remix samples the top level for a material and 2048x1024x4 is 8 MB per
+  character; the rest of the chain would add a third for nothing.
+- **A sub-rect lock is refused, not partially captured.** Handing Remix a partial texture as
+  though it were whole is a worse bug than the one being fixed.
+- **The copy happens in Unlock, before the original unlock call**, because after that the pointer
+  is no longer the game's to give.
+- **A fixed array under its own critical section, never a map resized from a foreign thread** -
+  the game locks resources from more than one thread, proven by a crash dump and measured at 272
+  buffer locks a frame, and mutating a container from that side is what crashed this project once.
+
+### The falsifier answers the last open question at the same time
+
+    ATLAS SNOOP ...: N captured, M copies uploaded, F failures | B draws/frame bound
+      atlas 1: 2048x1024  mean X of 255   <- what the GAME wrote
+
+`mean` is the number that matters and it is measured at a boundary nothing has measured before.
+Every read attempted so far - `LockRect` on the texture, `StretchRect` + `GetRenderTargetData`,
+Remix's own capture - reported zero. If the game's own write carries real pixels, `mean` is
+non-zero and all of those were looking at an image that never received them.
+
+    sr3-rtx.asi  e8f34e3822c4ecab3c8a338d7a76a63e
+    sr3-rtx.map  183f8d1be889259d554902a42cb2f6c2
+    sr3-rtx.ini  63040c251f3da101735656e8ab614276   atlasSnoop=1
+
+### The snoop works, and it proves the pixels were never written
+
+    ATLAS SNOOP: 3 captured, 1 copies uploaded, 0 capture failures | 9.7 draws/frame bound
+      atlas 1: 1280x768   mean 14.3    <- the capture mechanism reads real data
+      atlas 2: 2048x1024  mean  0.0    <- the character atlas
+      atlas 3: 1024x512   mean  0.0
+
+The snoop is mechanically correct: it captures, uploads and binds, 9.7 draws a frame take the
+copy, and a different texture captured through the identical path reads 14.3. **The character
+atlas contains zeroes in the game's OWN mapped memory, at Unlock.**
+
+So nothing downstream was ever losing the pixels. They were never written. That closes, with a
+control, the entire family of theories this investigation has been built on since 08-28 - Remix
+hashing, DXVK discard semantics, capture-off, the composite draws, the readback being blind. Each
+was an explanation for pixels going missing between the game and Remix, and there was no such
+journey.
+
+### What that leaves, and it is narrow
+
+The character IS correct without Remix. So SR3's compositor produces zeroes only inside this
+stack, and the step before the dynamic texture is the suspect: the game creates a **2048x1024
+RENDER TARGET of exactly the same size** (`BIG TEXTURE #3: fmt=21 usage=0x1`). A GPU composite
+into that, read back, and written into the dynamic texture would emit zeroes if the READBACK is
+what fails - and the game would then be faithfully writing the zeroes it just read.
+
+That also explains why every one of our own reads returned zero: we kept reading the END of the
+chain.
+
+### The probe
+
+Every large uncompressed render target is read ONCE, on the render thread in Present, one per
+frame, through the path whose control already passed (`SelfTestCopyPath`: 126.7 of an expected
+126.7).
+
+    RT CONTENT #N: WxH render target | mean X of 255
+
+| reading | meaning |
+|---|---|
+| one of them is non-zero and character-shaped | the pixels exist on the GPU in that surface, and the shim can bind THAT as the albedo instead - the snoop machinery to upload it already exists and is proven |
+| all zero | the composite never runs at all under this stack, and the fault is upstream of every texture - which would make it a Remix/DXVK defect with no shim-side workaround |
+
+    sr3-rtx.asi  36b0d31a3ecc6b50f252aec02123b5c8
+    sr3-rtx.map  56aa778f9fd7a3f13a43b76d6ec8bd75
+
+### All ten render targets read 0.0 - because they were all read during loading
+
+    RT CONTENT #1..#10: ... mean 0.0    (including three 2560x1440 SCENE targets)
+
+The 2560x1440 surfaces are the G-buffer and HDR scene targets. They unquestionably hold the
+rendered world. Reading them as empty is not a finding about the character - it is proof the
+measurement was taken at the wrong moment.
+
+**One candidate was read per frame starting at frame 1, and each was marked done after a single
+attempt.** Frames 1-10 are startup and loading, when those surfaces genuinely are empty.
+
+That is the THIRD time on this bug that the right quantity was measured at the wrong time:
+
+| probe | measured correctly | at the wrong time |
+|---|---|---|
+| `compositeToTexturePass` | 41 draws/frame, exactly as predicted | in frames that could not contain a character spawn |
+| the fill probe | LockRect on the atlas | hooked at the first character DRAW, after the fill |
+| the RT content probe | render target contents | during loading, before anything was drawn |
+
+The pattern is always the same and it is not the same as the missing-control pattern: the number
+is right, the clock is wrong. A one-shot read of a surface whose contents change is worth nothing;
+only the maximum over time is.
+
+### Fixed
+
+Round-robin, one read every four frames, cycling forever, keeping the MAXIMUM per surface and
+logging only increases. A surface that fills up later is now caught.
+
+    RT CONTENT #N: WxH | mean rose to X at frame F
+    render targets: N candidates, R reads (round-robin, MAX over time)
+      RT n: WxH  max mean X
+
+If the 2560x1440 scene targets now read non-zero, the read path is sound and any surface still at
+0.0 is genuinely empty. **If they STILL read 0.0 while the world is visibly on screen, then
+GetRenderTargetData cannot see this stack's render targets at all** - and every measurement taken
+through it this session, including the atlas ones, has to be discarded.
+
+That second outcome is the one to watch for. It would mean the tool has been lying since the
+control passed, and the control passed only because it read a surface that had just been written
+through the same API by us.
+
+    sr3-rtx.asi  87ad631a6f8c34260a09096c392e05cd
+
+### The round-robin probe FROZE THE GAME - and it was the recorded failure, again
+
+User: *"the game now freezes right after the intro logos."*
+
+The round-robin render-target read allocated a `CreateOffscreenPlainSurface` **per read** - 14.7 MB
+for each 2560x1440 candidate - and did a full `GetRenderTargetData` GPU sync **every four frames,
+forever**, in a 32-bit address space shared with the game, Remix's client and a 24 MB skinning
+ring.
+
+That is verbatim the failure already in YOUR-INSTRUCTIONS.md: pre-sizing the snoop buffers
+"exhausted a 32-bit address space and killed the game". The rule written beside it -
+**a shim must degrade, not abort its host** - applies with more force to a DIAGNOSTIC, which by
+definition is not even earning its keep.
+
+The one-shot version was safe because it was bounded by accident: ten reads, then never again.
+Making it correct in TIME removed the only thing bounding it in COST, and I changed one without
+looking at the other.
+
+### Recovery, in that order
+
+1. `atlasSnoop=0` - the probe is gated behind it, so the game runs again with **no rebuild**.
+   `sr3-rtx.ini 0f6b2183a0f8575108742699d1d2a34a`, .asi untouched.
+2. Then the probe made bounded rather than merely slower:
+   - a **total budget of 60 reads for the session**, not a rate;
+   - one read every 120 frames, about two seconds;
+   - surfaces larger than the atlas capped at 3 reads - they are only the control for whether
+     `GetRenderTargetData` can see game-written surfaces at all.
+
+    sr3-rtx.asi  f5932bc0e9dab78f3bea61a64f9fc8c8
+    sr3-rtx.map  c118be6588bfe4f54e137c5ad2b5b2bb
+
+### Standing lesson, now written twice in this file
+
+Every diagnostic added to this shim needs a CEILING, not just a purpose. Three probes this session
+have cost a run through cost or timing rather than through being wrong about the thing they
+measured.
+
+### Option A confirmed the recovery; Option B did not run
+
+    frame 3000 | draws 2520/frame | FFP converted 577/frame (22.9%)
+    TIMING: frame 26.7 ms avg (37 fps), no crash dump
+
+The bounded build plays normally, so the freeze WAS the unbounded probe and nothing else.
+
+The follow-up run reported `0 reads of a 60 budget` and `gate OFF` - the ini still read
+`atlasSnoop=0`. Asking the user to hand-edit a key cost a run; the gate is set here now instead.
+
+### A gap that would have wasted the next run too
+
+`g_rtProbeRead` counted only SUCCESSFUL reads. A `GetRenderTargetData` that refused every surface
+would also have printed "0 reads", which is indistinguishable from "the probe never ran" - the
+exact ambiguity that just happened for a different reason.
+
+Every step now reports its own HRESULT:
+
+    RT CONTENT FAILED #N: WxH | GetSurfaceLevel=0x... CreateOffscreenPlain=0x...
+                               GetRenderTargetData=0x... LockRect=0x...
+    ... %u reads FAILED
+
+**A non-zero failure count is itself the answer**: it means the read tool cannot see game-written
+surfaces, and every zero measured through it this session - "the atlas is empty", "the game writes
+zeroes", the composited-albedo readback - has to be discarded. The self-test that passed only ever
+proved the tool could read back a surface WE had just written through the same API.
+
+    sr3-rtx.asi  0d643d662a63229aca2100c41664bd23
+    sr3-rtx.map  28e3bbbe3e03e6b984edad1271128448
+    sr3-rtx.ini  a8602a03565b964a2702d3b3180becfc   atlasSnoop=1
+
+### It froze AGAIN at 1 read per 120 frames - which is the finding
+
+The bounded probe - one read every 120 frames, a 60-read session budget, big surfaces capped at
+three attempts - still froze the game. **At that rate the cost cannot be the problem.** So it is
+not an allocation or a stall:
+
+**Remix's D3D9 cannot service `GetRenderTargetData` on a surface it owns and is actively using.**
+
+That is consistent with everything measured, and it completes the story:
+
+- our own StretchRect read never hung, because it resolves OUR render target, not the game's;
+- `SelfTestCopyPath` passed for the same reason - it read back a surface we had just written;
+- and if **SR3's own compositor reads back its render target the same way**, it gets nothing under
+  this stack and then faithfully writes the zeroes it just read. Which is exactly what the atlas
+  snoop caught coming out of the game's own mapped memory: `mean 0.0`, measured by plain memcpy
+  from the game's pointer, with no readback API involved at all.
+
+That single mechanism explains the black character, why the game is correct without Remix, why no
+configuration touched it, and why every read we attempted returned zero.
+
+### Safety, and a design error of mine
+
+`rtContentProbe` now has its own key, defaulting OFF, and is documented as DO NOT ENABLE. Sharing
+a gate with `atlasSnoop` meant the harmless snoop could not be turned on without the dangerous
+probe - which is how the second freeze happened at all.
+
+Two freezes in one session, both from a diagnostic. The standing rule stands and needs no
+restating: a shim must degrade, not abort its host, and a probe has to be the safest code in the
+file, not the least careful.
+
+    sr3-rtx.asi  372dbb3a59f976bcdf2130d732f16ebb
+    sr3-rtx.map  2e9b15d11112c3e27d38b892bd35bbaf
+    sr3-rtx.ini  84510480348e014af7e2b18e2ce59909   atlasSnoop=1  rtContentProbe=0
+
+### Where this leaves the character texture
+
+If the cause is the game's own readback failing inside Remix, the shim cannot reach it: the
+failing call is between SR3 and Remix, and its result is consumed by the game's compositor before
+anything we hook sees a pixel. The remaining options are a Remix-side fix or an asset replacement,
+not a shim change.
+
+**Not decided.** Put to the user with performance as the alternative.
+
+## 2026-08-29 - THE COMPOSITOR WORKS. The user's lead was right and my conclusion was wrong.
+
+User, pushing back on "this is a Remix limitation": *"when i had vertex capture on, i could see my
+character being textured. maybe only capture the characters and npcs and vehicles."*
+
+Tested `rtx.useVertexCapture = True` together with `hiddenPassMode=0`:
+
+    ATLAS SNOOP: 3 captured, 1 copies uploaded | 11.4 draws/frame bound a snooped copy
+      atlas 1: 1280x768   mean  14.3
+      atlas 2: 2048x1024  mean 182.7      <- THE CHARACTER TEXTURE
+      atlas 3: 1024x512   mean 169.6      <- its normal map
+
+**182.7 is exactly the mean of `8E4C8047F62D947A`**, the historical atlas decoded from the 08-13
+captures showing skin, a face with makeup, arms, legs and the fleur-de-lis tattoo. Measured by
+memcpy out of the game's own mapped memory, with no graphics API in between.
+
+So SR3's compositor is not defeated by this stack at all. **The pixels are reachable, and the
+"Remix cannot service the readback, nothing can be done" conclusion was wrong.**
+
+### Why I got there, and it is not the missing-control failure
+
+Every earlier reading was taken with `hiddenPassMode=2` in force. There are TWO independent skip
+mechanisms and I only ever varied one at a time:
+
+| | effect |
+|---|---|
+| `rtx.useVertexCapture=False` | Remix declines shader-driven draws |
+| `hiddenPassMode=2` | THE SHIM skips ~2000 draws/frame before the device sees them |
+
+The state in which the atlas was provably populated - captures 08-13..08-18 - had capture ON and
+the shim not in skip mode. When capture=True was tested on 08-29 it was tested WITH the shim still
+skipping, judged visually, with no instrument, and closed on "still black".
+
+**A two-variable system tested one variable at a time, and the conclusion drawn as though the
+space had been covered.** That is a different error from the missing controls and the wrong-time
+measurements, and it is the one that produced a false "impossible".
+
+### The bisect
+
+Step 2 restores `hiddenPassMode=2` with capture still ON:
+
+    mean stays ~182  -> vertex capture is the lever, the shim's skipping is irrelevant, and this
+                        configuration ships as it stands
+    mean falls to 0  -> the SHIM's skipping destroys the composite, and a targeted rule must spare
+                        exactly those draws - which is what compositeToTexturePass attempted
+                        blind, and can now be aimed with this mean as its falsifier
+
+    sr3-rtx.ini  951deffebb739d8b6ce48b18447c7a82   hiddenPassMode=2, atlasSnoop=1
+    rtx.conf     d7e9c7ec79bc7208166f00ba8a56565a   useVertexCapture=True
+
+### Bisect step 2: the SHIM's skipping is the culprit, not vertex capture
+
+    step 1  capture=True, hiddenPassMode=0   ->  atlas 2048x1024 CAPTURED, mean 182.7
+    step 2  capture=True, hiddenPassMode=2   ->  atlas NEVER LOCKED at all
+
+In step 2 the game did not composite the texture - the snoop saw no top-level lock on it, only the
+unrelated 1280x768 one. So `hiddenPassMode=2` prevents the composite from happening, and vertex
+capture is NOT the lever.
+
+**That relocates the bug into our own code**, which is the best possible outcome: it is reachable,
+and rule 1 already describes it - *a draw whose RESULT the engine reads can never be SKIPPED*. The
+engine reads this one back as a texture, exactly as `compositeToTexturePass` argued in the first
+place. That rule was right in principle, aimed at a plausible population, and shipped with no way
+to tell whether it had worked. The atlas mean is that missing falsifier.
+
+### Step 3
+
+`screenSpaceMode=0` with `hiddenPassMode=2` unchanged: only the screen-space/composite quads pass
+through, every other prepass stays skipped.
+
+    atlas mean ~182  -> targeted fix found; everything else keeps its current disposition
+    atlas mean 0     -> a different skip rule is responsible and the frame dump names it
+
+Caveat on step 2: that run was short (~600 frames, log 22 KB) and its last report shows 0
+draws/frame. The user did see their character, so a character was drawn, but the run should be
+longer next time. Recorded so the conclusion is not treated as firmer than the sample.
+
+### Also unresolved and important
+
+In step 1 the atlas WAS captured at 182.7 and 11.4 draws/frame bound our uploaded copy - and the
+user still reported black skin. Either that report referred to step 2, or the correct texture is
+reaching Remix and something downstream still renders it black. The next run must be reported with
+BOTH the number and what was on screen, because those two possibilities need completely different
+work.
+
+    sr3-rtx.ini  b9c935812c96d35c5830b1f26cc1e0b5   screenSpaceMode=0
+
+### The atlas is PARTIALLY composited, and that narrows the target sharply
+
+User, looking at the character texture: *"it looks like we broke the way the character renders and
+the textures get baked because i see that the texture has some stuff in it but the skin part is
+black."*
+
+The 18:21 run agrees numerically:
+
+    atlas 2: 2048x1024  mean 3.8 of 255      (fully composited reads 182.7)
+
+Mostly black, some content. So the composite is MULTI-PASS and only some passes survive - which is
+also the original report, *"only the top of the player is colored correctly"*. One layer is being
+lost, not the whole bake.
+
+**That run used `screenSpaceMode=2`** - its settings line says so, and there is only one such line
+in the log, so it is not a stale entry. The game must have been launched before the step-3 ini
+landed. Step 3 is therefore still untested.
+
+### Reading the atlas instead of inferring from a mean
+
+A mean says how much is missing, never WHICH region. The snoop already holds the pixels, so the
+two largest captures are now written to `chartex-atlas1-WxH.raw` / `atlas2`. Bounded to two, ~6 MB
+each, written once.
+
+With the picture I can see exactly which part of the layout is black - skin, tattoos, garments -
+and each corresponds to a different composite pass. That turns "a layer is missing" into "THIS
+layer is missing", which is the difference between another bisect and a targeted rule.
+
+    sr3-rtx.asi  21a11f8062a77d83650b0b3d68556437
+    sr3-rtx.map  4c0c1e29df13c24ae9cff12ce8d39c98
+    sr3-rtx.ini  b9c935812c96d35c5830b1f26cc1e0b5   screenSpaceMode=0 (STILL UNTESTED)
+
+## 2026-08-29 - THE CHARACTER TEXTURE IS FIXED
+
+    settings: ffp=1 hiddenPassMode=2 screenSpaceMode=0 ... | rtx.useVertexCapture = True
+
+    ATLAS SNOOP: 3 captured, 1 copies uploaded | 26.0 draws/frame bound a snooped copy
+      atlas 2: 2048x1024  mean 182.7 of 255
+      atlas 3: 1024x512   mean 169.6 of 255
+
+Dumped and looked at: `chartex-atlas2-2048x1024.raw` is the complete character texture - skin,
+the face with makeup, the eye, arms, legs, the floral tattoos and the fleur-de-lis. Identical to
+`8E4C8047F62D947A` from the 08-13 captures.
+
+**`screenSpaceMode=0` is the fix**, with `hiddenPassMode=2` unchanged - so every other prepass is
+still skipped and only the screen-space/composite quads pass through.
+
+### What was actually wrong, start to finish
+
+SR3 bakes each character into one 2048x1024 texture using a chain of screen-space composite quads.
+The shim classified those as post/composite quads and, under `hiddenPassMode=2`, SKIPPED them.
+The bake never ran, the game read back nothing, wrote zeroes into the texture its character shader
+samples, and every character rendered black.
+
+**It was rule 1 all along** - *a draw whose RESULT the engine reads can never be SKIPPED, only
+hidden or passed through* - and `compositeToTexturePass` on 2026-08-28 was aimed at exactly this.
+It failed only because it was aimed at steady-state frames, where no character is being composited,
+and because there was no falsifier that could tell whether it had worked.
+
+### Why it took so long, honestly
+
+Four distinct failure modes, none of them about being wrong on the mechanism:
+
+| failure | instance |
+|---|---|
+| measurement without a control | `usage=0x200` read as RENDERTARGET; blank LockRect readbacks read as "never written" |
+| right quantity, wrong TIME | compositeToTexturePass measured in frames that could not contain a spawn; the fill probe hooked after the fill; the RT probe read during loading |
+| a two-variable space tested one variable at a time | `useVertexCapture` and `hiddenPassMode` are independent skips; every test held one at its broken value and the conclusion was drawn as though the space had been covered |
+| a diagnostic with no ceiling | the RT content probe froze the game twice |
+
+The third produced a false "this is impossible, wait for Remix". **The user rejected that
+conclusion and supplied the observation that broke it** - that the character had been textured with
+vertex capture on. That was the decisive evidence, and it came from them, not from the tooling.
+
+### Preserved
+
+    configs/sr3-rtx.ini.WORKING-character-texture.bak
+    configs/rtx.conf.WORKING-character-texture.bak
+
+### Still to settle
+
+- Is `rtx.useVertexCapture = True` still required, or does `screenSpaceMode=0` alone suffice? That
+  matters: capture-off was adopted for good reasons and capture-on may reintroduce duplicate
+  geometry and cost performance.
+- What `screenSpaceMode=0` costs - it was set to 2 because a passed-through composite chain can
+  paint the rasterised frame over the path-traced world.
+
+### Is capture-on actually required? Isolating it
+
+`screenSpaceMode=0` is only known to work WITH `rtx.useVertexCapture = True`, because both were
+changed on the way here. They are independent mechanisms and the question matters: capture-off was
+the unblock that took four sessions, and capture-on is expected to reintroduce duplicate geometry
+and cost performance.
+
+This run changes exactly ONE variable back - capture to False, `screenSpaceMode=0` and
+`hiddenPassMode=2` untouched:
+
+    atlas mean ~182  -> capture is NOT required. screenSpaceMode=0 alone is the whole fix, and the
+                        project keeps capture-off with everything it bought.
+    atlas mean 0/low -> capture-on IS required for the bake, and its costs have to be measured and
+                        managed - z-fighting, duplicate geometry, performance.
+
+The atlas mean is the falsifier and it is measured by memcpy out of the game's own memory, so
+this is a decision made on a number rather than on how the frame looks.
+
+    rtx.conf  80ea312f4ede5ccc9db3cfa7ec910aa6   useVertexCapture=False
+
+### Capture-on IS required - isolated, one variable
+
+    capture=True,  screenSpaceMode=0, hiddenPassMode=2  ->  atlas mean 182.7
+    capture=False, screenSpaceMode=0, hiddenPassMode=2  ->  black again
+
+So `rtx.useVertexCapture` is load-bearing for the bake, and with the earlier `ffp=0` result - shim
+inert, capture off, still black - the whole picture resolves:
+
+**TWO independent mechanisms were each breaking the bake.**
+
+| mechanism | what it did |
+|---|---|
+| `rtx.useVertexCapture=False` | Remix declines the game's shader-driven draws, so the composite quads never execute |
+| `hiddenPassMode=2` + `screenSpaceMode=2` | the SHIM skipped those same quads before the device saw them |
+
+Either one alone is sufficient to produce a black character. That is exactly why every
+single-variable test came back negative and why the space looked closed: each test fixed one and
+left the other broken. It is the clearest possible illustration of why a two-variable system
+cannot be bisected one variable at a time.
+
+This also means capture-off, adopted over four sessions for good reasons, silently broke every
+render-to-texture SR3 performs - not just characters. That cost is now known and was not before.
+
+### The user's check: is the GAME itself being rendered correctly?
+
+> *"can we make sure that the game fully and properly renders when we switch off the path tracing?
+> i think we are breaking the game and that is resulting in what we are seeing."*
+
+Right instinct, and Remix has the switch for it - from its own description, read out of
+`.trex/d3d9.dll`:
+
+    rtx.enableRaytracing - "Globally enables or disables ray tracing. When set to false the
+                            original game should render mostly as it would without Remix."
+
+Set False with the shim FULLY ACTIVE (`ffp=1`, `screenSpaceMode=0`, capture on), which separates
+"are we damaging SR3's own output" from "is the path-traced image right". The reference already
+exists: `d3d9.dll` renamed away with `ffp=0` renders the character correctly.
+
+| result | meaning |
+|---|---|
+| game renders correctly | the shim and Remix's rasteriser leave SR3's own output intact; anything still wrong lives in the path-traced path |
+| game renders wrongly | we ARE breaking the game, and whatever is broken here also explains the path-traced result |
+
+    rtx.conf  b5dabca361d2ea023a6c7d338d3d6fbf   capture=True, enableRaytracing=False
+
+### "Most of the map is not rendered" with ray tracing off - and the test was contaminated
+
+User, with `rtx.enableRaytracing = False` and `ffp=1`: most of the map missing, same symptoms.
+
+**That result cannot be read as damage, because it is what the shim is designed to do.** With
+`hiddenPassMode=2` the shim skips ~2000 draws a frame precisely so Remix does not see duplicates,
+and converts others to fixed function. With ray tracing ON that is invisible - Remix renders the
+conversions. With ray tracing OFF the skipped draws are simply gone from the screen and the
+converted ones rasterise as untextured fixed-function geometry.
+
+I proposed that test with `ffp=1` without thinking through what the shim does to a rasterised
+frame. The observation is real; the inference "we are breaking the game" does not follow from it.
+
+### The clean form
+
+`ffp=0` returns at the first line of `Classify`: nothing skipped, nothing converted, shim inert.
+With ray tracing still off, that is the actual question:
+
+| result | meaning |
+|---|---|
+| map renders correctly | the shim is not damaging SR3's output and Remix's rasteriser is sound; the fault is in what we DO to draws |
+| map still broken | Remix damages SR3's rendering with the shim inert and ray tracing off - a much larger finding that reframes everything downstream |
+
+Note the reference already collected: `d3d9.dll` renamed away with `ffp=0` renders correctly. So
+this run isolates Remix's own rasteriser as the only remaining difference.
+
+    sr3-rtx.ini  0f51f473be7bbe67eb8e5d9963315532   ffp=0
+
+### Remix is NOT breaking the game
+
+User, with `ffp=0` (shim inert) and `rtx.enableRaytracing = False`: *"the game now renders almost
+entirely correct. its exactly as when we first install rtx remix. there is some zfigting on the
+ground and water and shadows are invisible."*
+
+So Remix's rasterised passthrough is sound, and the residual z-fighting and missing shadows are the
+stock Remix baseline rather than anything this project introduced. **The shim is not damaging SR3's
+rendering. The fault is entirely in what we DO to draws** - which is the tractable case, and one
+whose fix is already identified.
+
+That also retires the question the user raised, with an actual reference frame rather than an
+argument.
+
+### The working configuration, reassembled
+
+    ffp=1  hiddenPassMode=2  screenSpaceMode=0  skipDeferredGBuffer=1  dedupAll=1  atlasSnoop=1
+    rtx.useVertexCapture = True   rtx.enableRaytracing = True
+
+Both halves of the bake are satisfied here: Remix executes the game's shader draws (capture on) and
+the shim stops skipping the composite quads (`screenSpaceMode=0`). This is the state that measured
+`atlas 2048x1024 mean 182.7` with the full character texture, tattoos and all, dumped and looked at.
+
+    sr3-rtx.ini  6891bbc483dceb4bb8cbf757c6ac33a4
+    rtx.conf     d7e9c7ec79bc7208166f00ba8a56565a
+
+### What to expect, and what remains
+
+Capture-on was turned OFF four sessions ago because it makes Remix reconstruct shader-driven draws,
+which doubled geometry and caused z-fighting. Those costs are expected to return, and they are now
+a KNOWN price for a working character rather than an unexplained regression. The tools for them
+already exist and are proven - `dedupAll`, `skipDeferredGBuffer`, `hiddenPassMode` - and the atlas
+mean is the guard that says immediately if any of them breaks the bake again.
+
+## 2026-08-29 - "extract information, do not break the game's render"
+
+User, after seeing the world drop out at some angles: *"we need to make sure that instead of
+breaking the game render, we are just extracting information."*
+
+That is the right architectural statement for this shim and it should have been the design rule
+from the start. Every `Disp::Skip` removes a draw from SR3's own framebuffer and every `Convert`
+replaces one. Both are destructive, and the `ffp=0` run proved the game renders correctly when
+left alone.
+
+### Where the current state stands
+
+    ATLAS: 2048x1024 mean 182.7 | 27.5 draws/frame bound a snooped copy    <- CHARACTER FIXED
+    FFP converted 384/frame (17.3%)                                        <- baseline is 31.6%
+    SKIPPED entirely 1632/frame
+
+The character texture problem is solved and holding. What is broken is world coverage: 17.3% is
+inside the band the docs record for both black-world regressions (11-16%), which is exactly the
+"most of the world stops rendering at some angles" being reported.
+
+### The assumption the whole conversion machinery rests on has never been re-tested
+
+From the top of YOUR-INSTRUCTIONS.md:
+
+> "Without it, Remix does not path-trace SR3 at all - measured 2026-08-17 by running with ffp=0,
+> which produced a completely unmodified rasterised game."
+
+**That was measured on 2026-08-17 and never re-checked.** Vertex capture is the mechanism by which
+Remix raytraces shader-driven draws, and its state has changed twice since. If capture-on lets
+Remix raytrace the game directly, the shim need not convert or skip anything at all - the user's
+principle becomes achievable outright, the black-world failure class disappears with the rules that
+cause it, and the character stays fixed because the bake needs only capture-on.
+
+Testing it costs one ini line, and it is the single highest-leverage unexamined assumption in the
+project.
+
+| result | consequence |
+|---|---|
+| the world path-traces | the conversion machinery is unnecessary; the architecture collapses to "capture on, skip nothing, snoop the atlas" |
+| flat rasterised game | conversion IS required and the 08-17 measurement stands; the work is raising coverage from 17.3% toward 31% without skipping the composite quads |
+
+    sr3-rtx.ini  259720dc7436ab1f799f7f407025c4f3   ffp=0, capture ON, raytracing ON
+
+### The conversion machinery IS required - clean negative, and worth the run
+
+`ffp=0` with `rtx.useVertexCapture = True` and ray tracing ON produced the **unmodified rasterised
+game**. So vertex capture alone does not make Remix raytrace SR3, the 2026-08-17 measurement still
+stands, and the shim's conversion is load-bearing.
+
+That was the single largest unexamined assumption in the project and it is now re-verified under
+current conditions rather than inherited from a week-old note.
+
+Also observed in that state: low frame rate and wrong exposure. Both are Remix rasterising the
+game with the shim inert, so neither is attributable to the shim, and neither is representative of
+the path-traced configuration.
+
+### On "render normally and just do not display it"
+
+The right shape, and the shim already holds the pieces - `Hook_SetRenderTarget` records slot 0's
+size and `HookDevice` records the back-buffer size, so "is this draw writing the screen" is
+answerable. The obstacle is a recorded dead end, not a missing capability:
+
+> **Skipping the composite quad.** It is the only draw that writes the back buffer, so the image
+> freezes at a healthy 56 fps.
+
+So the final composite cannot simply be dropped. Worth returning to, with that constraint in mind,
+once coverage is healthy.
+
+### The live problem: coverage, and it should be diagnosed from the failure
+
+    FFP converted 384/frame (17.3%)    <- baseline 31.6%; both black-world regressions sat at 11-16%
+    not converted: untextured 1110, other-camera 261, screen-space 82, vertex-format 71,
+                   ortho 16, mirrored 15
+    SKIPPED entirely 1632/frame
+
+`untextured 1110/frame` dominates. But a steady-state average cannot say why the world vanishes AT
+A PARTICULAR ANGLE, and this project has repeatedly gone wrong by reasoning from frame averages
+about a condition that only occurs sometimes.
+
+**The dump has to be aimed at the failure.** `captureKey=0x78` (F9) re-arms the frame dump and
+`dumpFrame=60` makes it land about a second later, so pressing F9 while the world is missing
+captures the frame that is actually broken. That is how the head bugs were finally caught.
+
+    sr3-rtx.ini  62bcf336afbfb8d2ce283adf3fe26c57   ffp=1, capture ON, screenSpaceMode=0
+
+## 2026-08-29 - turning capture back ON invalidated a set of decisions made FOR capture-off
+
+User: *"why are you regressing in the project. we wrote all the facts in the project files. why not
+see those?"*
+
+Correct, and the answer was in this file. `rtx.useVertexCapture = False` was not one setting; it
+was a PREMISE, and at least three decisions were taken because of it. Turning capture back on for
+the character bake invalidated all of them at once, and they were carried forward unexamined.
+
+| decision | why it exists (quoted from YOUR-INSTRUCTIONS.md) | status with capture ON |
+|---|---|---|
+| `forceOcclusionVisible=1` | *"SR3 does its own GPU occlusion culling and reads the depth prepass back ... Capture-off IS a global skip"* - 5330 draws/frame ON vs 1426 OFF, 73% of the game's own submission gone | **wrong.** The prepass is no longer skipped, the game culls correctly on its own, and forcing every query visible only makes it submit geometry it would have culled. The same section names the price: *"the game no longer culls anything, so more geometry is submitted than it would normally draw"* |
+| `hiddenPassMode=2` | *"became viable"* because capture-off already removed unconverted draws | still required, and now doing that job alone |
+| `skipDeferredGBuffer` returning PassThrough | *"pass-through submits them to the device exactly as before ... and with vertex capture off Remix never sees them"* | **the premise is gone.** With capture ON, Remix DOES see passed-through draws, so this no longer hides the character G-buffer copy from the path tracer |
+
+Also recorded, and relevant to what to expect: *"no configuration with `rtx.useVertexCapture` ON
+and no duplicate copies"*, and capture-off was *"the only mechanism that removes unconverted
+draws"*.
+
+### Changed
+
+`forceOcclusionVisible=0`. It is a compensation for a condition that no longer exists, and it is a
+direct candidate for the low frame rate - it forces SR3 to submit geometry it would correctly cull.
+
+### Method note
+
+This is the failure the "Read the code you already have before instrumenting" section already
+describes: *"The occlusion-culling breakthrough was sitting in a comment above `hiddenPassMode` the
+whole time."* Same section, same setting, and this time the fact was in the handoff document rather
+than a comment. I proposed another run before re-reading what a change of premise invalidated.
+
+    sr3-rtx.ini  e2a867a5e0a6dc87121deb97e06095bc   forceOcclusionVisible=0
+
+## 2026-08-29 - reading the file instead of re-deriving it
+
+User: *"again you are not checking everything we have already done and documented ... we did force
+occlusion visible because everything that is in the view frustum gets culled because the game
+thinks the camera is occluded, which it is."*
+
+Correct on both counts.
+
+**`forceOcclusionVisible=1` restored.** I had removed it on the reasoning that it only compensates
+for capture-off being a global skip. That is not the whole reason: the game's occlusion queries
+report the camera as occluded - which it genuinely is - so everything in the view frustum gets
+culled. The setting is required regardless of capture state. Reverted immediately.
+
+### What the file already says, and what it settles
+
+From "The hiding problem", corrected 2026-08-21:
+
+> "No texture-tag mechanism suppresses a vertex-captured draw. **There is no configuration with
+>  vertex capture ON and no duplicates**, and looking for one is a dead end."
+
+and from a real frame in the same section: **242 composite draws a frame**.
+
+So with capture ON the ONLY mechanism that keeps a draw away from Remix is `Disp::Skip` - never
+reaching the device. `screenSpaceMode=0` passes all 242 through, and every one is reconstructed by
+Remix and painted over the path-traced world. **That is the reported "some angles in some areas
+make most of the world stop rendering", and it was predictable from this file without a run.**
+
+### compositeToTexturePass re-enabled, and the 08-28 revert was premature
+
+The narrow form of what `screenSpaceMode=0` did wholesale: pass through only the composites whose
+render target is NOT screen-sized, leaving the 2560x1440 resolve chain and the back-buffer
+composite skipped. Measured on 08-28: 357 screen-sized untouched, 41 off-screen SKIP -> PASS.
+
+It was reverted as *"fired exactly as measured and fixed nothing"*. **That verdict was reached with
+`rtx.useVertexCapture = False`** - under which the bake is broken by capture alone, so no
+disposition rule of ours could have fixed it. The rule was never given a condition in which it
+could succeed.
+
+Two independent causes again, and the same trap as before: a correct rule tested while the other
+cause was still broken, then discarded.
+
+### The configuration now
+
+    ffp=1  hiddenPassMode=2  screenSpaceMode=2  compositeToTexturePass=1
+    forceOcclusionVisible=1  atlasSnoop=1   rtx.useVertexCapture = True
+
+Each element is doing one documented job: capture ON so the bake executes;
+`compositeToTexturePass` so the off-screen composites survive the shim; `screenSpaceMode=2` so the
+242-draw screen chain stays skipped and Remix cannot reconstruct it; `forceOcclusionVisible=1`
+because the game culls the frustum otherwise.
+
+    sr3-rtx.ini  c1c80e108eafa7a6e0e9f43d70336483
+
+## 2026-08-29 - cameraOnly: the architecture that adds instead of removing
+
+User: *"why cant we render everything properly off screen so anything that writes into composit
+quads can still function but are not being shown to us. and then we path trace the stuff we need
+without touching the game render."*
+
+The answer is that we can, and the reason it was never tried is a measurement fault.
+
+### The confound
+
+`ApplyTransforms` is the only caller of `SetTransform(D3DTS_VIEW/PROJECTION)` for the scene, and
+it is invoked from exactly ONE place - inside the conversion path. So `ffp=0` removes the geometry
+conversion **and the camera** at the same time.
+
+From docs/shader-map.md:
+
+> "Remix reads worldToView/viewToProjection from SetTransform and NEVER from shader constants.
+>  SR3 renders through shaders, so wherever it doesn't also set the fixed-function transforms,
+>  Remix has no camera."
+
+So the 2026-08-17 test behind the whole conversion architecture -
+
+> "ffp=0 with capture on produces a rasterised game and no path tracing at all ... The
+>  fixed-function conversion IS the path-traced world, entirely."
+
+- could not distinguish **"Remix needs our converted geometry"** from **"Remix needs a camera, and
+only the conversion path sets one"**. I repeated that exact test on 2026-08-29, with the same
+confound, and drew the same conclusion. Two runs spent re-confirming an ambiguity instead of
+resolving it.
+
+### What cameraOnly does
+
+Watches c28 (`projTM`, a FUSED view-projection) and c48 (`IR_World2View`, the pure view matrix) -
+both invariant across all 7,276 shaders in the corpus - rebuilds the pair, and calls SetTransform
+once per camera CHANGE. Then returns `Disp::PassThrough` for every draw, ahead of every rule that
+can skip, hide or convert.
+
+Geometry comes from `rtx.useVertexCapture = True`.
+
+**Nothing is skipped, hidden or replaced.** This is the only configuration in the project that
+cannot black out the world or break the character bake, because it never removes anything - which
+is precisely the constraint the user has been stating.
+
+    CAMERA ONLY ...: N camera changes applied over M draws, R refused for unusable constants
+
+| result | consequence |
+|---|---|
+| the world path-traces | the architecture works; the skip/hide/convert machinery and its entire failure class become unnecessary |
+| flat rasterised, N>0 | a camera is not sufficient, Remix does need the converted geometry, and the 08-17 conclusion stands on its own merits - now actually tested |
+| N = 0 | c28/c48 never held a usable pair and the mode did nothing |
+
+    sr3-rtx.asi  b28a5b2cdac60f7c4e59ad1b1beb7af5
+    sr3-rtx.map  ba0d36e841dec43859523bf281d8e1ec
+    sr3-rtx.ini  b61ac0737063df9f19dd8cfbbc779b89   cameraOnly=1
+
+## 2026-08-29 - cameraOnly WORKS. The 08-17 premise is disproven.
+
+User: *"the world does path trace but we have the issues that we had before like the shapes around
+our character, the world not being textured right."*
+
+**The world path-traces with the shim touching not one draw.** So the conclusion this entire
+architecture was built on -
+
+> "ffp=0 with capture on produces a rasterised game and no path tracing at all ... The
+>  fixed-function conversion IS the path-traced world, entirely."   (2026-08-17)
+
+- is wrong. Remix never needed the converted geometry. It needed a CAMERA, and `ApplyTransforms`
+was only ever called from inside the conversion path, so every test of that premise removed both
+at once.
+
+That is the largest single correction in the project's history, and it was found by reading the
+call sites rather than by running the game.
+
+### The two remaining symptoms are the two problems the conversion was built to solve
+
+Both already diagnosed in this file, neither requiring geometry conversion to fix:
+
+| symptom | documented cause |
+|---|---|
+| "the world not being textured right" | *"Remix cannot read SHORT2 texcoords and DISCARDS them"* - `[rtx-interleaver] Unsupported texcoord buffer format (80)`, VkFormat 80 = `R16G16_SSCALED` |
+| "shapes around our character" | the geometry prepass reaching Remix as a second surface |
+
+### The texcoord fix now runs in cameraOnly, and it is not a modification of the render
+
+`InstallFloatUV` factored out of the convert path and called for pass-through draws too. Checking
+what it writes before reusing it mattered:
+
+    // RAW short values widened to float, NOT scaled.
+    dst[i * 2 + 0] = static_cast<float>(t[0]);
+
+A SHORT2 declaration delivers exactly those raw values to a shader, so the game's own vertex
+shader reads identical numbers through either declaration. **It is a change of representation, not
+of the render** - which is what makes it legitimate under "do not touch the game render", and the
+only thing cameraOnly does to a draw.
+
+    sr3-rtx.asi  72b03b959498d6606963eecc10c8c524
+
+## 2026-08-30 - reading SR3's own pass structure instead of inferring it
+
+User: *"why cant we render everything properly ... we should know exactly how the game renders ...
+start disassembling the exe."*
+
+Done, statically, with radare2 + pefile. Results in `docs/engine-map.md`; the operative findings:
+
+**SR3 is a command-buffer renderer with a dedicated render THREAD.** The game thread produces
+command blocks into a ring; a consumer at `0x0049DE20` takes a 24-byte descriptor, sets the block
+bounds, and runs an opcode loop at `0x0049DED2`:
+
+    opcode = *readPtr;  if (opcode < 74)  table[opcode]();   readPtr advanced by the handler
+
+The dispatch table is 74 entries at `0x013509F8`; draws are opcodes 37, 41, 42, 43; a draw command
+is 28 bytes. `SetRenderTarget` is op 9. **Ops 55/56/72 call `GetRenderTargetData`** - the engine
+issues GPU->CPU readbacks as render commands, which is the mechanism behind the character bake.
+
+**All four draw handlers test one global byte, `0x03395EA4`**, and skip the draw when it is set.
+It is written at `0x0047CEBB` as `sete cl` from a visibility test at `0x0047C800`. So SR3 decides
+per object whether it is visible and disables drawing with a single flag. That is the engine's own
+culling, at instruction level, and it is exactly what the user said: everything in the frustum gets
+culled because the game believes the camera is occluded. **`forceOcclusionVisible` is not a
+workaround for capture-off; it is what keeps this flag clear.** Removing it on 08-29 was wrong.
+
+**This also explains the multi-threading** the project measured but never accounted for - "the game
+locks vertex buffers from more than one thread", 272 locks a frame, proven by a crash dump. There
+is a producer thread filling buffers and a consumer thread submitting them.
+
+### The classification axis this project has been approximating
+
+Every D3D9 call the shim sees comes from a handler running inside one command block, and the block
+is identified by `[0x02E5D648]` - readable at any draw. Two draws in the same block are in the same
+submission unit. That is a fact the engine writes down, not an inference from samplers, render
+targets or shader output signatures.
+
+`screenSpaceMode`, `skipDeferredGBuffer`, `compositeToTexturePass` and every prepass test are each
+attempts to reconstruct that information from the flattened stream. Three of them have blacked out
+the world.
+
+### Shipped: the reader
+
+Read-only, two pointer reads per draw. Guarded the way engine-map.md's own lesson demands - *"verify
+a static map against the live process before writing to it"* - after that document recorded a base
+mismatch caught by exactly such a check:
+
+- the host module must be `SaintsRowTheThird.exe`;
+- its base must be `0x00400000` (`RELOCS_STRIPPED`, no `DYNAMIC_BASE`, confirmed live 08-15);
+- every address must sit in a committed readable page, by `VirtualQuery`.
+
+Any failure disables the feature permanently and says so. Nothing is written.
+
+    COMMAND BLOCKS ...: N blocks/frame over F frames, D draws attributed
+      this frame: N blocks
+        block 0x........ :  1234 draws  (opcodes a..b)
+      engine draw kill-switch (0x03395EA4) was SET on K draws
+
+    sr3-rtx.asi  55b5a6afe4d463e8eaef76a05fbb2b85
+    sr3-rtx.map  a826a8256961cc1308a197242e927145
+
+### The crash was a Vulkan OOM inside Remix, and cameraOnly is why
+
+    err: Size: 33554432                          (a 32 MB allocation failed)
+    err: Heap 1: 33536 MB allocated, 32970 MB used, 31571 MB total
+
+No `sr3-rtx-crash.dmp` was written because the fault was not in our process. **33.5 GB allocated
+against a 31.5 GB heap.**
+
+Structural, not a leak: `cameraOnly` skips nothing, so with vertex capture on Remix builds geometry
+for EVERY draw in the game - 2,320 a frame including every prepass, composite and UI quad. The
+capture-off section already measured capture-on at 5,330 draws/frame reaching Remix; cameraOnly
+removes even the filtering that remained.
+
+**So the architecture is right and incomplete.** "Add a camera, touch nothing" gives a path-traced
+world, but Remix cannot be handed the entire submission stream. It needs selective filtering of
+draws Remix does not need - without removing draws the ENGINE reads back, which is the constraint
+rule 1 states and which the command-block listing exists to satisfy.
+
+Also of note: **no "Unsupported texcoord buffer format (80)" warning appeared in that run at all**,
+only `color0 format (37)`. Whether that is because `InstallFloatUV` converted them or because
+vertex capture never reads the input declaration is not yet established.
+
+### Two bugs of mine in that build
+
+**1. The command-block listing was always empty.** `ResetCommandBlocks()` was called near the top of
+`Hook_Present` and the frame report runs LATER in that same function, so the listing was wiped
+before it printed - "this frame: 0 blocks" while the game submitted 2,320 draws a frame. Same class
+as the destructive bucket-pop caught in the DIFFUSE_COLOR report before shipping; this one shipped.
+Now cleared on the first draw of a frame instead.
+
+**2. `InstallFloatUV` ran on every pass-through draw in cameraOnly** - 2,320 a frame and 6,252 D3D9
+vertex buffers created across the 32->64-bit bridge, against ~700 on the convert path. A
+contributor to the OOM, though not the dominant one. Moved behind `cameraOnlyFloatUV`, default OFF.
+
+    sr3-rtx.asi  2e569b585ba5e7ddff87e75f7cf0b778
+    sr3-rtx.map  f0234595fd05c13ddf3307c83c8db5f1
+    sr3-rtx.ini  b0fcafc70dcee0f515fe27f217fbcb3f
+
+### Lookahead built - rule 1 becomes a lookup instead of an inference
+
+The three remaining ring-descriptor fields carry no pass label (two are write-only globals with a
+single reference each; the third is a completion callback), and the blocks are 16 KB pool chunks
+0x4000 apart - allocation, not passes. That line is closed.
+
+What the command buffer DOES offer is lookahead: the block is fully built before the render thread
+starts it. Per-opcode sizes were extracted statically from each handler's own advance of the read
+pointer - most constant, six computed from a count inside the command - and are tabulated in
+docs/engine-map.md.
+
+So `GetRenderTargetData` (ops 55/56/72) is now VISIBLE AHEAD OF EXECUTION. A block containing one
+is a block the engine reads back, and nothing in it may be skipped. That is rule 1 stated by the
+engine rather than guessed at from samplers and render targets - the guessing that produced three
+black-world regressions.
+
+    BLOCK SCAN ...: N blocks walked, C commands | D draws, T SetRenderTarget, R GetRenderTargetData
+      X blocks contain a READBACK - those may never be skipped | Y walks stopped early
+
+`Y` is the honesty check: unresolved opcodes (7, 43, 56, 60, 72) stop a walk rather than guess a
+size, because a wrong size desynchronises every command after it. If more than half the walks stop
+early the report says so and the counts are lower bounds.
+
+    sr3-rtx.asi  f9b98e8550f46104d2f2cf5a6a3e7573
+    sr3-rtx.map  5d0caaabca8f98106c6205b78caa369f
+
+## 2026-08-30 - session close: what this session established
+
+Documented across `docs/YOUR-INSTRUCTIONS.md` (rewritten "STATE, 2026-08-30" section),
+`docs/engine-map.md` (two RE addenda) and `docs/HANDOFF-PROMPT.md`.
+
+### Findings, in order of how much they change the project
+
+1. **The founding premise was false.** "The fixed-function conversion IS the path-traced world,
+   entirely" (2026-08-17) could not have been established by the test that produced it:
+   `ApplyTransforms` is the only caller of `SetTransform` for the scene and runs solely inside the
+   conversion path, so `ffp=0` removed the camera along with the geometry. Remix reads the camera
+   only from `SetTransform`. Given a camera plus vertex capture, **Remix path-traces SR3 with the
+   shim converting nothing** - confirmed on screen.
+
+2. **The character texture is solved, with two independent causes.** SR3 bakes each character into
+   one 2048x1024 X8R8G8B8 DYNAMIC texture by locking each mip level's SURFACE. Capture-off alone
+   blacks it out; the shim skipping the composite quads alone blacks it out. Testing one at a time
+   is why it looked impossible for two days. Verified at `mean 182.7`, dumped and looked at.
+
+3. **SR3's renderer is reverse-engineered.** Command-buffer architecture with a dedicated render
+   thread, 74-opcode dispatch table at `0x013509F8`, per-opcode command sizes, the dispatcher at
+   `0x0049DE20`, and one global byte `0x03395EA4` that disables all four draw commands - the
+   engine's own culling, and the instruction-level proof that `forceOcclusionVisible` is
+   load-bearing. Ring descriptors carry no pass identity; that question is closed.
+
+4. **Lookahead exists now.** A command block is fully built before execution, so
+   `GetRenderTargetData` is visible ahead of time and rule 1 becomes a lookup.
+
+### Open
+
+- `cameraOnly` OOMs Remix (33.5 GB) because it filters nothing. The block scan's readback count is
+  the candidate filter and has not been read yet.
+- Whether the SHORT2 texcoord conversion is needed in `cameraOnly` - no format-80 warning appeared
+  in that run, but the cause is unconfirmed.
+- Performance, untouched all session.
+
+### Not to be repeated
+
+`rtContentProbe` froze the game twice (default OFF, do not enable). `d3d9.allowDiscard=False` and
+`d3d9.apitraceMode=True` are verified-parsed negatives. Restoring the 08-18 rtx.conf changed
+nothing. With `d3d9.dll` renamed away the game renders correctly, so the game, save, character mods
+and display settings are all cleared.
+
+State is deployed and hash-verified; backup at `D:\SR3RTXREMIXCOMP-backup-2026-08-29`.
+
+
+## 2026-08-30 15:47-15:52 - cameraOnly run with the block walker: the readback filter is empty, the render-target filter is not
+
+Run: ~10,800 frames, ~5 minutes, clean exit. NO OOM - the previous 33.5 GB blowup was
+`cameraOnlyFloatUV` creating 6,252 float-UV buffers on pass-through draws. Gated off, it is gone.
+Remix log has no memory diagnostic at all this run; exit is the normal dxvk teardown message.
+
+### The block walk is validated
+    200,839 blocks walked | 132,204,771 commands | 0 walks stopped early
+`CommandSize()` covers every opcode SR3 actually emits in gameplay. The walk never desynchronised.
+The unresolved opcodes (7, 43, 56, 60, 72) are never emitted during play, so they cost nothing.
+This makes the lookahead reader trustworthy as a source of facts, not just a probe.
+
+### FINDING: the engine never reads back a render target during gameplay
+    0 GetRenderTargetData (ops 55/56/72) in 132,204,771 commands
+    0 blocks contain a READBACK
+"A draw whose result the engine reads can never be skipped" is TRUE and VACUOUS. Nothing is read
+back, so the rule constrains nothing and cannot be used as the cameraOnly filter. Closed by
+measurement. Do not re-derive this.
+
+Corollary, and this is the useful half: the character atlas is NOT built by readback. The fill probe
+this same run shows texture LockRect 2, SURFACE LockRect 36, UpdateTexture 0, UpdateSurface 0,
+StretchRect 0, ColorFill 0. It is a CPU->GPU upload per mip surface, then sampled on the GPU. The
+constraint on skipping is GPU-side sampling, not CPU readback.
+
+### FINDING: the engine declares its own pass structure, ahead of execution
+    797,612 SetRenderTarget (op 9) = ~74 per frame
+Op 9 is 0x0C bytes and sits in the same walk. Because a block is fully built before the render
+thread executes it, every draw can be attributed to the render target the ENGINE names for it,
+before it runs. That is the pass identity that screenSpaceMode, hiddenPassMode, skipDeferredGBuffer
+and every prepass heuristic have been reconstructing from samplers and shader output counts - each
+of which has blacked out the world at least once. This is the replacement for all of them.
+
+### Performance in cameraOnly
+    frame 27.0 ms avg (37 fps), worst 154 ms | shim 0.49 ms avg = 1.8% of frame, worst 1.9 ms
+    inside real Present 4.56 ms avg | 93 frames >=33 ms of 600, 2 >=100 ms
+Down from ~57% of frame time when converting. Converting nothing is nearly free; the remaining cost
+is Remix and the game.
+
+### CORRECTION to docs/engine-map.md
+0x02E5D644 holds the PREVIOUSLY dispatched opcode, not the current one. Evidence: across every
+block listing, the opcode range seen during draws is 20..35 (SetStreamSource 35,
+SetVertexShaderConstantF 24, ops 20/34) and NEVER 37/40/41/42, which are the draw opcodes
+themselves. The global is updated at the end of a loop iteration.
+
+### Other state this run
+- engine draw kill-switch 0x03395EA4 SET on 0 draws - forceOcclusionVisible is holding.
+- blocks are 16 KB apart (0x4000) and carry 46..302 draws each; ~22-32 blocks/frame.
+- atlas snoop captured 6 atlases with real pixels (2048x1024 mean 182.7, 1024x512 mean 169.6) but
+  uploaded 0 copies and 0 draws bound one. Expected: in cameraOnly nothing is converted, so the
+  game binds its own atlas and the snoop is correctly inert.
+- VB LOCK HOOK 77,829 invalidations deferred, 22,949 coalesced, 0 allocations failed.
+
+## 2026-08-30 - the black world at certain angles is the CAMERA, not the skip rules
+
+### The elimination
+User reported, for the cameraOnly run above: world goes black at some angles. In cameraOnly the
+shim converts nothing, skips nothing, hides nothing - Classify returns PassThrough ahead of every
+rule and the report confirms it: converted 0/frame, skipped 0/frame, hidden 0/frame, prepasses
+hidden 0/frame, demoted 0/frame. The shim removed NOTHING for ~10,800 frames and the world still
+went black.
+
+So the classification rules are eliminated as the cause. Four sessions blamed them - screenSpaceMode,
+hiddenPassMode, skipDeferredGBuffer, the prepass rules - and this is the first run that could tell
+the difference, because it is the first one in which none of them executed.
+
+### The cause
+Setting the camera is the only thing the shim does in cameraOnly, and it was doing it 11.5 times a
+frame: 124,566 DISTINCT view/projection pairs over 10,800 frames, pushed into SetTransform
+indiscriminately in draw order. Shadow cascades, the water reflection, cubemap faces, the main view.
+Remix's CameraManager has to choose one. Its log shows the strain from its own side:
+
+    warn: [RTX] CameraManager: FOV of a camera changed between frames
+    info: Camera cut detected on frame 1416 / 2471 / 2508
+
+At some angles it settles on a camera whose frustum does not contain the scene.
+
+### The fix - cameraMainViewOnly=1, built and deployed, NOT YET RUN
+Three discriminators, each from state the ENGINE sets, none inferred from shader names or
+render-target indices (both recorded dead ends):
+  1. SIZE - render target is the back buffer's size. Shadow atlases, the light buffer and the
+     half-res post chain are not. g_rt0Width/Height already carry this from the SetRenderTarget
+     hook, so no extra bridge round trip.
+  2. PERSPECTIVE - IsPerspective() on _34/_44. Full-res post and UI quads are orthographic.
+  3. HANDEDNESS - RotationDeterminant(view) > 0. A water reflection mirrors and flips it; this is
+     already documented and already used by skipMirrored for the same reason.
+
+Failure mode chosen deliberately: reject everything in a frame and nothing is set, so Remix keeps
+the last camera. A stale camera lags; it does not black out.
+
+### The control ships with the change
+Per-frame census of every distinct camera: RT size, perspective/ortho, mirrored/upright, draw
+count, accepted/declined. A gate that picks the WRONG camera and one that picks NONE are both a
+black world from the outside, and only the listing separates them. cameraMainViewOnly=0 restores
+push-everything for an A/B without a rebuild.
+
+Census reset is keyed on g_frames at the top of ApplyCameraOnly - the first draw of a frame, NOT
+Present. Resetting in Present wipes the listing before the report prints; that bug shipped once
+already for the command-block listing and cost a session of "0 blocks" readings.
+
+### Deployed
+    sr3-rtx.asi  7975119e177575cb3d879540751aa7ca
+    sr3-rtx.map  73b7dbe9aedf72212de5778935f728ff
+    sr3-rtx.ini  698d80fef8500a0c71270d18fc972e59
+    ffp=1 cameraOnly=1 cameraMainViewOnly=1 hiddenPassMode=2 screenSpaceMode=2
+    compositeToTexturePass=1 forceOcclusionVisible=1 atlasSnoop=1 rtContentProbe=0
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-main-view-camera
+
+
+## 2026-08-31 - the camera gate WORKS; and Remix's own binary closes the tagging route for good
+
+### The camera gate: verified, one camera accepted
+User ran the cameraMainViewOnly build. The census, one frame:
+
+    MAIN-VIEW GATE ON: accepted 9,581,420 draws | declined - not back-buffer sized 2,190,420,
+                       orthographic 0, mirrored 0
+      cam 0: rt  128x128  ORTHO       upright      3 draws -> declined
+      cam 1: rt 2560x1440 perspective upright   5613 draws -> ACCEPTED
+      cam 2: rt 4096x4096 ORTHO       upright      8 draws -> declined
+      cam 3: rt 4096x4096 ORTHO       upright      7 draws -> declined
+      cam 4: rt 4096x4096 ORTHO       upright    165 draws -> declined
+      cam 5: rt  512x288  perspective MIRRORED   765 draws -> declined
+      cam 6: rt  400x288  perspective upright     14 draws -> declined
+      cam 7: rt  400x288  perspective MIRRORED    22 draws -> declined
+      cam 8: rt  400x288  perspective MIRRORED   207 draws -> declined
+
+Exactly one camera accepted, and it is unambiguously the right one. The "which camera" problem is
+solved. Note the by-product: this is also a complete, engine-stated PASS TAXONOMY BY RENDER TARGET -
+shadow cascades are 4096x4096 ortho, reflections are 512x288/400x288 mirrored, the scene is
+2560x1440 perspective. 18.6% of all draws are off-screen passes.
+
+### But the user's symptom moved to the geometry
+"camera only renders everything. it also renders all the geometry from shaders. so just like
+before, the camera is blocked and the character is surrounded with shapes."
+
+Correct, and it follows directly from vertex capture being ON: Remix reconstructs EVERY draw it is
+handed, including shadow-cascade geometry, reflection geometry, light volumes and full-screen
+composite quads. A full-screen quad reconstructed as world geometry sits directly in front of the
+camera - "the camera is blocked". Light volumes and prepass geometry around the player - "shapes
+around the character".
+
+### RE result: Remix declines a draw for exactly THREE reasons
+Scanned the 182 MB `.trex/d3d9.dll` for its compatibility messages. The complete set:
+
+    Trying to raytrace an occlusion query. Ignoring.
+    Trying to raytrace an unsupported primitive topology [N]. Ignoring.
+    Trying to raytrace but not detecting a valid camera.
+
+There is no "this draw is tagged, do not raytrace it". This CONFIRMS FROM THE BINARY what runs
+58-61 established empirically: no texture tag suppresses a vertex-captured draw. `ignoreTextures`
+visualises as a pink/black checkerboard, `hideInstanceTextures` does not apply, clearing all eight
+stages does nothing. Both directions now agree. **Do not spend another run looking for a tag that
+hides geometry - it does not exist.**
+
+Full texture-category list in the runtime, for the record: `ignoreTextures`, `hideInstanceTextures`,
+`ignoreTransparencyLayerTextures`, `uiTextures`, `worldSpaceUiTextures`,
+`worldSpaceUiBackgroundTextures`, `skyBoxTextures`, `terrainTextures` (via `rtx.terrain*`),
+`decalTextures`, `dynamicDecalTextures`, `nonOffsetDecalTextures`, `singleOffsetDecalTextures`,
+`particleTextures`, `beamTextures`, `animatedWaterTextures`, `lightmapTextures`,
+`playerModelTextures`, `playerModelBodyTextures`, `raytracedRenderTargetTextures`,
+`rayPortalModelTextureHashes`. 210 `rtx.*` options total.
+
+### RE result: D3DPERF markers are a dead end
+The exe imports D3DPERF_BeginEvent/EndEvent/GetStatus/SetOptions but has ZERO call sites for all
+four (checked every `call dword [IAT]` in .text against the IAT addresses). Pulled in by a static
+lib, never called. See engine-map.md.
+
+### RE result: the full render-pass class tree, from RTTI
+`rl_d3d_shadow_render_pass`, `rl_d3d_base_render_pass`, `rl_d3d_xray_render_pass`,
+`rl_d3d_motion_blur_mask_render_pass`, `rl_d3d_batched_pass`, `rl_composite_pass`,
+`rl_d3d_render_to_texture_pass` plus eight renderers - all with resolved vtables (engine-map.md).
+
+The catch, and it is decisive: **passes run on the MAIN thread and record commands; the render
+thread executes them.** At a draw hook the stack holds the dispatcher, not the pass. So the class
+tree cannot serve as per-draw identity without pass identity being carried into the command stream,
+and the ring descriptors were already traced and carry none. The render TARGET is what is actually
+available per draw - and per the census above, it is sufficient.
+
+## 2026-08-31 - the magenta/black surfaces: 16 dead marker-era hashes were painting real textures
+
+User's lead: "before turning off vert capture we observed the game is rendering the verts correctly
+but is also overlaying the magenta texture. now the magenta texture is black. i think we assigned
+that texture to the world."
+
+Correct, and it was a live config bug rather than an architecture problem.
+
+### What was there
+    rtx.ignoreTextures      = 16 hashes
+    rtx.hideInstanceTextures = 1 hash (-0x978271113F293CE4, also present in ignoreTextures)
+Per Remix's own description, every object using an ignored texture renders as the IGNORED MATERIAL -
+a pink/black checkerboard, which reads as magenta at distance and as black under a dark exposure.
+Six of the sixteen hashes have NO recorded reason anywhere in the docs. Collisions were rife:
+-0x196FBE2CAB23CB16 was in worldSpaceUi + ignore + particle; -0x6AC1CFA187D094AA in worldSpaceUi +
+ignore; -0x978271113F293CE4 in ignore + hideInstance.
+
+### Why it survived the 2026-08 stale-tag cleanup, and why that reason is now void
+That cleanup removed ten stale category lines but DELIBERATELY kept rtx.ignoreTextures, recorded as:
+
+    "carries the marker hash 0x978271113F293CE4 ... It is load-bearing for ~1,863 marked draws a
+     frame; removing it puts the magenta prepass shells back on screen."
+
+That is no longer true. The marker subsystem was deleted when hiddenPassMode=2 became viable, and
+the current log proves the shim marks nothing at all:
+
+    MARKED with the marker texture 0/frame (refused as unsafe 0/frame, 0 SetTexture calls/frame)
+
+So the list marks no draw of ours; all 16 entries are REAL GAME TEXTURES rendering as ignored
+material. Note also the sign flip: run43's log has 0x978271113F293CE4 POSITIVE, the deployed conf
+has it NEGATIVE - different 64-bit values - so the retained entry may not even be the marker.
+
+### Change
+Both lines removed. Config only, no rebuild, instantly reversible.
+    backup  configs/rtx.conf.before-dead-marker-untag.bak
+    before  d7e9c7ec79bc7208166f00ba8a56565a
+    after   421b35520b662159df313db2a6df3205   (master and deployed both)
+
+Deliberately left alone, to keep this a single-variable test: skyBoxTextures, worldSpaceUi*,
+particleTextures, and rtx.ignoreLights (-0x645CF1DD53FF6357, part of the same smear, but lights
+currently work).
+
+### The general lesson, which has now bitten twice
+A tag added for a mechanism that is later deleted does not become inert - it keeps acting on
+whatever textures it names. When a subsystem is removed, its CONFIG residue must be removed with
+it. The 2026-08-12 entry records the same failure mode ("user's in-game texture clicking silently
+tagged 100+ textures ... invisible effects, felt like nothing happened").
+
+## 2026-08-31 - BASELINE RESTORED. cameraOnly cannot produce a judgable image, and I kept asking for runs from it
+
+User: "i cannot check any of that. things are either rendered wrong or are blocking the camera...
+basically in a similar position to how we started the project."
+
+That is a process failure on my side, not a new symptom. cameraOnly=1 passes EVERY draw through
+with vertex capture ON, so Remix reconstructs shadow geometry, reflection geometry, light volumes
+and gameplay collision shapes all at once. It was built to test ONE architectural claim (does Remix
+need only a camera - yes) and it answered that. It was never a configuration anyone could look at
+and judge a texture change from. I left the project sitting in it and then asked for evaluations
+that the image could not support.
+
+RULE: an experimental mode that degrades the image must be reverted to the last verified-good
+config as soon as it has answered its question. Do not stack a second experiment on top of a
+configuration whose output cannot be assessed.
+
+### Restored
+configs/sr3-rtx.ini <- configs/sr3-rtx.ini.WORKING-character-texture.bak
+(previous experimental ini preserved at configs/sr3-rtx.ini.before-baseline-restore.bak)
+
+    ffp=1 convertSkinned=1 hiddenPassMode=2 screenSpaceMode=0 compositeToTexturePass=0
+    atlasSnoop=1 forceOcclusionVisible=1 injectLights=1 rtContentProbe=0
+    cameraOnly absent -> 0.  cameraMainViewOnly is inert when cameraOnly=0 (IsMainSceneCamera is
+    reached only from ApplyCameraOnly), so the new build is safe to leave deployed.
+
+screenSpaceMode=0 is the recorded fix for the black character skin - composite quads are not
+skipped at all - which is why compositeToTexturePass=0 in this snapshot is coherent rather than a
+regression: it is the narrower gate for the same protection and is redundant here.
+
+### The single change on top of the baseline
+rtx.conf keeps the dead-marker untag from earlier today: rtx.ignoreTextures (16 hashes) and
+rtx.hideInstanceTextures (1) removed. Verified by diff against
+configs/rtx.conf.before-dead-marker-untag.bak - EXACTLY those two keys, nothing else. An earlier
+claim in this session that four keys were dropped was wrong; it came from diffing against the
+WORKING snapshot rather than the untag backup. worldSpaceUi* are present, 77 lines.
+
+### Deployed
+    sr3-rtx.asi  7975119e177575cb3d879540751aa7ca   (unchanged - no rebuild)
+    sr3-rtx.ini  b9c935812c96d35c5830b1f26cc1e0b5
+    rtx.conf     421b35520b662159df313db2a6df3205
+So this run varies exactly one thing against a state whose character texture was previously
+verified: the removal of the dead ignore tags.
+
+## 2026-08-31 - the untag WORKED, and the remaining wrong texturing is ours: DYNAMIC vertex buffers
+
+User: "player skin is textured. the top is textured right but not shoes and other stuff. underwear
+has extra geometry. the wrong texturing is also reflected in with ray tracing off as well."
+
+### Confirmed: the dead ignore tags were painting the character
+Skin went from black to textured with NO code change - only the removal of rtx.ignoreTextures (16
+hashes) and rtx.hideInstanceTextures (1). The 2026-08 decision to keep that list, on the grounds
+that it was "load-bearing for ~1,863 marked draws a frame", was carrying 16 real game textures into
+Remix's ignored material long after the marker subsystem that justified it had been deleted.
+
+### "Also with ray tracing off" is the decisive clue
+It rules Remix out entirely. Whatever is wrong is in the RASTERISED draw, which means it is ours.
+
+### Cause, from the run's own counters
+    SHORT2 texcoords converted to a float2 stream: 314 draws/frame | failures: 83737 convert
+    conversion failures by reason: 0.0 layout, 5.8/frame DYNAMIC source, 0.0 desc, 0 create, 0 lock
+
+EVERY failure is one branch: UvBufferFor() refuses any source vertex buffer carrying
+D3DUSAGE_DYNAMIC. Those draws keep raw SHORT2 texcoords, and SHORT2 is NOT normalised - a stored
+16384 is a UV of 16384, so the texture tiles into noise. Dynamic vertex buffers are what the engine
+uses for per-frame-written character parts: cloth, shoes, accessories (CLOTH: 21.0 draws/frame in
+the same run). "Top textured right, shoes not" is precisely that split.
+
+Note the counter design failure that hid this: five reasons were tracked but only the TOTAL was
+printed on the main line, and the breakdown line was conditional. 83,737 read as a scary aggregate
+for months when it was one branch refusing 5.8 draws a frame.
+
+### Both objections in that refusal were already answered elsewhere in the file
+    "a DYNAMIC buffer must not be read back"  - correct, and the fix does not. RegisterSnoop /
+        SnoopCopy read the copy the VB lock hook already makes of the game's OWN write. Exactly
+        the mechanism the morph stream has used since 2026-08-28.
+    "a conversion of it would be stale immediately" - InvalidateUvBuffers(vb) is ALREADY wired
+        into Hook_VBUnlock (line ~1642), so the converted copy is dropped the moment the game
+        refills the buffer. The staleness guard existed; this path predates it.
+
+### Change: convertDynamicUV (default ON)
+DYNAMIC sources are now registered with the snoop and converted from the snooped copy. The first
+draw on a newly registered buffer finds nothing and WAITS - counted as g_uvDynWaiting, deliberately
+NOT as a conversion failure, so "we cannot do this" and "we have not seen the data yet" can never
+again be summed into one number. New report line:
+
+    DYNAMIC sources (ON): N converted from the snooped copy, M waiting for the game's next write
+    ... plus an explicit warning if registered-but-never-filled, which would mean the snoop is not
+        seeing these locks and the whole approach is wrong.
+
+Set convertDynamicUV=0 in sr3-rtx.ini to restore the old refusal with no rebuild.
+
+### Deployed
+    sr3-rtx.asi  bef8135eafa77cc6f1c1e00c178fd370
+    sr3-rtx.map  5845ffce1c2da94d46e43107d775e3e2
+    sr3-rtx.ini  b9c935812c96d35c5830b1f26cc1e0b5   (unchanged baseline)
+    rtx.conf     421b35520b662159df313db2a6df3205   (unchanged, keeps the untag)
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-dynamic-uv
+
+### STILL OPEN - not addressed by this change
+"underwear has extra geometry". Extra geometry is the duplicate-draw problem: with vertex capture
+ON, every draw the shim does NOT convert is reconstructed by Remix alongside the converted copy.
+This run: 430/frame converted of 1,930 (22.3%), and "not converted: untextured 987, vertex-format
+99, other-camera 164, screen-space 49". Do not conflate it with the UV fix - different cause,
+different fix.
+
+## 2026-08-31 - dynamic UV attempt 1 FAILED as designed, and the warning caught it in one run
+
+    DYNAMIC sources (ON): 0 converted from the snooped copy, 24772 waiting for the game's next
+                          write  <- registered but NEVER filled: the snoop is not seeing these locks
+    failures: 0 convert   (was 83737)
+
+The refusal is gone but nothing converted. The warning that shipped with the change named the
+failure outright, so this cost one run and no guessing. That is the counter design paying for
+itself - contrast the lumped 83,737 that hid the original branch for months.
+
+### Why it failed - read out of the snoop's own comments, not from another run
+`SnoopCopy(vb, 0, whole declared buffer, &fresh)` was wrong twice over:
+
+1. SIZE. Hook_VBUnlock grows c.data only to `offset + size` of what the game actually wrote -
+   its own comment: "Grows to what the game actually writes, which is a fraction of most buffers'
+   declared size." So a whole-buffer request trips `offset + len > c.data.size()` and returns
+   false immediately.
+2. FRESHNESS. Hook_VBLock clears EVERY fresh bit on D3DLOCK_DISCARD. After a partial refill most
+   of the buffer is legitimately stale, so requiring all-fresh over the whole buffer can never
+   pass for a ring the game refills a slice at a time.
+
+Both facts were already written down in this file. I asked for the whole buffer because the static
+path does; a dynamic buffer is not the same object.
+
+### Attempt 2 - convert the SLICE the draw reads
+- Range comes from g_curDrawFirstVertex / g_curDrawVertexCount, the same pair the skinning path
+  uses via VertexRangeFits.
+- SnoopCopy(vb, first*stride, count*stride) - only those bytes, freshness required only there.
+- UvKey now takes (first, count), used for DYNAMIC sources only. A dynamic buffer is a RING: two
+  draws in one frame legitimately read different vertices from it, and keyed on the pointer alone
+  the second draw would be served the first's coordinates. That is exactly the bind-pose cache
+  defect ("each character had the wrong head"), whose key had to become
+  {vb, offset, stride, minIndex, count}. Static buffers pass 0/0 and keep the old key.
+- Entries stay indexed per vertex as stream 0 is (the uv stream binds at offset 0 with its own
+  stride), so entry i always means stream-0 vertex i. Unfilled entries are zeroed rather than left
+  as whatever the allocator returned.
+
+### Deployed
+    sr3-rtx.asi  748c2134fd95ec8efaa8c42879adab23
+    sr3-rtx.map  c6dd47323484fa0d82cc6c3457fcf8a5
+    ini / rtx.conf unchanged (b9c935.../421b35...)
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-dynamic-uv-slice
+
+Falsifier unchanged and still explicit: "N converted, M waiting", with the never-filled warning if
+registration still yields nothing.
+
+## 2026-08-31 - dynamic UV attempt 2 WORKS at the mechanism level
+
+    DYNAMIC sources (ON): 47323 converted from the snooped copy, 21 waiting
+    SHORT2 ... 354 draws/frame | 49589 buffers converted (3.3 MB held, 1 flush,
+                                 47294 invalidated by the game) | failures: 0 convert
+
+The 21 "waiting" are the initial registrations, exactly as the design predicts (a newly registered
+buffer has no snooped data until the game next writes it). 0 conversion failures, down from 83,737
+- every one of which was the DYNAMIC refusal.
+
+Invalidation is working and is load-bearing here: 47,294 invalidations means each dynamic slice is
+rebuilt as the game rewrites it, which is the whole reason the cached conversion is not stale.
+
+### Cost, recorded now so it is not discovered later as a mystery
+    frame 28.0 ms (36 fps) | shim 15.53 ms = 55.4% of frame, worst 171 ms
+    134 frames >=33 ms, 8 >=100 ms of 600 | inside real Present 3.94 ms
+    uv buffer arena flushed at 48 MB (flush #1)
+55% is in line with the conversion path's historical ~57%, so this change did not obviously make
+it worse - but it does create and destroy thousands of D3D9 vertex buffers a second across the
+bridge. If this needs optimising the fix is buffer REUSE (keep the allocation, refill it) rather
+than create/release per invalidation. Not done yet: correctness first.
+
+## 2026-08-31 - UV fix works but was NOT the cause; what the frame dump and the atlas actually show
+
+User on attempt 2: "no change at all", nothing else changed either.
+
+So the SHORT2/DYNAMIC theory is FALSIFIED as the cause of the wrong-textured shoes. The fix is kept
+because it repaired a real defect (83,737 refusals -> 0, 47,323 conversions from the snoop), but it
+must not be credited with anything visual. Do not re-propose it.
+
+### What the frame dump says about the player (dump at frame 1448, player at 96.9 145.7 29.7)
+    211 draws total: 155 SKIP, 54 CONVERT, 2 PASS
+    SKIP reasons: 102 "prepass: shader samples nothing", 52 "prepass: only normal/stipple/depth",
+                  1 orthographic - all legitimate prepass, none of them material draws.
+
+The player BODY is ONE mesh drawn 35 times:
+    v=7977 first=0 vb=49186410 bones=58[0..57] pal=58@d5021 gens=1  tex0=3BD233F0
+    ... with 35 DIFFERENT primitive counts (p=84 .. p=3408)
+i.e. one 7,977-vertex, 58-bone skinned mesh, one texture, and 35 index ranges - one per material
+slot / clothing item. The other ~19 converted draws are separate meshes (head, hair, accessories)
+on their own vertex buffers.
+
+Note for anyone reading the dump: `ps='...'` is the shader's FIRST sampler, `rank=` is the rank of
+the CHOSEN albedo. `ps='Blend_MapSampler' rank=100` therefore means a Diffuse map WAS found and
+chosen - it does NOT mean the blend map is being bound as albedo. I misread this once today.
+
+### The character atlas is CORRECT - dumped and viewed
+chartex-atlas2-2048x1024.raw converted to PNG and inspected: skin, face with makeup, eye, arms,
+legs, floral tattoos, fleur-de-lis, and striped sock/shoe bands ALL PRESENT and correctly
+composited. mean 182.7, 6310/6311 sampled bytes non-zero.
+
+So the atlas content is not the defect, and the atlas snoop is not implicated. Closed.
+
+### Correction to a misleading counter: "atlas 1" is the TITLE SCREEN
+    atlas 1: 1280x768 mean 14.3 of 255
+This is not a character atlas at all. Dumped and viewed: it is the SAINTS ROW THE THIRD / THQ /
+Volition logo screen. Its low mean is correct for a black background with logos, and it should not
+be read as "an atlas that failed to fill". The atlas tracker admits a 1280x768 UI texture on size
+alone. Worth tightening so this number stops looking like evidence of a defect.
+
+### Where to look next, from this run's own counters
+    uv tiling matched to the albedo map 3.5/frame, no pair for it 80.1/frame
+80 draws a frame carry a tiling constant that cannot be matched to the albedo map, so no UV
+transform is applied to them. With one atlas shared by 35 material slots, a missing per-slot UV
+transform would put some slots on the wrong region of a texture that is itself perfect - which is
+exactly the shape of "the top is right, the shoes are not". UNVERIFIED.
+
+## 2026-08-31 - THE REMIX API IS CALLABLE FROM THE SHIM. This changes the architecture.
+
+User: "can we fix some of these data reads with remix logic and skip the engine? and reconstruct
+them ourselves?"
+
+Yes. Verified from the binaries, not assumed.
+
+    .trex\d3d9.dll  (64-bit runtime)  exports  remixapi_InitializeLibrary
+    d3d9.dll        (32-bit BRIDGE CLIENT, the one the game loads, OUR process)
+                    exports  remixapi_InitializeLibrary, remixapi_RegisterCallbacks
+
+The bridge forwards the API, so a 32-bit ASI in the game process can call it. Header is already in
+the tree: tools/vibe-re/rtx_remix_tools/dx/remix-comp-proxy/deps/bridge_api/remix/remix_c.h
+
+### What the interface gives us (remixapi_Interface, remix_c.h:681)
+    CreateMaterial / DestroyMaterial      - WE choose the albedo. Explicitly.
+    CreateMesh / DestroyMesh              - hand over geometry directly
+    SetupCamera                           - a real camera entry point
+    DrawInstance                          - mesh + transform, per instance
+    CreateLight / DrawLightInstance       - real lights
+    SetConfigVariable
+    dxvk_RegisterD3D9Device               - ATTACH TO THE GAME'S EXISTING DEVICE
+    Startup / Present / Shutdown
+
+### Why this dissolves most of the project's standing problems
+Every hard problem in this project comes from one constraint: the ONLY way to tell Remix about
+geometry was to fake a fixed-function draw, or let vertex capture reconstruct one. That constraint
+is what produced:
+
+  - the FFP conversion path and its 64-bone ceiling (MaxVertexBlendMatrixIndex = 8)
+  - "which sampler is the albedo" - AlbedoRank, blanked/white materials, moved-off-stage-0
+  - the SHORT2 texcoord problem (Remix discards VkFormat 80)
+  - vertex capture ON reconstructing EVERY draw: the shapes around the character, blocked camera
+  - the camera derivation from c28/c48 and the cameraMainViewOnly gate
+  - skipping draws at all, which is what broke culling and blacked the world
+
+With CreateMesh/CreateMaterial/DrawInstance none of those apply. We already CPU-skin the character
+(51 skinned draws/frame, 95 meshes cached) - we would simply hand Remix the result instead of
+re-expressing it as fixed function. We already reflect every shader (7,276 of them) and know which
+sampler is the diffuse map - we would name it in a material instead of hoping Remix guesses stage 0.
+
+And nothing is skipped: the game renders exactly as shipped, we describe a PARALLEL scene. That is
+precisely the architecture the user has been asking for since "we need to make sure that instead of
+breaking the game render, we are just extracting information".
+
+Vertex capture can then go OFF - not to suppress anything, but because we no longer depend on it.
+
+### Unverified, and must be tested before committing to this
+1. Whether the BRIDGE's implementation is complete or returns NOT_AVAILABLE for some entry points.
+   The 32-bit client exports the symbol; that is not proof every function is forwarded.
+2. Whether dxvk_RegisterD3D9Device accepts the device Remix itself created for the game.
+3. Whether API-submitted instances coexist with the game's own draws in one frame.
+
+### Proposed order, smallest falsifiable step first
+STEP 1: initialize the API and call SetupCamera ONLY, replacing ApplyCameraOnly's SetTransform
+        hack. Tiny, reversible, and it answers unknowns 1 and 2 outright. If the camera works
+        through the API, everything else is worth building.
+STEP 2: one CreateMaterial + CreateMesh + DrawInstance for a single known object.
+STEP 3: characters (we already have the skinned vertices and the atlas).
+STEP 4: world, lights, decals, particles - the user's own scene contract.
+
+Do NOT start at step 3.
+
+## 2026-08-31 - Remix API step 1 BUILT: initialize + register the device, nothing else
+
+Structures transcribed from bridge_api/remix/remix_c.h, API version 0.5.2 (REMIXAPI_VERSION_MAKE
+0.5.2 = 0x50002). __stdcall throughout. The 21-member remixapi_Interface is declared in full even
+though step 1 calls two of it - one wrong member and every pointer after it is garbage.
+
+Implemented:
+  RemixApiInit(dev)         GetModuleHandleW(L"d3d9.dll") - the BRIDGE CLIENT, never .trex, and
+                            GetModuleHandle not LoadLibrary (a second d3d9 means two runtimes).
+                            InitializeLibrary -> log rc. Then QueryInterface for
+                            IDirect3DDevice9Ex (SR3 creates via CreateDeviceEx) and
+                            dxvk_RegisterD3D9Device -> log rc.
+                            Explicitly checks for NULL entry points and says so: "the bridge
+                            exports the symbol but does not implement the interface".
+  RemixApiSetCamera(v,p)    SetupCamera with REMIXAPI_CAMERA_TYPE_WORLD.
+  RemixApiCameraTick()      same derivation and same IsMainSceneCamera gate as cameraOnly, so a
+                            visual change can only be the API and not a different camera.
+                            Called from Classify ahead of every rule.
+
+Settings: remixApi=1 (default ON, image-neutral), remixApiCamera=0 (default OFF).
+Both documented in configs/sr3-rtx.ini; step 1b is an ini flip with no rebuild.
+
+Report line:
+    REMIX API: InitializeLibrary <rc> | RegisterD3D9Device <rc> | entry points <ALL PRESENT|INCOMPLETE>
+      attached to the game's device. SetupCamera: N calls, M failed, last rc <rc>
+
+Error codes are named, not numeric: SUCCESS, REGISTERING_NON_REMIX_D3D9_DEVICE,
+INCOMPATIBLE_VERSION, NOT_INITIALIZED etc.
+
+### Deployed
+    sr3-rtx.asi  c96199fcc5553946b49a5337767f0d6f
+    sr3-rtx.map  70c2001c594ef7fa1c9afef806cdd562
+    sr3-rtx.ini  27ccbedb171712d39088b086ec676bfb
+    rtx.conf     421b35520b662159df313db2a6df3205  (unchanged)
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-remix-api
+
+### The falsifier
+INCOMPATIBLE_VERSION on init means the bridge implements a different API version - recoverable by
+changing kRemixVersion. NULL entry points, or INCOMPLETE, means the bridge stubs the interface and
+steps 2-4 are impossible through it; that is a real possible outcome and the log says it outright
+rather than leaving it to be inferred from a picture.
+
+## 2026-08-31 - Remix API step 1 result: GATED, not absent. The bridge said so itself.
+
+    remix api: InitializeLibrary FAILED rc=11 (NOT_INITIALIZED)
+
+Not a stub and not a timing problem. bridge32.log, line 20, at 14:40:31:
+
+    err: Remix API is not enabled. This is currently an experimental feature and must be
+         explicitly enabled in the `bridge.conf`. Please set `exposeRemixApi = True` if you
+         are sure you want it enabled.
+
+The bridge diagnosed itself. Confirmed independently: the string `exposeRemixApi` is present in the
+32-bit bridge client d3d9.dll, and bridge32.log line 2 records it trying to open
+"D:\SR3RTXREMIXCOMP\Saints Row 3\.trex\bridge.conf" - a file that did not exist.
+
+### Change: created .trex/bridge.conf with exposeRemixApi = True
+    configs/bridge.conf -> Saints Row 3/.trex/bridge.conf   db55f8142db1db21eb4bdf256f5c4ae5
+Config only for the gate itself; no rebuild was needed for that.
+
+LESSON, and it is the second time today the answer was already written down: read the BRIDGE logs,
+not only remix-dxvk.log and our own. bridge32.log carried the exact remedy, in an err line, from
+the first run that called the API.
+
+### Also fixed: a misleading line I wrote myself
+The step-1 report said "entry points INCOMPLETE - the bridge stubs part of the interface" whenever
+the pointers were null. But a FAILED init leaves the interface all zeroes, so that message asserted
+stubbing on evidence that showed nothing of the kind. Now three distinct states:
+  - init failed        -> "not obtained - init failed, so nothing is known about them"
+  - init OK, non-null  -> "ALL PRESENT"
+  - init OK, null      -> "INCOMPLETE - init succeeded but entry points are NULL", the only case
+                          that is actually evidence of stubbing
+and rc==11 now prints the exposeRemixApi remedy directly in our own log.
+
+### Deployed
+    sr3-rtx.asi  55daca0a00372c6efef4d2f8007b622a
+    sr3-rtx.map  c95e4802b50e3f1cf9524482264d76ea
+    bridge.conf  db55f8142db1db21eb4bdf256f5c4ae5   (NEW)
+    sr3-rtx.ini  27ccbedb171712d39088b086ec676bfb   rtx.conf 421b35520b662159df313db2a6df3205
+Still remixApi=1 / remixApiCamera=0, so the image is unaffected either way.
+
+## 2026-08-31 - STEP 1 ANSWERED: the mesh path is AVAILABLE. SetupCamera is not. Registration is unnecessary.
+
+With exposeRemixApi = True in .trex/bridge.conf:
+
+    remix api: InitializeLibrary OK. entry points:
+        SetupCamera    = 00000000   <- NOT implemented
+        CreateMesh     = 72968B30   AVAILABLE
+        CreateMaterial = 729683F0   AVAILABLE
+        DrawInstance   = 72968FE0   AVAILABLE
+        CreateLight    = 72967AB0   AVAILABLE
+        RegisterD3D9Device = 72969900
+    remix api: RegisterD3D9Device rc=1 (GENERAL_FAILURE)
+
+and bridge32.log line 23 explains the last one outright:
+
+    err: [remixapi_dxvk_RegisterD3D9Device] Not yet supported. Device used by Remix API defaults
+         to most recently created by client application.
+
+### What this means
+1. The API is REAL through this bridge. CreateMesh / CreateMaterial / DrawInstance / CreateLight -
+   everything steps 2-4 need - are implemented.
+2. Explicit registration is NOT SUPPORTED and NOT REQUIRED. The API already targets the game's
+   device, because the game's is the most recently created one. GENERAL_FAILURE here is not a
+   failure to attach.
+3. SetupCamera is NOT implemented. Step 1b is impossible and is abandoned - which costs nothing,
+   because the camera is already solved: the cameraMainViewOnly gate picks exactly one camera
+   (verified 2026-08-31, 5,613 draws on the 2560x1440 perspective view, all others declined).
+
+### Two defects in my own step-1 code, both fixed
+a) The warning tested `!SetupCamera || !CreateMesh || !DrawInstance` and therefore announced
+   "steps 2-4 are not possible through it" on the strength of ONE null pointer that steps 2-4 do
+   not use. Capabilities are now tracked per function group: g_remixMeshReady (CreateMesh +
+   CreateMaterial + DrawInstance) and g_remixCameraAvail (SetupCamera), reported separately.
+b) g_remixDeviceReady was set from the RegisterD3D9Device return code, so a call the bridge does
+   not implement would have disabled a working API. It is now derived from what is actually
+   callable.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)   bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+    sr3-rtx.ini  27ccbedb171712d39088b086ec676bfb   rtx.conf 421b35520b662159df313db2a6df3205
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-remix-capabilities
+
+### Next: STEP 2 - one CreateMaterial + CreateMesh + DrawInstance for a single known object.
+Not started. Do not jump to characters.
+
+## 2026-08-31 - STEP 2 BUILT: one material, one mesh, one instance, entirely through the Remix API
+
+Structures transcribed from remix_c.h: RemixHardcodedVertex (64 bytes - position[3], normal[3],
+texcoord[2], color, 7 pads, all declared because the size is what matters), MaterialInfo,
+MeshInfoSurfaceTriangles, MeshInfo, InstanceInfo, Transform (float[3][4], translation in the last
+column). StructTypes: MATERIAL_INFO=2, MESH_INFO=12, INSTANCE_INFO=13.
+
+What it does, once per frame from Present:
+  - builds ONCE: a 24-vertex / 12-triangle cube (4 verts per face so each face has its own
+    normal) and an emissive material;
+  - then DrawInstance every frame. DrawInstance is a per-frame submission like a draw call, not a
+    persistent registration - issue it once and the cube exists for exactly one frame.
+
+Design choices that are about DIAGNOSIS, not aesthetics:
+  - GREEN, because magenta already means "Remix ignored material" here and would be ambiguous the
+    instant it appeared.
+  - EMISSIVE (intensity 200), because a merely-lit cube could be invisible for lighting reasons,
+    and "invisible because unlit" is indistinguishable from "the API did nothing" - the exact
+    confusion step 2 exists to remove.
+  - 3 units in front of the camera, from the inverse of the recorded main-scene view, so it cannot
+    be mistaken for world geometry.
+
+No textures on the material: remixapi_Path is a wchar_t FILE PATH, not a D3D9 texture. Texturing
+API meshes from the game's own atlases is a separate problem and deliberately not in step 2.
+
+RemixApiCameraTick now records the main-scene view UNCONDITIONALLY (it used to return early unless
+remixApiCamera was on). Step 2 needs the view to place the cube, and SetupCamera is not implemented
+by this bridge anyway, so there is nothing to gate.
+
+Build error caught and fixed: g_remixLastView/g_remixLastViewValid were declared in the step-2
+block, which the patch inserted AFTER RemixApiCameraTick, so both were undeclared at first use.
+Moved beside g_remixCamView with a note saying why they must precede both users.
+
+### Deployed
+    sr3-rtx.asi  0aaa60594b5404baf1edf099f64a2e90
+    sr3-rtx.map  ed4cadb9c5af4194b8a3c6c7018937a0
+    sr3-rtx.ini  fed219fdc1b410051a861a7b0650d0e0
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-remix-step2
+
+### The three outcomes
+  cube VISIBLE                      -> API geometry reaches the path tracer. Steps 3-4 are on.
+  DrawInstance rc=0 but NOT visible -> submissions accepted then discarded: transform convention
+                                       or camera association is wrong. Recoverable.
+  DrawInstance rc!=0                -> named in the log by RemixErrName.
+
+## 2026-08-31 - STEP 2 SUCCEEDED. The cube is visible. This is the turning point.
+
+User: "the cube is visible but it was not bright green. it was gray/black"
+
+VISIBLE is the result that matters, and it settles the architectural question outright:
+
+  * geometry described entirely through the Remix API, with NO D3D9 draw behind it, reaches the
+    path tracer and is rendered;
+  * the transform convention is right - remixapi_Transform float[3][4] with translation in the
+    last column put the cube exactly where intended, 3 units in front of the camera;
+  * the camera association works with no SetupCamera at all (the bridge does not implement it),
+    because the API attaches to the most recently created device, which is the game's;
+  * DrawInstance-per-frame from Present is the correct submission point.
+
+The constraint that produced nearly every hard problem in this project - that geometry could only
+reach Remix as a faked fixed-function draw or a vertex-capture reconstruction - is GONE.
+
+### Why it was grey/black, and it is not a mystery
+remixapi_MaterialInfo has NO albedo field. It carries textures (as wchar_t FILE PATHS), emission,
+sprite-sheet and filter/wrap settings - nothing else. The surface properties live in
+remixapi_MaterialInfoOpaqueEXT: albedoConstant, opacityConstant, roughnessConstant,
+metallicConstant. I did not chain it, so albedo fell to its default and the cube rendered with the
+default surface. The API was working perfectly the whole time.
+
+Emission also did not show, which is worth noting rather than explaining away: emissiveIntensity
+200 with emissiveColorConstant green produced no glow. Possibly emission needs the opaque EXT
+present too, possibly it needs a texture, possibly the intensity is in units this does not expect.
+Deliberately NOT resolved by guessing - the rebuilt cube sets BOTH albedoConstant and emission, so
+the next run separates them:
+    lit green   -> albedoConstant landed, emission did not
+    glowing     -> emission landed
+    grey again  -> neither constant is honoured, and the problem is not which struct carries them
+
+### Change
+RemixMaterialInfoOpaqueEXT transcribed (sType 5) and chained through MaterialInfo::pNext with
+albedoConstant {0.05,1,0.05}, opacityConstant 1.0, roughnessConstant 0.4, metallicConstant 0.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)   ini fed219fdc1b410051a861a7b0650d0e0
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-opaque-ext
+
+### STEP 3 is now unblocked, and the open question changes shape
+Characters: we already CPU-skin them (51 skinned draws/frame, 95 meshes cached) and we already know
+which sampler is the diffuse map from shader reflection. What we do NOT yet have is a way to give
+an API material the game's OWN texture: remixapi_Path is a FILE PATH, so either
+  (a) dump the atlas to disk once and point the material at it, or
+  (b) find whether a D3D9 texture can be handed over some other way.
+That is the next real unknown, and it should be settled before building step 3.
+
+## 2026-08-31 - the invisible-but-glowing cube: alphaTestType 0 means NEVER
+
+User: "the cube is invisible but i do see a green light coming from where it should be."
+
+That is two findings, not one:
+  1. EMISSION WORKS. The green light proves the material is live, emitting, and correctly placed.
+     The earlier "emission did not land" reading was wrong - it never landed because the SURFACE
+     was gone, not because emission failed.
+  2. The surface was alpha-tested away.
+
+### Cause
+remixapi_MaterialInfoOpaqueEXT::alphaTestType is a raw `int` in remix_c.h with no enum beside it.
+Remix mirrors VkCompareOp: NEVER = 0, ALWAYS = 7. The 64-bit runtime carries the default string
+"AlphaTestType alpha_test_type = Always". The struct was zero-initialised, so the material said
+alpha test NEVER PASSES - every pixel discarded, while the emissive property still contributed
+light to the scene. Exactly the reported symptom.
+
+### The general lesson, which cost two runs
+The FIRST cube (no opaque EXT chained) was VISIBLE. Chaining the extension made it invisible.
+Supplying an extension REPLACES Remix's defaults wholesale: inside these structs a zero is an
+INSTRUCTION, not an absence. Zero-initialising a Vulkan-style extension struct and filling in only
+the interesting fields is safe only where 0 is a valid default, and here it is not.
+
+Every field of the opaque EXT is now set explicitly, including the ones that happen to be zero,
+with a comment saying why.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt, alphaTestType = 7 ALWAYS)
+    ini fed219fdc1b410051a861a7b0650d0e0 | rtx.conf 421b35520b662159df313db2a6df3205
+    bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-alphatest
+
+Expected next run: a solid green cube, lit AND glowing. If it is solid but grey, albedoConstant is
+not being honoured and the alpha test was the only problem. If it is still invisible, the alpha
+test was not the cause and opacityConstant or the blend path is.
+
+## 2026-08-31 - STEP 2 COMPLETE, and the texture route answered
+
+User: "it works. i see a lit green cube."
+
+Step 2 is proven end to end:
+  geometry submitted through the API reaches the path tracer | transform convention correct
+  (float[3][4], translation in the last column) | albedoConstant works via MaterialInfoOpaqueEXT |
+  emission works | alpha test understood | DrawInstance-per-frame from Present is the right
+  submission point | no SetupCamera needed - the API binds to the most recently created device.
+
+### The texture question, answered from the header and the runtime
+remixapi_Path is a `const wchar_t*` FILE PATH. There is NO route for a live D3D9 texture:
+dxvk_GetVkImage goes the other way (IDirect3DSurface9 -> VkImage, for reading Remix's OUTPUT), and
+no MaterialInfo extension takes an image handle. The runtime carries both ".dds" and ".png", plus
+"Please make sure all replacement textures have mip-maps" and "A suboptimal replacement texture
+detected", so mips are expected.
+
+So: the game's own textures reach an API material only by being WRITTEN TO DISK.
+
+### Built: the atlas -> DDS -> API material test
+- WriteBgraDds(): uncompressed BGRA8 DDS with a full box-filtered mip chain. DDS rather than PNG
+  because it needs no compression library - header plus raw pixels.
+- ALPHA FORCED TO 255. The atlas is X8R8G8B8, so its alpha byte is undefined; passing it through
+  could hand Remix a fully transparent texture. That would look exactly like the alphaTestType bug
+  already paid for once today, so it is pre-empted rather than diagnosed later.
+- Hooked to the atlas capture, gated on w>=2048 && h>=1024 so it takes the CHARACTER atlas and not
+  the 1280x768 title screen that the tracker also admits.
+- The cube now waits for the atlas (bounded at 1200 frames), then wears it: albedoTexture = the
+  DDS path, albedoConstant white so the texture is not tinted, emission off so a glow cannot wash
+  out the thing being checked. No atlas by 1200 frames -> the green constant cube, so a missing
+  atlas degrades the test rather than deleting it.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini fed219fdc1b410051a861a7b0650d0e0
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-atlas-texture
+Stale sr3-remix-atlas.dds deleted before the run so its presence proves this run wrote it.
+
+### Also found, and it matters more than the texture route
+REMIXAPI_STRUCT_TYPE_INSTANCE_INFO_BONE_TRANSFORMS_EXT (14) carries up to
+REMIXAPI_INSTANCE_INFO_MAX_BONES_COUNT = 256 bone transforms per instance, and
+remixapi_MeshInfoSkinning carries bonesPerVertex + blendWeights + blendIndices. SR3 needs 58 bones.
+So Remix can do the SKINNING ITSELF: hand it the bind-pose mesh once and per-frame bone transforms.
+That retires both the shim's CPU skinning and the 64-bone fixed-function ceiling
+(MaxVertexBlendMatrixIndex = 8) that has shaped this project from the start. Step 3 should use it.
+
+## 2026-08-31 - STEP 2 COMPLETE (lit green cube), and the texture question answered
+
+User: "it works. i see a lit green cube."
+
+alphaTestType = 7 (ALWAYS) fixed it. Step 2 is fully proven:
+    API geometry reaches the path tracer          - the cube renders
+    transform convention correct                  - float[3][4], translation in last column
+    camera association works with NO SetupCamera  - the API uses the game's device implicitly
+    DrawInstance-per-frame from Present           - correct submission point
+    albedoConstant works (MaterialInfoOpaqueEXT)  - green
+    emission works                                - proven by the light cast while the surface
+                                                    was alpha-tested away
+
+### The texture question - ANSWERED from the header and the runtime
+remixapi_Path is `const wchar_t*`, a FILE PATH. There is no texture-handle route:
+  - MaterialInfo carries albedo/normal/tangent/emissive as PATHS only;
+  - dxvk_GetVkImage(IDirect3DSurface9*, uint64_t* out) goes the WRONG WAY - it reads Remix's
+    output into a VkImage, it does not accept a texture for a material;
+  - no other StructType in the API takes an image. The full extension list is 24 entries and the
+    only material extensions are PORTAL, TRANSLUCENT, OPAQUE and OPAQUE_SUBSURFACE.
+The runtime contains both '.dds' and '.png', plus "Please make sure all replacement textures have
+mip-maps" and "A suboptimal replacement texture detected".
+
+So: the game's own textures reach an API material THROUGH A FILE, and that is the only route.
+
+### Also found, and it matters more than the texture question
+REMIXAPI_STRUCT_TYPE_INSTANCE_INFO_BONE_TRANSFORMS_EXT = 14
+    remixapi_InstanceInfoBoneTransformsEXT { sType, pNext, const remixapi_Transform* , count }
+    REMIXAPI_INSTANCE_INFO_MAX_BONES_COUNT = 256
+with remixapi_MeshInfoSkinning { bonesPerVertex, blendWeights, blendIndices } on the surface.
+SR3 needs 58 bones. So Remix can do the skinning itself from a bind-pose mesh plus per-frame bone
+transforms - which retires BOTH our CPU skinning AND the fixed-function 64-bone ceiling
+(MaxVertexBlendMatrixIndex = 8) that has shaped this project since the beginning.
+
+### Built: the texture test, reusing the proven cube
+  WriteBgraDds(path, w, h, bgra)  uncompressed BGRA8 DDS with a FULL MIP CHAIN (box filter).
+                                  DDS rather than PNG because it needs no compression library.
+                                  ALPHA FORCED TO 255 - the atlas is X8R8G8B8 so its alpha byte is
+                                  undefined, and shipping that through would produce an invisible
+                                  texture, i.e. exactly the alpha failure already paid for today.
+  WriteAtlasDdsOnce()             called from the atlas capture, for p.w>=2048 && p.h>=1024 only -
+                                  the 1280x768 capture is the TITLE SCREEN, identified earlier.
+                                  Absolute path beside the exe (Remix resolves it; a relative path
+                                  depends on a working directory this shim does not control).
+  cube material                   if the DDS exists: albedoTexture = it, albedoConstant white,
+                                  emission ZERO (a glowing surface would wash out the test).
+                                  Otherwise the green constant, so a missing atlas degrades the
+                                  test rather than removing it. Bounded wait of 1200 frames.
+
+### Deployed
+    sr3-rtx.asi  ad5e6ab82136c8a5a7421f17bbf8c735
+    sr3-rtx.map  8ca1173055d9a1af81576be21ca967b8
+    ini fed219fdc1b410051a861a7b0650d0e0 | rtx.conf 421b35520b662159df313db2a6df3205
+    bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-atlas-texture
+Stale Saints Row 3/sr3-remix-atlas.dds deleted before the run so its presence proves this run wrote it.
+
+### Outcomes
+  cube wears the character atlas -> the file route works; step 3 is fully unblocked
+  cube is white/untextured        -> Remix did not load the DDS; check its log for a texture
+                                     complaint, and the header/mips are the suspects
+  cube is still green             -> no atlas was captured in time; not a texture failure
+
+## 2026-08-31 - the texture test did not run: a race, not a texture failure
+
+User: "the cube is still glowing green."
+
+That is the third outcome listed for this test - no atlas was available when the cube was built -
+and the log confirms it exactly:
+
+    remix api: wrote the character atlas as ...\sr3-remix-atlas.dds (2048x1024 BGRA8 + mips)
+    STEP 2 CUBE: built (green constant - no atlas was available) | DrawInstance 1024 calls, 0 failed
+
+### The DDS writer is CORRECT and is not implicated
+The file is 11,184,940 bytes. A 2048x1024 BGRA8 mip chain is 12 levels -
+8388608+2097152+524288+131072+32768+8192+2048+512+128+32+8+4 = 11,184,812 - plus a 128-byte
+header = 11,184,940 EXACTLY. Nothing about the format has been tested yet either way.
+
+### The actual defect: a one-shot build against a resource that appears on the game's schedule
+The cube waited up to 1200 frames for the atlas and then built green. But the character atlas is
+only captured once a CHARACTER IS ON SCREEN, which is well after the loading screens that the first
+1200 frames are spent in. The bounded wait did not fix the race, it just hid it behind a timeout.
+
+### Change: rebuild once when the atlas arrives late
+If the cube is already built, untextured, and the atlas becomes ready, destroy the untextured
+material+mesh and rebuild with the texture. Guarded:
+  - runs from Present BEFORE this frame's DrawInstance, so nothing has been submitted against the
+    old handles yet this frame;
+  - the old handles are released only AFTER the new pair is successfully created;
+  - if the textured rebuild fails, the working green pair is restored rather than leaving no cube.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)   map (rebuilt)
+    ini fed219fdc1b410051a861a7b0650d0e0 | rtx.conf 421b35520b662159df313db2a6df3205
+    bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-cube-rebuild
+
+## 2026-08-31 - the cube vanished: the HASH is the identity, and I reused it
+
+User: "i do not see any cube." DrawInstance reported 630 calls, 0 failed, SUCCESS - so the
+submission was fine and the object simply did not exist.
+
+Remix's own log names it:
+
+    info: Ignoring repeated material registration (handle=5923289857198653441)
+
+5923289857198653441 = 0x5233C0BE00000001, the material hash hard-coded in RemixBuildCube.
+
+### What actually happened
+remixapi_MaterialInfo::hash and remixapi_MeshInfo::hash ARE the identity. Registering a second,
+different material under the same hash is refused and the EXISTING registration is handed back. So:
+  1. the textured material was never registered - the green one was returned instead;
+  2. the code then destroyed "the old" material and mesh;
+  3. that destroyed the object the new handle aliased.
+Result: no cube at all, with every return code SUCCESS. A destroy of an aliased handle cannot be
+detected from return codes, which is why this looked like a rendering failure and was not one.
+
+### Fixes
+1. g_remixBuildGen, incremented per build, added to both hashes. Each rebuild is now a genuinely
+   distinct object. (Mesh hash also moved off 0x...00000002 to 0x...10000002 so material and mesh
+   hashes cannot collide with each other across generations.)
+2. The old pair is NO LONGER DESTROYED. Two objects one frame apart on a test path are not worth
+   the risk that just cost a run; leaking one material and one mesh, once, is the cheaper mistake.
+3. The build log now reports the generation, both hashes, and WHICH material was built - it
+   previously said "albedoConstant green" unconditionally, including for the textured build, which
+   would have misled the next reading of it.
+
+Also in the Remix log, and NOT yet attributed:
+    [RTX-Compatibility-Info] Texture 0 without valid hash detected, skipping drawcall.
+    [RTX-Compatibility-Info] Trying to bind a texture to a mesh without UVs. Was this intended?
+The cube does carry UVs (texcoord is written per vertex), so if that line refers to our mesh it is
+a real finding about how the API expects them. Deliberately left open rather than guessed at - the
+next run separates it, because a cube that renders textured makes both lines someone else's.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini fed219fdc1b410051a861a7b0650d0e0
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-hash-fix
+
+
+## 2026-08-31 - MILESTONE: the Remix API path is proven end to end
+
+    remix api: STEP 2 built gen 1 - hashes 00000002/10000003 (albedoConstant green + emissive green)
+    remix api: STEP 2 built gen 2 - hashes 00000003/10000004 (albedo = the character atlas from disk)
+    STEP 2 CUBE: built (wearing the CHARACTER ATLAS from disk) | DrawInstance 451 calls, 0 failed
+
+A cube described entirely through the Remix API, with no D3D9 draw behind it, rendered in the path
+traced image wearing the game's OWN character texture. No "Ignoring repeated material registration"
+this run.
+
+### Every mechanism now PROVEN, and none of it needs re-deriving
+| mechanism | state |
+|---|---|
+| API reachable from the 32-bit shim | bridge client d3d9.dll exports remixapi_InitializeLibrary |
+| gate | `.trex/bridge.conf` -> `exposeRemixApi = True` (bridge log said so itself) |
+| device attach | NOT needed. dxvk_RegisterD3D9Device is unimplemented; the API defaults to the most recently created device, which is the game's |
+| camera | NOT needed. SetupCamera is unimplemented; the game's own camera is used |
+| geometry | CreateMesh + DrawInstance, per frame from Present |
+| transform | remixapi_Transform float[3][4], translation in the LAST COLUMN |
+| base colour | MaterialInfoOpaqueEXT::albedoConstant - the base MaterialInfo has NO albedo field |
+| emission | MaterialInfo::emissiveIntensity + emissiveColorConstant |
+| alpha | OpaqueEXT::alphaTestType mirrors VkCompareOp. 0 = NEVER = invisible. USE 7 = ALWAYS |
+| identity | MaterialInfo::hash / MeshInfo::hash ARE the identity. Reusing one is refused and the OLD object is returned |
+| textures | remixapi_Path is a wchar_t FILE PATH. Uncompressed BGRA8 DDS with a full mip chain loads correctly |
+
+### Traps paid for, in order, so they are not paid for again
+1. Supplying an extension REPLACES Remix's defaults wholesale. Inside these structs a zero is an
+   INSTRUCTION, not an absence - a zeroed alphaTestType means "never draw this".
+2. The hash is the identity. A rebuild must use a NEW hash, or the new registration is silently
+   ignored and every return code still says SUCCESS.
+3. Do not destroy a handle that may alias a live registration. Leaking a test object is cheaper.
+4. A one-shot build against a resource the GAME produces on its own schedule is a race. The
+   character atlas does not exist until a character is on screen, long after frame 1200.
+5. X8R8G8B8 sources have an undefined alpha byte. Force it to 255 when writing a DDS.
+
+### Left open, deliberately, and now someone else's problem
+    [RTX-Compatibility-Info] Texture 0 without valid hash detected, skipping drawcall.
+    [RTX-Compatibility-Info] Trying to bind a texture to a mesh without UVs. Was this intended?
+Two occurrences, unchanged from runs before the API existed, and the cube renders textured - so
+neither refers to our mesh.
+
+### STEP 3 - characters. The architecture it enables
+The reason this matters is not the cube. It is that the constraint behind nearly every hard problem
+in this project is gone:
+
+  - "which sampler is the albedo" (AlbedoRank, blanked/white materials, moved-off-stage-0) becomes
+    a NAMED texture path. We already reflect all 7,276 shaders and know the diffuse sampler.
+  - the 64-bone fixed-function ceiling (MaxVertexBlendMatrixIndex = 8) is gone:
+    INSTANCE_INFO_BONE_TRANSFORMS_EXT carries up to 256 bones, and SR3 needs 58.
+  - SHORT2 texcoords stop mattering: we write float UVs into the vertex struct ourselves.
+  - vertex capture can go OFF - not to suppress anything, but because we no longer depend on it,
+    which removes the duplicate reconstruction that IS the shapes around the character and the
+    blocked camera.
+  - nothing is skipped. The game renders exactly as shipped; we describe a parallel scene.
+
+Order: 3a submit ONE character mesh through the API alongside the existing path (expect a DOUBLED
+character - that is the proof it landed); 3b turn vertex capture off and stop converting, so the
+API scene is the only one. Do not do 3b first - a black screen would then have two candidate
+causes.
+
+## 2026-08-31 - STEP 3a BUILT: one character mesh through the Remix API
+
+Deliberately ALONGSIDE the existing path, not instead of it. A DOUBLED character is the proof it
+landed; replacing the old path in the same change would make a missing character mean either "the
+API failed" or "the old path was removed correctly", and that ambiguity has cost whole sessions.
+
+### How it works
+The CPU-skinned vertices are ALREADY what Remix wants: SkinnedVertex is {pos[3], nrm[3], uv[2]}
+and remixapi_HardcodedVertex is those same fields plus a colour and padding. They are already in
+WORLD space (the dump's at(96.9 145.7 29.7) is the skinned centroid), so the instance transform is
+identity - no matrix convention to get wrong.
+
+  capture   in SkinAndBind, just before the Unlock, for the first draw with >= 4000 vertices.
+            Reading back through the mapped pointer is exactly what the existing centroid
+            accumulation already does, so it is no new risk.
+  indices   read ONCE from the game's index buffer in the draw hook, which is the only place
+            startIndex and primitiveCount exist. Handles INDEX16 and INDEX32.
+  rebasing  out[i] is the skinned vertex for original index (baseVertex + minIndex + i), and the
+            game's indices address (baseVertex + idx), so the captured-array index is
+            (idx - minIndex). Anything outside the captured window becomes a degenerate triangle
+            rather than dropping the whole mesh.
+  material  names the character atlas DDS. This is the FIRST geometry in this project whose albedo
+            we CHOSE instead of hoping Remix would infer it from texture stage 0.
+  hashes    a distinct family (0x5233C0DE...) from the cube's, plus the generation counter.
+  alpha     alphaTestType = 7. A zero means NEVER; that cost a run today.
+
+### Build error caught: the same declaration-ordering trap as before
+The per-frame DrawInstance tick lives in the Remix API block, which precedes SkinnedVertex - so the
+captured-vertex vector cannot be declared beside the handles it is used with. Only the handles moved
+early, with a comment saying why the two halves of step 3a sit on opposite sides of that type.
+
+### Deployed
+    sr3-rtx.asi  75c4bffc601a1ed427c591f3ad566b80
+    sr3-rtx.map  18847f84a9b05784939c6e5eb69f2137
+    sr3-rtx.ini  0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-step3a
+
+### Expected
+    STEP 3a CHARACTER: N verts, M triangles | DrawInstance ... - expect a DOUBLED character
+A frozen second copy of one body part, in the pose it had when captured, wearing the atlas. Frozen
+is CORRECT at this stage: the mesh is captured once and never updated. Animation is step 3c, via
+INSTANCE_INFO_BONE_TRANSFORMS_EXT (256 bones; SR3 needs 58).
+
+## 2026-08-31 - step 3a: submitted successfully, rendered nowhere anyone would look
+
+    STEP 3a CHARACTER: 7977 verts, 3408 triangles | DrawInstance 3863 calls, 0 failed, SUCCESS
+    STEP 2 CUBE: built (wearing the CHARACTER ATLAS from disk) | 3863 calls, 0 failed
+
+7977/3408 matches the big body draw in the frame dump exactly, so the capture and the index
+rebasing both worked. The cube still renders, so the API is healthy. The mesh exists and is drawn.
+
+### Cause: the capture and the build did not share their preconditions
+RemixBuildCharacter required g_atlasDdsReady. The CAPTURE in SkinAndBind did not - it took the
+FIRST skinned draw of the run with >= 4000 vertices. That happens during loading, long before the
+player character exists in the world, so the mesh was frozen at a pose and a POSITION from that
+moment. Submitted correctly, rendered correctly, and nowhere the player would ever look.
+
+RULE: a capture and the build that consumes it must share their preconditions. Gating only the
+consumer leaves the producer free to sample the wrong moment, and every return code still reads
+SUCCESS.
+
+### Changes
+1. The capture is now gated on g_atlasDdsReady, exactly as the build is.
+2. The build logs the mesh's world-space CENTROID and EXTENT, and the frame report repeats the
+   position. Without it, "submitted successfully but invisible" and "submitted successfully and
+   sitting 400 metres away" are the same log line - and they were, which is what made this cost a
+   run. The report already prints the camera position, so the comparison needs no arithmetic.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-3a-gate
+
+## 2026-08-31 - step 3a: the mesh was CORRECT and UNPLACED. Skinned output is OBJECT space.
+
+    mesh   at (-0.0 1.2 0.0), extent 0.56 x 1.86 x 0.39
+    camera at (90.8 145.4 21.4)
+
+A correctly sized character - 1.86 units tall - sitting at the WORLD ORIGIN. Geometry, indices,
+material and submission were all right; only the placement was missing.
+
+### The wrong claim this was built on
+I asserted "the CPU-skinned vertices are already in WORLD space, so the instance transform is
+identity", and wrote it into the code, the ini and the worklog. It is FALSE. They are in OBJECT
+space; SR3 places them with objTM.
+
+I read the frame dump's main-line `at(96.9 145.7 29.7)` as the skinned centroid. The bind-pose
+figure printed right beside it - `bind=1.23x1.79x0.34 at(-0.00 1.19 -0.01)` - is what our captured
+mesh actually matches, to within rounding. The evidence for the correct answer was on the same line
+as the evidence I misread.
+
+### Fix
+objTM (3 constant registers at kRegObjTM) is captured AT THE SAME MOMENT as the vertices - a
+transform from a later frame would place this pose where the character has since moved to - and
+used as the instance transform.
+
+The layouts map across with a straight memcpy: SR3's objTM is a row-major float3x4, row r is
+m[r*4..r*4+3] with translation in the fourth component, and remixapi_Transform is float[3][4] with
+translation in the last column. The skinning code already documents SR3's half of that.
+
+### Diagnostic improved
+The build now logs BOTH the object-space centroid and the position objTM places it at. Logging only
+the former is what made "unplaced" look like "broken" for a whole run.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-objtm
+
+## 2026-08-31 - STEP 3a SUCCEEDED: character geometry through the Remix API, placed and textured
+
+    object space centroid (-0.0 1.2 0.0), extent 0.56 x 1.86 x 0.39
+    objTM places it at (96.9 146.9 29.7)
+    camera                (96.2 147.7 35.2)
+    STEP 3a CHARACTER: 7977 verts, 3408 triangles | DrawInstance 1416 calls, 0 failed, SUCCESS
+
+User: "i see some polyguns from my character."
+
+(96.9 146.9 29.7) matches the player position from the 2026-08-31 frame dump - (96.9 145.7 29.7) -
+so the placement is right. Character geometry described ENTIRELY through the Remix API, with no
+D3D9 draw behind it, rendering in the path traced image at the correct world position wearing the
+character atlas.
+
+"Some polygons" is CORRECT at this stage and is not a defect: the body is ONE 7,977-vertex mesh
+drawn 35 times with different index ranges - one per clothing/body slot - and this captures a
+single range. 3408 triangles of roughly 15,000 across all 35, so about a quarter of the body, in
+one frozen pose.
+
+### What is now proven end to end
+  geometry     CreateMesh from CPU-skinned vertices - the layout already matched
+  indices      read once from the game's IB, rebased by (idx - minIndex)
+  placement    objTM captured with the vertices, straight memcpy into remixapi_Transform
+  material     albedo NAMED as the character atlas DDS - not inferred from texture stage 0
+  submission   DrawInstance per frame from Present
+
+### Remaining, in order
+  3b  all 35 slots, not one. Each slot is a separate index range over the same vertex buffer, so
+      it is 35 meshes sharing one vertex array - or one mesh with 35 surfaces, which
+      remixapi_MeshInfo::surfaces_count already supports.
+  3c  LIVE, not frozen: re-upload the skinned vertices each frame, or better, hand Remix the bind
+      pose plus per-frame bone transforms via INSTANCE_INFO_BONE_TRANSFORMS_EXT (256 bones, SR3
+      needs 58) and let it skin.
+  3d  then, and only then, turn vertex capture off and stop converting, so the API scene is the
+      only one. Doing this before 3b/3c would leave a broken image with several candidate causes.
+
+### Worth measuring at 3b
+How many indices fall outside the captured window and become degenerates. The rebasing maps them
+to 0 rather than dropping the mesh, which is the safe choice but is silent - if that count is
+large, part of "some polygons" is collapsed triangles rather than a partial slot.
+
+## 2026-08-31 - STEP 3b BUILT: all of the character's slots as surfaces of one mesh
+
+SR3's body is ONE 7,977-vertex buffer drawn 35 times with different INDEX RANGES, one per
+clothing/body slot. remixapi_MeshInfo::surfaces_count takes an array of surfaces, each with its own
+indices and material - exactly the shape of the problem. One mesh, N surfaces, one shared vertex
+array, one material.
+
+### Two phases, because a slot list is only complete when its frame ends
+  COLLECT  RemixCollectCharacterSlot(), from the draw hook, during the CAPTURE FRAME ONLY. Matches
+           on g_stream0 == the captured vertex buffer, plus minIndex and vertex count. Copies the
+           game's index buffer ONCE on the first slot - a character IB is ~90 KB, so copying it
+           whole costs one lock instead of one per slot, and every later slot reads the copy.
+  BUILD    RemixBuildCharacter(), from Present, on the first frame AFTER the capture frame, when
+           no further slots can arrive.
+
+### The out-of-range count is now reported
+Promised at the end of step 3a and delivered: indices outside the captured vertex window are
+collapsed to degenerate triangles (safe - dropping the mesh would be worse), and the count is
+printed against the total. If it is a large fraction, the missing geometry is collapsed triangles
+rather than an honestly partial capture. That distinction was previously invisible.
+
+### Build error, third time for the same reason
+g_apiCapVB / g_apiCapFrame were declared with the builder but written by SkinAndBind, which
+precedes it. Moved, with a comment. The step-3 state is inherently split around SkinnedVertex and
+the Present-time tick, and that keeps catching me out.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-step3b
+
+### Expected
+    STEP 3b CHARACTER: N surfaces (M slots seen), 7977 verts, T triangles at (x y z) | ...
+                       | K indices collapsed as out-of-range
+A frozen FULL character - all slots - standing where the capture happened, wearing the atlas.
+
+## 2026-08-31 - step 3b: half the body wrong. baseVertex, dropped when the builder was split.
+
+    36 surfaces from 36 slots, 7977 verts, 19359 triangles, placed at (96.9 146.9 29.7)
+    0 indices collapsed as out-of-range
+User: "its the whole body with like half the polygons missing at random."
+
+All slots collected, EVERY index in range, placement correct - and still half the polygons wrong.
+That combination is the finding: it rules out an out-of-BOUNDS rebasing and leaves an
+off-by-a-per-slot-amount one. A wrong index that is still inside [0, 7977) is invisible to a range
+check, which is why the diagnostic read 0 while the mesh was half nonsense.
+
+### Cause
+Splitting the single-slot builder into collect + build dropped baseVertex from the collect
+signature. Every slot was then rebased as (idx - minIndex), which is correct ONLY for slots whose
+baseVertex equals the captured draw's. SR3's 36 body slots do not all share one baseVertex, so the
+rest landed on valid but wrong vertices.
+
+Step 3a did not show this because it used a single draw, where baseVertex cancels out.
+
+### Fix: rebase absolutely
+    captured vertex 0 is at absolute index  capBaseVertex + capMinIndex   (g_apiCapFirstVertex)
+    a slot's index idx is at absolute index slotBaseVertex + idx
+    so the captured-array index is        (slotBase + idx) - g_apiCapFirstVertex
+Computed in long long, and out-of-range now means genuinely outside the captured window rather
+than "a different window".
+
+minIndex is deliberately no longer required to match when collecting a slot - the absolute
+rebasing handles any window, so a slot with a different one is now handled instead of skipped. The
+vertex COUNT still has to match, as a cheap "same body mesh" test.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-basevertex
+
+## 2026-08-31 - step 3b: the numbers say the mesh is COMPLETE, so stop reading the picture as the mesh
+
+    36 surfaces from 36 slots, 7977 verts, 19359 triangles, 0 collapsed as out-of-range
+Identical before and after the baseVertex fix - so those 36 slots DO share one baseVertex and that
+fix was a no-op. It is kept because the absolute rebasing is correct by construction, but it must
+not be credited with anything.
+
+19,359 triangles against 7,977 vertices is a complete closed body's worth (roughly 2 triangles per
+vertex). Every index is in range. All 36 slots are present. The mesh is not missing anything.
+
+### The overlap, which every number was blind to
+The API copy is placed at (96.9 146.9 29.7). The game's OWN character stands at (96.9 145.7 29.7).
+The same spot. Two copies of the same surfaces occupying one volume in a path traced scene z-fight,
+and that reads exactly as "the whole body with like half the polygons missing at random".
+
+Step 3a was designed around "a DOUBLED character is the proof it landed" - and the doubling is
+precisely what made the result unreadable, because the two copies are not side by side, they are
+INTERPENETRATING. That was a flaw in the test design, not in the code under test.
+
+### Change: remixApiCharacterOffset, default 3.0
+Translates the API instance on X so it stands BESIDE the real character. Purely a diagnostic:
+step 3d removes the game's copy entirely and the offset goes back to 0. Until then the two must
+not share a volume or neither can be judged. Set remixApiCharacterOffset=0 to overlay them again.
+
+Build error: added a second statement to a brace-less `if`, orphaning its `else`. Braced.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-offset
+
+## 2026-08-31 - step 3b: the offset did NOT fix it, so the z-fight theory was wrong
+
+User, with the copy standing beside the real character: "it is missing alot of polygons and is not
+textured or textured properly. its just a mesh with a bunch of holes."
+
+The overlap hypothesis is FALSIFIED. Separating the two copies changed nothing, so the mesh really
+is broken rather than merely interpenetrating. Recorded as a wrong call: the numbers (36/36 slots,
+0 out-of-range, a plausible triangle count) were consistent with a complete mesh and I let that
+outweigh a direct visual report a second time.
+
+### Found by reading the code, not the picture: the UVs are RAW SHORTS
+kShortUVScale = 1/1024 exists in this file, and SR3's vertex shaders end with
+`mul o1.xy, r0, 0.0009765625`. The fixed-function path reproduces that with a uv TEXTURE MATRIX
+rather than touching the vertices - the frame report even prints "last scale 0.00098, 0.00098".
+An API mesh has no texture matrix, so handing Remix the raw values tiles the atlas ~1024x, which
+reads as untextured. Now baked into the vertex at build time.
+
+That explains the texture. It does NOT explain holes, so:
+
+### Diagnostic added rather than another guess
+The build now audits the captured vertex data itself, independently of anything Remix does:
+  - how many captured vertices are ALL-ZERO, i.e. never written by the skinning loop;
+  - the position range on each axis;
+  - the uv range after scaling.
+If more than a quarter are zero it says so outright: every triangle touching one collapses to the
+origin and reads as a hole, and that would mean the CAPTURE is incomplete rather than the index
+rebasing - which every previous counter was blind to, because a zeroed vertex is perfectly
+in-range.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-uvscale
+
+## 2026-08-31 - the holes: the mesh arrays were LOCAL and died at the end of the builder
+
+The vertex audit came back completely clean, and that is what made this findable:
+
+    0 of 7977 vertices are all-zero
+    pos x[-0.33 0.22] y[-0.07 1.79] z[-0.22 0.17]     - a proper character bounding box
+    uv  u[0.010 0.994] v[0.009 0.986]                 - textbook 0..1 after the x1/1024 fix
+
+Sound data, correct rebasing, 36/36 slots, correct placement. Which leaves only the DESCRIPTION.
+
+### Cause
+remixapi_MeshInfoSurfaceTriangles holds POINTERS - vertices_values, indices_values - and nothing
+in the header says CreateMesh copies them. The character built its vertex and index arrays as
+LOCAL std::vectors inside RemixBuildCharacter, so they were freed the moment it returned, and every
+DrawInstance afterwards read released memory.
+
+The step-2 cube has worked since its first correct build precisely because its arrays are static
+globals (g_remixCubeVerts / g_remixCubeIdx). The difference between the working case and the broken
+one was sitting in the file the whole time.
+
+A complete, sound, correctly rebased mesh reading as "a bunch of holes" and smeared texture is
+exactly what use-after-free looks like here, and no counter can see it: every number describes the
+data at BUILD time, when it was still alive.
+
+### Fix
+g_apiCharVerts, g_apiCharSlotIndices and g_apiCharSurfaces are now globals that outlive the call.
+The surface array is still populated only AFTER every inner index vector is final - taking a
+pointer into a vector that is later resized is the same mistake one level down.
+
+### Also fixed this round
+UVs are scaled by kShortUVScale (1/1024) when building API vertices. SR3's bind-pose uvs are raw
+shorts; the game's shaders apply `mul o1.xy, r0, 0.0009765625` and the fixed-function path uses a
+uv texture matrix. An API mesh has neither, so the scale is baked into the vertex. Confirmed by the
+audit: uvs now span 0.010..0.994.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-lifetime
+
+## 2026-08-31 - TEXTURED. Remaining: holes (duplicate slots) and body-only (by design)
+
+User: "it is textured but it still has a lot of holes and is only the body. no hair. no clothes."
+
+TEXTURED is the win: the x1/1024 uv scale and the array-lifetime fix both landed. The audit
+confirms it independently - uvs span 0.010..0.994 and no captured vertex is zeroed.
+
+### "only the body" is SCOPE, not a defect
+The capture takes ONE vertex buffer. From the 2026-08-31 frame dump the player is the body
+(vb=49186410, 7977 verts) PLUS about 19 separate meshes on their own buffers - 49186B50, 49186EF0,
+491864F8, 49187718, 3CA094C8 and others - which are the head, hair, clothing and accessories. They
+were never in scope for 3b and their absence is expected. Capturing them is step 3e.
+
+### The holes: duplicate index ranges, and the evidence was already in our own log
+The shim's skinning report has said "19 exact duplicates dropped/frame" all along - SR3 submits the
+same skinned geometry more than once a frame, and the FFP path has always deduped it. The slot
+collector had no such filter, so an identical index range entered the mesh twice and two coplanar
+copies of a surface z-fight against each other.
+
+36 collected slots with ~19 duplicates is about half of them, which also matches the earlier
+"half the polygons missing at random" that I misattributed to overlap with the game's own character
+and then to baseVertex. Both of those were wrong; this is the same symptom's actual cause.
+
+No counter could show it because every slot is individually valid - correct range, correct base,
+in-bounds indices. Only the RELATIONSHIP between slots is wrong.
+
+### Fix
+Slots are deduped on (startIndex, primitiveCount, baseVertex) at collection time, and the dropped
+count is reported beside the kept one.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-slotdedup
+
+## 2026-08-31 - the holes: four theories dead, so print the mesh instead of inferring it
+
+    36 surfaces from 36 slots (0 duplicate index ranges dropped), 7977 verts, 19359 triangles
+    0 out-of-range | vertex audit clean | textured correctly
+
+Four causes have now been proposed for the holes, from the picture, and all four are dead:
+  1. overlap with the game's own character   - offsetting it aside changed nothing
+  2. a baseVertex rebasing mistake           - the fix was a measurable no-op
+  3. out-of-range indices                    - 0
+  4. duplicate index ranges                  - 0 dropped
+Every aggregate number describes a healthy mesh. That is the point: the aggregates cannot see this,
+and I kept proposing mechanisms instead of printing the structure.
+
+METHOD NOTE, and it is the same one this project recorded in August: when a symptom survives more
+than two hypotheses, stop hypothesising and measure the thing directly. Four is too many.
+
+### Added: the slot structure, in full
+At build time the log now prints, for every slot: startIndex, triangle count, baseVertex, the index
+range it covers, and whether that range OVERLAPS another slot's. Plus the number of distinct
+vertices referenced by any slot at all.
+
+Two specific things it can show that nothing so far could:
+  - ranges that overlap WITHOUT being identical. LOD variants or nested submissions z-fight exactly
+    like duplicates while defeating the equality test that reported 0.
+  - a referenced-vertex count well below 7977, which would mean the slots simply do not cover the
+    body and the holes are geometry never submitted at all.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-slotdump
+
+## 2026-08-31 - THE HOLES: SR3's character slots are TRIANGLE STRIPS. Found by printing the structure.
+
+The slot dump answered it in one run, after four hypotheses from the picture had failed. The ranges
+tile the index buffer EXACTLY when a slot consumes (prims + 2) indices instead of (prims * 3):
+
+    slot  0: start   741, 3408 tris ->  741 + 3408 + 2 = 4151 = slot  8's start
+    slot  8: start  4151,  250 tris -> 4151 +  250 + 2 = 4403 = slot  9's start
+    slot  9: start  4403,  628 tris -> 4403 +  628 + 2 = 5033 = slot 10's start
+    slot 35: start 18464, 2972 tris -> 18464 + 2972 + 2 = 21438 = slot  5's start
+
+Four independent confirmations, exact. These are D3DPT_TRIANGLESTRIP draws.
+
+### What that did
+Reading prims*3 indices per slot ran THREE TIMES TOO FAR - into the following slots' data - and
+then formed triangles from consecutive STRIP vertices as though they were independent triples.
+Hence holes everywhere, while every aggregate stayed healthy: the indices were all real, all in
+range, all distinct, and the vertex data was provably sound.
+
+Hook_DrawIndexedPrimitive is handed the primitive type as its FIRST parameter, and every version of
+this feature ignored it. The "36 of 36 slots overlap" line was the strip length being misread, not
+a real overlap.
+
+### Fix
+Slots record their D3DPRIMITIVETYPE. Strips read prims+2 indices and expand to a triangle list with
+alternating winding, dropping degenerate joins (a repeated index, used to stitch strips together)
+rather than emitting slivers. Lists keep the old path. Anything else is skipped rather than guessed
+at. The count of strip slots and dropped degenerates is reported.
+
+### The method point, recorded because it cost four runs
+Every one of the four dead hypotheses was proposed from the SCREENSHOT. The one that worked came
+from printing the data structure and doing arithmetic on it. The project's own August rule -
+"when a symptom survives more than two hypotheses, stop hypothesising and measure" - was right, and
+I passed it by two.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-strips
+
+## 2026-08-31 - STEP 3b COMPLETE: the character copy is correct. Now the tint.
+
+User: "now the copy is right. the texture tint is probably not correct."
+
+The triangle-strip fix closed the holes. A character mesh described ENTIRELY through the Remix API -
+geometry, indices, placement and a NAMED albedo texture - now renders correctly beside the game's
+own copy. That is step 3b done.
+
+### The tint, which is the customisation
+SR3 multiplies its diffuse result by Tint_color (c37 in the cloth family); the full model is
+already documented above ShaderInfo in this file - three Diffuse_Color_a/b/c weighted by the
+Pattern_Map channels at gamma 2.2, then `mul oC0, r1, c37`. The API material was built with
+albedoConstant WHITE, so that multiply was simply dropped.
+
+The shim has measured this all along without acting on it:
+    DIFFUSE_COLOR: 64.5 draws/frame carry it (30.2 skinned) | NON-WHITE 11.88/frame,
+                   45 distinct values seen
+
+### Change: one material per distinct tint, assigned PER SURFACE
+Tint_color is captured per slot at collection time from g_psConst[tintColorReg]. At build, slots
+are grouped by colour (within 0.004) and one material is created per distinct value, then assigned
+to that slot's surface. remixapi_MeshInfoSurfaceTriangles carries a material per SURFACE precisely
+so one mesh can do this.
+
+Building one material per slot would be 36 registrations of mostly the same colour; building one
+for the whole mesh is what threw the customisation away. Capped at 24 distinct tints, with a white
+fallback for slots whose shader declares no Tint_color.
+
+The build logs how many distinct tints were found and the first eight values, so "the tint is
+wrong" can be separated from "the tint was never read" without another guess.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-tint
+
+### Remaining for a complete character
+  - hair, clothes and accessories: ~19 more meshes on their own vertex buffers (step 3e)
+  - live animation: BONE_TRANSFORMS_EXT, 256 bones against SR3's 58 (step 3c)
+  - then remove the game's own copy and drop the diagnostic offset (step 3d)
+
+## 2026-08-31 - STEP 3e BUILT: the whole character, one vertex buffer at a time
+
+The tint landed ("i think it is now correct"), so step 3b is closed and the remaining gap is that
+the copy is BODY ONLY. From the frame dump the player is the body plus about nineteen separate
+meshes on their own vertex buffers - head, hair, clothing, accessories.
+
+### Approach: repeat the working pipeline, do not refactor it
+Capture one buffer, build it, FILE it, reset, and pick up the next buffer on a later frame. The
+capture/collect/build path that now works is untouched; only its bookkeeping changed. About twenty
+meshes therefore take roughly forty frames to accumulate, which is invisible in play.
+
+### Two things that had to be right
+1. PER-MESH STORAGE. remixapi_MeshInfoSurfaceTriangles keeps POINTERS to the vertex and index
+   arrays - the lesson that cost a run when those arrays were function locals. Reusing one set of
+   buffers for the next build would free the previous mesh's data out from under Remix in exactly
+   the same way, one level up. Each finished mesh gets its own ApiMeshStore.
+2. MEMBERSHIP. The size floor drops from 4000 to 64, because 4000 was chosen to find the BODY and
+   would exclude most of what is missing. Parts are instead grouped by objTM TRANSLATION: every
+   piece of one character shares it, so NPCs and props are excluded without needing to identify
+   them. The first capture must still be a >=4000-vertex mesh, which fixes the reference position
+   on the body rather than on a stray accessory.
+
+### Robustness: a failure now skips, it does not stop
+Every permanent `g_apiCharFailed = true` inside the builder became ApiSkipCurrentCapture(): the
+buffer is remembered in a skip list and the next one is tried. Previously one accessory with an
+index format we could not read would have set the flag and cost the other nineteen meshes. Six
+failure sites plus two out-of-memory sites rewritten; zero permanent failures remain.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-step3e (and .before-skipfail)
+
+### Expected
+    STEP 3e CHARACTER: N meshes, T triangles total | latest: ...
+The copy beside the player gains parts over the first second or so - head, hair, clothes - until
+it stops growing. Still frozen; animation is step 3c.
+
+## 2026-08-31 - step 3e: parts mis-placed and mis-textured. Two independent faults, both mine.
+
+User: "the parts are not textured correctly and are not placed correctly".
+
+### Placement: a capture-WINDOW bug, not a transform bug
+The first 3e captured ONE buffer per frame - build, reset, take the next one later. That freezes
+each part at the objTM and in the POSE it had on ITS OWN frame, so the instant the player moves the
+parts scatter and each is mid-a-different-animation. The transform code was right all along.
+
+Fixed: one capture FRAME takes every part, into a pending table. Builds are drained afterwards, one
+per Present, by loading each pending entry into the globals the builder already reads - so the
+build path itself is unchanged.
+
+### Texture: every part was pointed at the BODY's atlas
+Only the body uses 3BD233F0. Head, hair, clothing and accessories carry their own textures -
+4923C980, 16381958, 4923F2A0 and about sixteen more in the frame dump.
+
+Fixed: DumpTextureDds() writes ANY game texture to a DDS, cached by pointer, and each part's
+material names its own. Compressed formats (DXT1/3/5) are copied through UNCHANGED - a DDS carries
+DXT blocks natively, so the fourCC is set and the bytes written, which avoids a block decoder and
+keeps the texture bit-exact. A8R8G8B8/X8R8G8B8 are written as BGRA8 with alpha forced to 255.
+Anything else, or a texture that cannot be locked (DEFAULT pool), logs the reason and falls back to
+the atlas rather than failing the part.
+
+### The declaration order finally restructured, as promised
+This was the FOURTH build broken by step-3 declaration order, each previous fix moving one more
+global earlier. The cause is structural: the capture runs in SkinAndBind, the build near the draw
+hook, and the per-frame DrawInstance tick far above both - so a type used by all three has exactly
+one legal home. ApiSlot and ApiPending are now together in a commented block immediately before
+SkinAndBind, with a note saying only raw handles may live earlier and why.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backups: .before-pending, .before-texdump, .before-reorder
+Stale sr3-remix-tex-*.dds deleted before the run, so any present afterwards were written by it.
+
+## 2026-08-31 - only the body again: a window that opens MID-FRAME can only collect the tail of one
+
+User: "i do not see any parts now at all. its just a textured body".
+
+The one-frame capture opened its window at the instant the body was recognised - and SR3 draws the
+body LATE, so every part drawn earlier in that same frame had already gone past. The window was
+real, it just started too late in the frame to contain anything but its own trigger.
+
+### Fix: a scouting frame
+The frame that finds the body no longer captures. It records the reference position and schedules
+the real window for g_frames + 1, which is then collected WHOLE - body included, and in draw order
+from the first draw of the frame.
+
+Two details that follow from the split:
+  - the membership tolerance widens from 0.25 to 4.0 (squared), because the character may move
+    between the scouting frame and the capture frame;
+  - the FIRST part taken on the capture frame re-anchors the reference position, so every later
+    part is matched against a position from the SAME frame rather than the previous one.
+
+Both logged: "character found at (x y z) - capturing every part of it on frame N", then
+"capture window closed - N parts of the character taken in one frame". Those two lines separate
+"the window never opened" from "the window opened and found nothing", which the previous build
+could not distinguish.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-window
+
+## 2026-08-31 - one part built, no errors: the post-build reset was killing the drain
+
+    remix api: character found at (96.9 145.7 29.7) - capturing every part of it on frame 1354
+    remix api: capture window closed - 10 parts of the character taken in one frame
+    STEP 3b - character mesh built: 2 surfaces, 1080 verts, 576 triangles, extent 0.10 x 0.14 x 0.14
+    (no skips, no failures, no further builds)
+
+The scouting-frame window WORKED - 10 parts captured in one frame, which is the thing the previous
+run could not do. But only the first was ever built.
+
+### Cause
+The post-build reset ended with `g_apiCapFrame = 0xFFFFFFFFu;` and the builder's third line is
+
+    if (g_apiCapFrame == 0xFFFFFFFFu || g_frames <= g_apiCapFrame) return;   // window still open
+
+so completing ONE mesh set the sentinel that makes every later call return immediately. No skip, no
+failure, no log - exactly how it presented, and why the symptom looked like a capture problem when
+the capture had already succeeded.
+
+That line was correct in the ORIGINAL sequential design, where each build ended one capture and
+began another. Under the pending table the window frame is history that must be kept. The same line
+was in ApiSkipCurrentCapture and had the same effect; both are now commented rather than deleted,
+because the reason is not obvious from the code.
+
+The two diagnostic lines added last round are what made this a five-minute diagnosis instead of
+another guess: "window closed - 10 parts" proved the capture was fine, so only the drain was left.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-drainfix
+
+## 2026-09-01 - 6 of 10 parts built. The 4 failures were a call-ORDER bug.
+
+    capture window closed - 10 parts of the character taken in one frame
+    6 meshes built, including the BODY: 36 surfaces, 7977 verts, 13524 triangles
+    5 textures dumped: 4 compressed copied through (256x256 and 64x64), 1 BGRA8 2048x1024 atlas
+    pending part 0, 6, 8, 9: "no usable slots"
+
+The drain fix worked and the per-part texture dumping works - compressed formats copy through
+bit-exact, which was the right call over writing a block decoder.
+
+### Why four parts had no slots
+RemixCollectCharacterSlot ran at the TOP of Hook_DrawIndexedPrimitive, which is BEFORE
+Classify -> SkinAndBind captures the part. So on the first draw of any new vertex buffer there was
+no pending entry to attach the slot to, and the slot was dropped. A part drawn ONCE therefore ended
+with zero slots and was skipped.
+
+That also explains the pattern exactly: the parts that survived are the ones drawn more than once,
+and the body - drawn 36 times - was never at risk.
+
+### Fix
+The collect call moves to immediately AFTER g_origDrawIndexedPrimitive. The capture has happened by
+then, and g_stream0 / g_curPS still describe the game's draw because EndFFP - which restores state -
+runs after it.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-collectorder
+
+## 2026-09-02 - STEP 3e COMPLETE (10/10 parts), and STEP 3c BUILT: the character is now LIVE
+
+    capture window closed - 10 parts of the character taken in one frame
+    10 meshes built, 21,990 triangles, 9 textures dumped
+The call-order fix took it from 6 to 10. Step 3e is done.
+
+### Step 3c - Remix does the skinning now
+A frozen character is not a finished one, so the mesh is now uploaded ONCE in its BIND POSE with
+skinning data, and only the bones and objTM move afterwards.
+
+  mesh      remixapi_MeshInfoSkinning on every surface: bonesPerVertex 4, blend weights and bone
+            indices taken from the shim's existing decoded bind pose (BaseVertex already carries
+            pos/nrm/uv/w[4]/idx[4], so nothing new had to be decoded).
+            Weights are NORMALISED here - SR3's shader divides by their sum and Remix will not.
+  instance  REMIXAPI_STRUCT_TYPE_INSTANCE_INFO_BONE_TRANSFORMS_EXT (=14), chained on pNext, up to
+            256 bones; SR3 uses 58 and the palette is 64.
+  per frame every frame the game draws one of our captured parts, its objTM AND its bone palette
+            are snapshotted in the draw hook. That is the whole of the animation - no per-frame
+            CreateMesh.
+
+The layouts line up exactly, so this is a copy rather than a conversion: SR3's bone palette is a
+row-major float3x4 in three registers per bone with translation in the fourth component of each
+row, and remixapi_Transform is float[3][4] with translation in the last column - the same
+convention the instance transform already proved.
+
+Consequence worth noting: for anything on the API, the shim's CPU skinning becomes unnecessary.
+That is currently a large part of the 15 ms shim cost.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 0522311c7684be32b391d3955dfd9f0b
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-step3c
+
+### Still open on the character
+  - eyes render wrong. All 10 meshes build, so it is a MATERIAL problem: alphaTestType is forced
+    to 7 (always pass) with a fully opaque material on every part, which would flatten the
+    alpha-blended or two-layer shader eyes normally use.
+  - the diagnostic X offset of 3 is still standing the copy beside the game's own character; it
+    goes to 0 when the game's copy is removed (step 3d).
+
+## 2026-09-02 - step 3c CRASHED the game. Skinning gated OFF; the working character is restored.
+
+    *** CRASH: 0xC0000005 at 713080CE (d3d9.dll +0x780CE)
+        access violation reading address 4BD17000
+        shim state: frame 1160 draw 6222
+    minidump: Saints Row 3/sr3-rtx-crash.dmp
+
+The log shows the capture and the slot walk completing normally and then nothing - 10 parts taken,
+the audit clean, the slot structure printed, ZERO meshes built. The crash is inside the BRIDGE
+during the first CreateMesh, so Remix read past one of the two skinning arrays.
+
+### Response: restore the working build first
+remixApiSkinning is a new setting, DEFAULT OFF. With it off the character is submitted
+already-skinned and frozen - exactly the 10-part state that worked - so the game is playable again
+while the contract is worked out. The whole skinning path is kept behind the switch rather than
+reverted, because it is one ini flip from being testable again.
+
+### Two hardening changes kept regardless of the eventual cause
+1. The FULL 64-bone palette is always sent, initialised to IDENTITY at build time. maxBone is
+   computed only over NON-ZERO weights, so a vertex carrying a high bone index with a zero weight
+   can legitimately exceed maxBone+1 - and an index beyond boneTransforms_count would have Remix
+   read past the array. Sending the whole palette removes the possibility rather than reasoning
+   about it. This is a plausible cause of the crash on its own.
+2. A surface only claims skinning when BOTH arrays are exactly 4 x vertexCount.
+
+### What is NOT yet known
+remix_c.h says the count must be bonesPerVertex * vertexCount, which is what was passed
+(4 x 1080 = 4320 for the part being built). If it still crashes with the guards above, the next
+suspect is the bridge's own marshalling of those arrays across the 32-to-64-bit boundary rather
+than anything in this file - and that would be checked by shrinking to a single tiny test mesh
+rather than by another full run.
+
+### Deployed
+    sr3-rtx.asi  f52e13c90241598c6fc8270d2d819c1d
+    sr3-rtx.map  4c0727a20ea1c23328aa4d73d1748855
+    sr3-rtx.ini  807553e47b726a8468d755be3f186112   (remixApiSkinning=0)
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-skingate
+
+## 2026-09-02 - materials read from the DRAW instead of hardcoded
+
+"the character is almost fully correct but we need to do better work."
+
+The named defect is the eyes, and the cause was structural rather than specific: EVERY part was
+given one hardcoded material - fully opaque, alphaTestType 7 (ALWAYS), one roughness, one
+opacityConstant. That is correct for the body and wrong for anything with a cutout or a blend,
+which is precisely what eyes use.
+
+### The mapping, which is exact rather than approximate
+Remix's AlphaTestType mirrors VkCompareOp (NEVER=0 .. ALWAYS=7) and D3D9's D3DCMPFUNC runs
+NEVER=1 .. ALWAYS=8. So the conversion is (func - 1), and alpha test DISABLED maps to ALWAYS - the
+old hardcoded 7, which is why the body always looked right and everything else did not.
+
+### Change
+Each slot now records the game's real state at the moment of its draw:
+    D3DRS_ALPHATESTENABLE / ALPHAFUNC / ALPHAREF / ALPHABLENDENABLE / SRCBLEND / DESTBLEND
+and the material key becomes (tint, alphaTestType, alphaRef, blendOn) instead of tint alone. Alpha
+is part of a material's IDENTITY, not a property of the mesh: two slots of one part legitimately
+differ only in whether they are cut out, and a shared opaque material is what loses them.
+
+Blended draws are given opacityConstant 0.85 rather than a blendType_value, because that
+enumeration is not in the header and guessing it is how the alphaTestType=0 invisibility happened.
+Stated as a deliberate approximation rather than left implicit.
+
+### Measurement shipped with it
+The build now lists every distinct material: tint, alpha test function BY NAME, reference value,
+and whether blending is on. If the eyes are still wrong, that line says whether their draw was
+read as cut-out, blended or opaque - which separates "we read the state wrongly" from "we read it
+correctly and Remix needs something else".
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 807553e47b726a8468d755be3f186112 (remixApiSkinning=0)
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-material
+
+## 2026-09-02 - "its just got the body albedo": the texture was stored per PART, not per SLOT
+
+User, on the eyelashes/eyelids: "its just got the body albedo".
+
+That is the atlas fallback, and the evidence was already in the log and not chased: 9 textures
+dumped for 10 parts.
+
+### Cause
+One albedo was stored per PART, taken from g_curPS.albedoStage on its FIRST draw:
+  - a shader with no ranked albedo gave null, and the part fell back to the BODY's atlas;
+  - and slots within one part that legitimately use different textures could never both be right,
+    even when the first one resolved.
+The material was already per SURFACE. The texture had no business being per part.
+
+### Change
+ApiSlot carries its own albedo, recorded at slot-collection time as the ranked stage if the shader
+has one and otherwise whatever is ACTUALLY BOUND at stage 0 - never the body's atlas, which is
+never right for a part that simply has no ranked sampler. The material key becomes
+(texture, tint, alphaTestType, alphaRef, blendOn), and each material names its own dumped DDS.
+The cap rises from 24 to 32 distinct materials.
+
+### Measurement
+The material listing now prints the texture pointer per material and marks any that has none:
+    mat N: tex 0x........, tint (...), alphaTest GREATER_EQ ref 128, blend off
+    mat N: tex 0000000000, ...  <- NO texture of its own, using the fallback
+So "wrong texture" and "no texture found" are now different lines rather than the same picture.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 807553e47b726a8468d755be3f186112 (remixApiSkinning=0)
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-slottex
+Stale sr3-remix-tex-*.dds cleared, so the dumps present after a run are this run's.
+
+## 2026-09-02 - eyelashes fixed; and the material listing exposed a tint of 5.0
+
+    STEP 3e CHARACTER: 10 meshes, 21990 triangles | 11 textures | 0 materials without a texture
+User: "the eyelashes are textured correctly now."
+
+Per-slot textures closed that out. 11 textures for 10 parts is the expected shape once slots within
+one part may differ.
+
+### What the new listing showed, unprompted
+    mat 0: tex 4A9D7EF8, tint (1.000 1.000 1.000), alphaTest ALWAYS ref 0, blend off
+    mat 1: tex 4A9D7EF8, tint (5.000 5.000 5.000), alphaTest ALWAYS ref 0, blend ON
+Every part has exactly two materials, and the second carries a tint of 5.0 with blending ON.
+
+albedoConstant is a COLOUR - 0..1. Five is not a base colour, it is a multiplier, and handing it
+to albedoConstant coats the surface in blown-out white. A 5x multiplier on a BLENDED pass is
+almost certainly an additive glow or sheen rather than a second opaque skin.
+
+This is the value the user was asked to judge as "the tint" and approved as probably correct. It
+was not: it looked plausible because the opaque material underneath it is right. Only printing the
+number made it visible.
+
+### Change
+- albedoConstant is clamped to [0,1], and the listing marks any value that was clamped, so the raw
+  reading stays visible rather than being silently corrected.
+- The listing now prints D3DRS_SRCBLEND / D3DRS_DESTBLEND per material, with the enumeration in a
+  comment: src ONE / dst ONE is additive, SRCALPHA / INVSRCALPHA is ordinary alpha.
+
+That last line decides the next step honestly: if the blended slot is ADDITIVE it should be an
+emissive material or dropped, not a translucent skin over the character - and that is a decision to
+take from the blend factors, not from the picture.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 807553e47b726a8468d755be3f186112 (remixApiSkinning=0)
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-tintclamp
+
+## 2026-09-02 - the blend FLAG is not the blend. The FACTORS are.
+
+The listing added last round answered its own question in one run:
+
+    11 materials: blend ON (src 2 dst 1)   = D3DBLEND_ONE / D3DBLEND_ZERO
+     1 material:  blend ON (src 5 dst 6)   = SRCALPHA / INVSRCALPHA
+    10 materials: blend off
+
+src=ONE, dst=ZERO is the IDENTITY blend: result = source. D3DRS_ALPHABLENDENABLE is set, but the
+factors make it an ordinary OPAQUE write. So eleven of the twelve "blended" slots are not
+translucent at all, and giving them opacityConstant 0.85 thinned the entire character. Exactly one
+slot is genuinely alpha-blended.
+
+Reading the enable flag alone was the error; the flag is necessary but not sufficient.
+
+### Change
+    identityBlend = (srcBlend == D3DBLEND_ONE && destBlend == D3DBLEND_ZERO)
+    translucent   = alphaBlendEnable && !identityBlend
+Only genuinely blending factors produce a translucent material now.
+
+### Note on the 5.0 tint, kept clamped
+Those same eleven slots carry Tint_color = 5.0. With src=ONE/dst=ZERO they are plain opaque draws
+with a 5x multiplier, so the constant is an intensity rather than a base colour - albedoConstant
+cannot exceed 1 and the clamp stands. Recorded rather than resolved: if the character later reads
+as too dark in those slots, this constant is the first suspect and the raw value is in the log.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 807553e47b726a8468d755be3f186112 (remixApiSkinning=0)
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-blendfactors
+
+## 2026-09-03 - white clothes, bracelets, piercings: the customisation RECIPE, not a missing texture
+
+User: "the players underwear, bracelets, piercings, etc are white. the only thing textured on the
+real player was the top while the copy only has the body textured correctly."
+
+Note the first half: THE REAL PLAYER IS ALSO MOSTLY UNTEXTURED. This is not an API-path defect. Both
+paths bind a texture where the game computes a colour.
+
+### What those draws actually are
+Frame dump, player position, by first sampler:
+    35 Blend_MapSampler      rank=100
+    17 Diffuse_MapSampler    rank=100
+     3 IR_GBuffer_DSF_Data   rank=80      <- rank 80 is Pattern_Map
+A Pattern_Map is a MASK, not a colour. SR3's clothing and accessories have no diffuse texture
+holding their colour at all: it is three CONSTANTS - Diffuse_Color_a/b/c - weighted by the
+pattern's r/g/b channels at gamma 2.2, with a selector that sends some texels to a desaturated
+branch so trim and skin escape tinting, and the whole result multiplied by Tint_color. That recipe
+is already documented above ShaderInfo, read out of ir_sr3npcclothfull_c shader[8].
+
+Binding the raw pattern as albedo is exactly why these items are white.
+
+### Change
+1. A slot whose shader declares Diffuse_Color_a/b/c is marked as CUSTOMISED, and its three colours
+   are captured with it.
+2. For those slots the shim's existing ClothAlbedo() is asked to GENERATE the albedo - pattern
+   combined with the three colours. Where it succeeds that is the correct texture and beats
+   anything bound.
+3. Where it cannot - it only handles the family where the pattern IS the albedo, and the player's
+   own clothing samples a Diffuse_Map through a SECOND UV SET which cannot be folded into one
+   texture - the material takes Diffuse_Color_a as its albedoConstant instead of Tint_color.
+
+Point 3 is an APPROXIMATION and is labelled as one in the code: the real recipe weights all three
+colours per texel and a single constant cannot express that. It is the difference between a white
+bracelet and a roughly right one, not correctness. The log reports the split:
+    CUSTOMISED items - N albedos GENERATED from pattern x Diffuse_Color, M use Diffuse_Color_a as
+    a flat approximation
+so how much is properly generated versus approximated is visible rather than assumed.
+
+### The honest remaining gap
+The player's clothing family needs the two UV sets reconciled before its albedo can be generated
+properly. That is a real piece of work and is NOT done here - ProbeClothUV in this file is the
+existing note on it.
+
+### Deployed
+    sr3-rtx.asi  04d907dc4d603f96a7fff03c6afdb5d4
+    sr3-rtx.map  ddde2193c3014e2b8e30550774e3cff2
+    ini 807553e47b726a8468d755be3f186112 (generateCloth=1, remixApiSkinning=0)
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-cloth
+
+## 2026-09-03 - REGRESSION: the top went black. The fix was applied wider than the fault.
+
+User: "the top of the copy is now black."
+
+Mine. Diffuse_Color_a was applied as albedoConstant to EVERY slot carrying the cloth recipe -
+including the top, which already had a real Diffuse_Map at rank 100 and rendered correctly. Its
+Diffuse_Color_a is near-black, because for that shader the colour comes from the texture and the
+constant is not the base colour at all. So the top went black.
+
+The fault was never "cloth slots have the wrong constant". It was "slots whose chosen albedo is a
+PATTERN have no colour". Widening the fix past its case broke a working surface.
+
+### Two guards, both narrowing
+1. The approximation applies only when the slot's chosen albedo ranks <= 80 - a Pattern_Map bound
+   as base colour, which is the case that renders white. A slot with a genuine Diffuse_Map (100)
+   keeps its texture and its tint, untouched.
+2. A near-black constant is never an improvement on white. If Diffuse_Color_a reads as unset
+   (luminance <= 0.02) the surface is left alone, and the count is reported:
+       N customised slots had a near-BLACK Diffuse_Color_a and were left with their own texture
+
+Guard 2 would have prevented this regression on its own, which is why it is in rather than just
+guard 1.
+
+### Still true and NOT caused by this work
+"the original clothes ... are not textured correctly even with ray tracing off." The GAME's own
+render has the same defect, so the customisation recipe is unimplemented in both paths, not broken
+in the API path. The player clothing family still needs its two UV sets reconciled before its
+albedo can be generated properly - unchanged, and still the real remaining work.
+
+### Deployed
+    sr3-rtx.asi  (rebuilt)  ini 807553e47b726a8468d755be3f186112
+    rtx.conf 421b35520b662159df313db2a6df3205 | bridge.conf db55f8142db1db21eb4bdf256f5c4ae5
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-clothfix
+
+## 2026-09-03 - BAKING the pixel shader's output. The custom shader, finally, and for the right reason.
+
+User: "why cant we save or get what the pixel shader computes?" - and the criticism that the
+material tweaking was regressing rather than solving. Both correct.
+
+### Why no amount of material work could have fixed the clothes
+Remix NEVER RUNS A PIXEL SHADER. It picks one bound texture as the albedo and applies its own PBR
+model. SR3's clothing colour exists only as the OUTPUT of a pixel shader - three constants weighted
+per texel by a Pattern_Map at gamma 2.2, a selector branch, then x Tint_color. There is no texture
+holding it and no constant equal to it. Choosing a better texture or a better constant was
+therefore structurally incapable of working, and the Diffuse_Color_a approximation that blacked the
+top was that dead end reaching its natural end.
+
+### The method
+Run the game's own pixel shader into an offscreen target whose SCREEN SPACE IS UV SPACE. Every
+texel of the output then holds exactly the colour that shader computes for that texel. Not an
+approximation of the recipe - the recipe, executed by the same shader with the same constants and
+the same textures. The engine already uses this technique itself: the 2048x1024 character atlas is
+a bake.
+
+The cloth pixel shader writes only oC0, which is what makes it bakeable.
+
+### What had to be built: a vs_3_0 assembler
+The game provides no vertex shader that maps UV to clip space, so one is assembled directly as
+tokens. It does NOT patch the game's shader: in SM3.0 vertex inputs bind by DECLARATION USAGE
+rather than register number, so a standalone shader declaring dcl_texcoord v0 receives the texture
+coordinates from the game's own vertex declaration.
+
+    position.x = u * 2/1024 - 1
+    position.y = 1 - v * 2/1024      (texture space runs down, clip space up)
+    position.zw = (0, 1)
+The 1/1024 is folded into the literal because SR3's texcoords are RAW SHORTS - the same scale the
+uv work established earlier.
+
+Seven texcoord outputs are written with the same uv, because the cloth pixel shader declares
+v0..v6 and which one carries the pattern's coordinates is not yet known. A wrong guess there shows
+as a mis-sampled bake, not a crash.
+
+### THIS BUILD ONLY VALIDATES THE ASSEMBLER
+Hand-assembled bytecode is exactly the kind of thing that fails silently, so nothing is baked yet.
+The shader is created and D3D9 is asked to validate it:
+    bake: uv-bake vertex shader accepted by D3D9 (N tokens)          -> the assembler is correct
+    bake: D3D9 REJECTED the hand-assembled uv-bake vertex shader ... -> it is not, and baking
+                                                                        disables itself
+D3D9 validates the token stream, so this is a real check and not a self-assessment. The bake pass
+is only worth building on top of a shader that is known good.
+
+### Deployed
+    sr3-rtx.asi  9de699dfc2c2dcf1d8fc3dbb62af6a7f
+    sr3-rtx.map  ca569231ff50dd9a7b3c99a0468edbe8
+    ini 807553e47b726a8468d755be3f186112 (remixApiClothAlbedo=0 - the generated-albedo path that
+        blacked the top is OFF; bakeShaderAlbedo defaults on but only builds the shader)
+Source backup: src/sr3-rtx/sr3rtx.cpp.before-bake
+
+## 2026-09-03 - the GPU bake crashes Remix. Twice, same address. Off.
+
+    bake: uv-bake vertex shader accepted by D3D9 (75 tokens)   <- the assembler is CORRECT
+    Exception 0xc0000005 at 00007FFAD8FF5A39 (NvRemixBridge.exe)   <- both runs, same address
+
+No bake ever completed. The crash is in Remix's 64-bit server, not in the shim.
+
+Tried and did NOT help: wrapping the bake draw in an occlusion query. Remix's own log says it
+ignores draws issued inside one ("Trying to raytrace an occlusion query. Ignoring."), so this
+should have kept the bake invisible to it. Same crash, same address - which means the fault is not
+the DRAW being captured. The remaining suspects are the render-target switch itself
+(SetRenderTarget to a texture we created) or GetRenderTargetData, both of which Remix intercepts.
+
+What IS established and worth keeping:
+  - the hand-assembled vs_3_0 is valid; D3D9 accepted it (75 tokens).
+  - the approach is sound in principle - the engine bakes its own character atlas the same way.
+  - it cannot be done through the Remix device.
+
+bakeShaderAlbedo is off. The game is stable and the character is unchanged.
+
+### Where this leaves the clothes
+Remix never runs a pixel shader, so the computed colour has to be produced SOMEWHERE. The GPU route
+through the Remix device is now closed. The remaining route is a CPU bake: the recipe is fully
+documented above ShaderInfo and ClothAlbedo() already implements it for the family where the pattern
+IS the albedo. The player's own clothing needs its two UV sets reconciled first - that is the real
+outstanding work, and it is reverse engineering rather than another material switch.
+
+## 2026-09-03 - clothes and hair now render correctly through the Remix API
+
+### The clothes: a CPU bake of SR3's customisation recipe
+The GPU bake was abandoned - driving a render target through the Remix device crashed its 64-bit
+server twice at the same address, even with the draw hidden inside an occlusion query. The hand
+assembled vs_3_0 that maps UV to clip space WAS valid (D3D9 accepted it, 75 tokens); the fault is
+in Remix intercepting the render-target switch or the readback.
+
+So the recipe is evaluated on the CPU instead. What it took, in the order the faults appeared:
+  1. the second UV set. The cloth shaders declare three texcoord inputs and sample the pattern
+     with TEXCOORD1. Only set 0 was ever decoded.
+  2. the bind pose is cached from the FIRST draw on a buffer, which is a prepass with a reduced
+     declaration and no TEXCOORD1 - so uv2 was always empty. Now re-decoded from the material
+     draw, which is the only point where the buffer and a full declaration are both in hand.
+  3. a fallback to TEXCOORD0 for the three parts whose shaders carry no second set at all. The
+     corset was one of them, which is why it kept showing its segmentation map raw.
+  4. Tint_color = 5.0 is not a colour. It multiplied a correct dark maroon albedo into pure
+     magenta. Components above 1 are now treated as "no tint".
+  5. DOUBLE GAMMA. The recipe works in linear light - both branches raise the pattern to 2.2 -
+     but the DDS is 8-bit and Remix samples it as sRGB, so the 2.2 was applied twice. That is the
+     "too dark with black noise" report exactly: an 8-bit encoding of a linear value has almost
+     no precision left in the shadows. Now encoded back to sRGB on write.
+
+### The hair
+    slot 0: albedo 'Diffuse_MapSampler', first 'Diffuse_MapSampler', HAIR 1694 tris
+Hair's chosen albedo is its Diffuse_Map, and for hair that map is smooth DIRECTIONAL data - the
+blue/green/purple image on screen. It is not a colour, so binding it beat the colour constant.
+Hair now takes Hair_Spec_Color2 with NO texture at all. Strand detail is a later problem.
+
+The hair shader is LIT (it samples the L-buffer), so it is deliberately NOT baked - that would burn
+the game's lighting into the albedo and Remix would light it twice.
+
+### Also fixed: black texture dumps
+A DEFAULT-pool or render-target texture can return SUCCESS from LockRect and hand back ZEROES. A
+512x512 dump was black end to end and was being shipped as an albedo. An empty dump is now
+discarded and the slot falls back, with the texture named in the log.
+
+### What made the difference this session
+Logging what each slot IS - its albedo sampler by name, its first sampler, cloth/hair - instead of
+identifying parts from the screenshot and then guessing which shader they used. The hair was found
+in one line after several runs of guessing.
+
+## 2026-09-04 - what the GAME CODE says about customisation (verified, not inferred)
+
+Reading the exe instead of guessing which shader file applies.
+
+### The colours are plain 8-bit sRGB, divided by 255
+0x008FCE60 and 0x00951A60 both set Diffuse_Color_a/b/c BY NAME, and immediately unpack the value:
+    movzx ecx, al / movzx edx, ah / movzx eax, [esp+0x52]
+    divsd xmm1, [0x12a2d88]        ; the constant decodes to exactly 255.0
+So a customisation colour is the 8-bit swatch the player picked, over 255. Not linear, not
+premultiplied, no hidden scale.
+
+CONSEQUENCE, and it settles an argument that cost several runs: the pow(c, 2.2) in
+ir_at_sr3pccloth is that SHADER moving an sRGB constant into linear light for its OWN lighting
+maths. It is not part of the colour's identity. Remix lights from an sRGB albedo, so the colour
+must be handed over AS AUTHORED, with no pow. That also explains why the two player cloth variants
+disagree - ir_sr3pccloth uses the same constants directly (no pow, Diffuse_Color at c14,
+Pattern_Map at s0) while ir_at_sr3pccloth pows them (c11, s2).
+
+### The material is set by NAME, which is the model the shim already uses
+0x00951A60 sets Diffuse_Color_a/b/c, "Hair", and Sphere_Map through one call (0xd9e8b0) taking a
+name string. The shader's own constant table then maps that name to a register. So reflecting by
+name per draw - which ReflectShader already does at line 868 for Pattern_MapSampler - is correct
+by construction, and the varying registers between variants were never a bug.
+
+### What the exe CANNOT answer
+Which texture is bound to which sampler STAGE for a given garment. "Pattern_Map" does not appear as
+a string in the exe at all - it lives in the material data files, not in code. Diffuse_Map,
+Specular_Map, Normal_Map, Sphere_Map and Decal_Map do appear, but the binding is data-driven.
+
+So the remaining gap genuinely needs a runtime probe rather than more disassembly, and that is now
+established rather than assumed.
+
+### Verified inventory
+  colours are byte/255 sRGB                         exe, 0x008FCE60
+  no engine-side gamma or scale on them             exe, same block
+  parameters bound by name                          exe, 0x00951A60 -> 0xd9e8b0
+  Pattern_Map register varies (s0 vs s2)            corpus, two files
+  Diffuse_Color register varies (c11 vs c14)        corpus, two files
+  shim resolves both by name already                sr3rtx.cpp:868
+  the pattern we read is 32x32 SOLID BLUE           runtime, mean 85 = (0+0+255)/3
+  the pattern lock succeeds                         runtime, "8 ok, 0 failed"
+
+## 2026-09-04 - the clothes are too dark, and it is NOT the recipe
+
+Traced r1.x in the lerp: `mov_pp r1.xz, c6` with `def c6, 1, 0.5, -0.5, ...` so r1.x = 1.0, and
+`mad r5.xyz, r6.z, r5, c6.x` with `r5 = c3 - r1.x` is exactly lerp(1, C, p.b). The implementation
+matches the shader instruction for instruction.
+
+Bake #2 computes (84 0 0) from colour C = (0.40 0 0) and a diffuse of 0.82. That IS what the
+shader produces. So the albedo is right and the image is still dark, which places the fault in how
+REMIX LIGHTS this mesh rather than in what we hand it.
+
+Added clothBrightness (a percentage, default 100) and labelled it in both the code and the ini as
+a TUNING KNOB rather than a fix, with the evidence for why the recipe is not at fault written
+beside it. Whatever value looks correct is a measurement of the lighting gap - a factor of two
+would point at our API instances not receiving the same lights as the game's own geometry.
+
+Also added clothUseDiffuse (default 1) so the diffuse multiply can be A/B'd from the ini.
+
+### Session summary
+Everything from this session is written up as "STATE, 2026-09-04" at the top of
+docs/YOUR-INSTRUCTIONS.md: the Remix API contract and its six paid-for traps, the character
+pipeline, the customisation facts verified from the exe and the shaders, what is open, the routes
+that are closed and must not be reopened, and the method lessons that actually paid.

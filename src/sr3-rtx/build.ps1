@@ -11,9 +11,14 @@ if (-not (Test-Path $vcvars)) { throw "vcvars32.bat not found at $vcvars" }
 
 # /LD builds the DLL; the .asi extension is just a renamed DLL. Object and output paths
 # are given as full filenames - a trailing backslash inside quotes escapes the quote.
+#
+# /MAP is not optional. The shim installs a crash handler and writes sr3-rtx-crash.dmp, and on
+# 2026-08-28 that dump named a fault at sr3-rtx.asi+0x198ee - which nothing in the project could
+# turn into a line of source, because no map or symbols were ever produced. A crash address you
+# cannot resolve is a crash you have to guess at.
 $cmd = "`"$vcvars`" >nul 2>&1 && cl /nologo /std:c++17 /O2 /W3 /EHsc /MT /LD " +
        "`"$src\sr3rtx.cpp`" /Fe:`"$out\sr3-rtx.asi`" /Fo:`"$out\sr3rtx.obj`" " +
-       "/link user32.lib shlwapi.lib"
+       "/link user32.lib shlwapi.lib /MAP:`"$out\sr3-rtx.map`""
 
 Write-Host "building..."
 
