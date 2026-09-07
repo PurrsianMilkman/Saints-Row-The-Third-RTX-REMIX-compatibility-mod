@@ -520,3 +520,164 @@ Across the run: 9,581,420 draws on the accepted camera against 2,190,420 decline
 non-back-buffer target - 18.6% of draws are off-screen passes. `g_rt0Width/Height` already carries
 this from the `SetRenderTarget` hook at no extra bridge cost, and it needs no shader names and no
 render-target indices, both of which are recorded dead ends.
+
+
+---
+
+# ADDENDUM 2026-09-07 — the dispatch table is WRITABLE, and `0xD9E8B0` is a string hasher, not a setter
+
+*Static only, against `SaintsRowTheThird.exe` with pefile + capstone. No runs.*
+
+## 1. The opcode dispatch table can be hooked
+
+The 74-entry table at `0x013509F8` — the one the render thread indexes at `0x0049DED2` — sits in
+**`.data`**, which is `READ|WRITE`:
+
+| section | VA | virtual size | characteristics |
+|---|---|---|---|
+| `.text` | `0x00401000` | `0x00C1AAF0` | `0x60000020` R-X |
+| `.rdata` | `0x0101C000` | `0x002C436A` | `0x40000040` R-- |
+| **`.data`** | **`0x012E1000`** | **`0x022415FC`** | **`0xC0000040` RW-** |
+
+Every runtime global in this document's submission map is in that same writable section: the read
+pointer `0x02E5D650`, the block bounds `0x02E5D648/64C`, the ring base `0x033938A0`, the device
+pointer `0x03171B68` and the kill-switch `0x03395EA4`.
+
+Dumped from file offset `0xF4EDF8`, the table holds **58 live handlers — all inside `.text` — and
+16 copies of the stub `0x004BF550`**. The dwords following entry 73 are `0, 2, 0x28, 1`: small
+integers, not pointers, so the table ends exactly where the dispatcher's `cmp esi, 0x4a` says.
+
+**Calling convention.** Handlers take no arguments — each reads its command from `[0x02E5D650]` —
+and end in a plain `ret`, not `ret N`. `void __cdecl` is therefore an exact replacement. The
+dispatcher keeps the opcode in `ESI` across the call, and `esi` is callee-saved in the MSVC x86
+ABI, so an ordinary C function already preserves it.
+
+**The stub is a bare `ret`** (`0x004BF550`, then `int3` padding). It never advances the read
+pointer, so if the producer ever emitted one of those 16 opcodes the render thread would spin on
+that command forever. They are therefore never emitted — and a hook that counts them turns that
+inference into a measurement.
+
+## 2. The kill-switch does the pointer arithmetic for us
+
+The `DrawIndexedPrimitive` handler's two paths, in full:
+
+```asm
+0x0049D661  cmp  byte [0x3395ea4], 0     ; kill-switch
+0x0049D668  jne  0x49d6a5
+            ... six args from [esi+4..+0x18], call vtable+0x148 ...
+0x0049D692  add  dword [0x2e5d650], 0x1c ; DRAW path advances by 0x1C
+0x0049D699  mov  dword [0x3395e7c], 0
+0x0049D6A3  pop  esi
+0x0049D6A4  ret
+0x0049D6A5  mov  ecx, [0x351f8f8]        ; KILL path
+0x0049D6AB  mov  eax, [ecx + 0x50]
+0x0049D6AE  or   dword [eax + 4], 0x80   ; the engine's own "draw was skipped" flag
+0x0049D6B5  add  dword [0x2e5d650], 0x1c ; ...advances by the SAME 0x1C
+0x0049D6BC  pop  esi
+0x0049D6BD  ret
+```
+
+**Both paths advance the read pointer identically.** So the way to suppress a draw is to set
+`0x03395EA4`, call the original handler, and clear it again: the engine skips its own draw,
+advances its own pointer, and sets its own skipped flag. No size arithmetic on our side, no chance
+of desynchronising the block — and it works for **op 43**, whose size the static extraction in the
+previous addendum could never resolve.
+
+The kill path dereferences `[0x351f8f8] → +0x50 → +4`, so that chain must be non-null before the
+switch is armed.
+
+## 3. CORRECTION — `0x00D9E8B0` is a string hasher, not a material-parameter setter
+
+`YOUR-INSTRUCTIONS.md` records "0x00951A60 sets Diffuse_Color_a/b/c … through one call (0xd9e8b0)
+taking a name string". The call site is right; what the function *is* was not. Disassembled, it
+walks the string one byte at a time:
+
+```asm
+0x00D9E8E8  call  0xea739d                  ; tolower  (if 'A'..'Z' add 0x20)
+0x00D9E8F1  movzx ecx, al
+0x00D9E8F6  xor   ecx, esi
+0x00D9E8F8  and   ecx, 0xff
+0x00D9E8FE  shr   esi, 8
+0x00D9E901  xor   esi, [ecx*4 + 0x1320da0]  ; table lookup
+...
+0x00D9E914  mov   [edx], esi                ; stored raw - NO final inversion
+```
+
+That is the standard reflected CRC-32 inner loop, `crc = (crc >> 8) ^ table[(crc ^ ch) & 0xFF]`.
+All 256 entries at `0x1320DA0` are **byte-identical to a generated CRC-32 table** (polynomial
+`0xEDB88320`), checked entry by entry. Signature is thiscall
+`Hash(this, const char* name, unsigned seed, unsigned maxLen)`; call sites pass seed `0` and
+maxLen `-1`, and the result is stored without a final XOR.
+
+So the identity of a named engine parameter is:
+
+    id = crc32_lowercase(name)      init 0, no final XOR
+
+| name | id |
+|---|---|
+| `Diffuse_Color_a` | `0xA7D143AC` |
+| `Diffuse_Color_b` | `0x3ED81216` |
+| `Diffuse_Color_c` | `0x49DF2280` |
+| `Diffuse_Map` | `0x69B48F91` |
+| `Pattern_Map` | `0x03B65AF7` |
+| `Specular_Map` | `0xE848C9CA` |
+| `Normal_Map` | `0x2808EB90` |
+| `Tint_color` | `0x8F88517A` |
+
+At `0x008FCE60` the three colour names are hashed **once** and cached, guarded by a bitmask at
+`0x025F5B7C` (`test byte [0x25f5b7c], bl` / `or dword [0x25f5b7c], ebx`) with the hash objects at
+`0x025F5B70/74/78`.
+
+This does **not** overturn "parameters are bound by name" — that conclusion stands, and reflecting
+by name per draw is still correct by construction. What it adds is the *runtime key*: the engine
+compares 32-bit hashes, not strings, so any parameter id seen at runtime can be turned back into a
+name by hashing a candidate list, and any name can be looked up without a string search. That is
+the mechanism goal 3 needs, and `Pattern_Map` not appearing as a string in the exe is consistent
+with it — a data-driven binding stores the hash, not the text.
+
+
+## Correction, 2026-09-07 - op 37 is NOT DrawPrimitive, and the query triple is now named
+
+The opcode table above assigned op 37 to `DrawPrimitive`. Reading the handlers themselves - after
+the stage 0 hook census showed several thousand commands a frame with no established identity -
+corrects it, and names four more:
+
+| op | handler | what it actually is |
+|---|---|---|
+| 20 | `0x0049D040` | **engine state shadow.** Writes `[id*4 + 0x33958E0]` and `[((w1<<4)+w0)*4 + 0x3395970]`, ORs bits into `0x3395E70/74`, sets flag `0x3395E79`. **Calls no D3D9 method at all** |
+| 21 | `0x0049D0C0` | the same two shadow arrays, from a pointed-to block rather than inline. Also no D3D9 call |
+| **37** | `0x0049D510` | **`SetTexture` (vtable+0x104 = slot 65), stage = `[cmd+4] + 0x101`.** `0x101` is `D3DVERTEXTEXTURESAMPLER0`, so this binds a **VERTEX texture**. It issues no draw and does not test the kill-switch |
+| **40** | `0x0049D560` | **`DrawPrimitive`** (vtable+0x144 = slot 81). Tests the kill-switch. Size `0x10` |
+| 52 | `0x0049D810` | `IDirect3DQuery9::Issue` (vtable+0x18 = slot 6) with `D3DISSUE_BEGIN` |
+| 53 | `0x0049D830` | `IDirect3DQuery9::Issue` with `D3DISSUE_END` |
+| 54 | `0x0049D850` | `IDirect3DQuery9::GetData` (vtable+0x1C = slot 7), 4 bytes, flags 0. On failure writes `0xFFFFFFFF` to `[cmd+8]`, else the result |
+
+**So the draw opcodes are 40, 41, 42, 43** - handlers `0x0049D560/5D0/650/6C0`, consecutive, and
+exactly the four that test the kill-switch at `0x03395EA4`. Op 37 was never one of them. The shim
+had inherited `{37, 40, 41, 42, 43}`; treating 37 as a draw would suppress a vertex-texture bind
+while removing no geometry, which is precisely the kind of fault that is invisible until a drop is
+actually attempted. Fixed in `EngineOpIsDraw()` before stage 1.
+
+Ops 52/53/54 are dispatched at an **identical 557.3 per frame** - they are one occlusion query,
+issued and read back 557 times a frame. That is the engine's own occlusion culling appearing in the
+command stream, and it is what `forceOcclusionVisible` currently intercepts at the D3D9 boundary.
+
+## First run of the stage 0 hook, 2026-09-07 - measured
+
+`74/74` entries hooked, **123,307,264 commands dispatched over 4,800 frames** (~25,700 a frame),
+no crash, and the table still held our thunks at exit. The predictions all held:
+
+- **stub opcodes dispatched: 0**, confirming the bare-`ret` reading - the engine cannot emit them.
+- **op 42 dispatches (15,831,840) match the D3D9 draws the shim attributed (15,831,620)** - two
+  independent measurement paths agreeing to within a sampling window.
+- the kill-switch was **set on 0 draws**, consistent with `forceOcclusionVisible=1`.
+
+Two results that matter for filtering:
+
+1. **Zero `GetRenderTargetData` in 108 million commands across 163,456 blocks.** Rule 1 - "a block
+   whose result the engine reads back may never be skipped" - is the constraint that blacked out
+   the world three times, and in gameplay **it does not bind anywhere**. 
+2. **Zero walks stopped early**, so ops 7, 43, 56, 60 and 72 - the five whose sizes were never
+   resolved - simply never occur. The size table is complete for gameplay.
+
+~59.5 `SetRenderTarget` per frame, so roughly 60 passes a frame is the unit stage 2 will filter.

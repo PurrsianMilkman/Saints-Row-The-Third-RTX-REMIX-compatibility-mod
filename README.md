@@ -40,26 +40,37 @@ and thanks to RTX REMIX and Nvidia!
 
 ## Status: work in progress
 
-The path-traced world renders, is textured and is lit. **The sky and the HUD are still missing**,
-and characters are mid-rebuild onto a new architecture — see [Known issues](#known-issues) before
-you install, so you know what you are getting.
+The path-traced world renders, is textured and is lit. **The HUD is back as of v0.1.4**, and so is
+the character's skin and their clothing colours. **The sky is still missing** — see
+[Known issues](#known-issues) before you install, so you know what you are getting.
 
 **Install: [INSTALL.md](INSTALL.md)** · **What changed: [CHANGELOG.md](CHANGELOG.md)** ·
 **Credits: [CREDITS.md](CREDITS.md)** · **Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)**
 
-### The architecture changed in v0.1.2
+### The technique that unlocked v0.1.4
 
-Characters are no longer faked as fixed-function draws. They are described to Remix directly
-through its **programmatic API** — the shim creates the meshes, names the materials and chooses
-the textures, while the game renders untouched alongside. Ten parts, ~22,000 triangles, correct
-geometry, placement, per-slot textures, customisation colours and hair.
+**Remix's refusal is about the vertex shader, not the draw.** Its own message says so —
+`Skipping draw call with shader usage as vertex capture is not enabled` — because vertex capture
+exists to capture *vertex-shader* output. The pixel shader was never the problem.
 
-The API is gated behind `exposeRemixApi = True` in `.trex\bridge.conf`, which is why the install
-now has an extra step. `remixapi_InitializeLibrary` is exported by the **32-bit bridge client**
-`d3d9.dll` — the one the game loads, in the game's own process.
+So a draw re-issued with **fixed-function vertex processing** while **the game's own pixel shader
+stays bound** is a combination Remix executes happily with capture off. One fact, three fixes:
 
-This matters beyond characters: it is a route to describing *anything* to Remix directly, rather
-than dressing draws up as fixed function and hoping Remix reconstructs them the way we meant.
+| what it fixed | how |
+|---|---|
+| **the HUD** | `DrawPrimitiveUP` draws rebuilt as `D3DFVF_XYZRHW` quads — positions are already screen pixels, so it is a 28-byte field reorder |
+| **the character's skin** | the atlas composites re-issued as a full-target quad with their own pixel shader kept |
+| the menu video | proved the rule: nulling the pixel shader turned it greyscale, because Bink is Y/Cr/Cb across three stages and stage 0 alone is luma |
+
+### The Remix programmatic API (v0.1.2, now optional)
+
+The shim can also describe geometry to Remix **directly** — creating meshes, naming materials and
+choosing textures — instead of dressing draws up as fixed function. That is how characters were
+built in v0.1.2, gated behind `exposeRemixApi = True` in `.trex\bridge.conf`.
+
+It ships **off** in v0.1.4 (`remixApiCharacter=0`), because the technique above makes the game's
+own character render correctly — which also retires the duplicate character and the frozen one.
+The API path remains available and is still the route for describing arbitrary geometry to Remix.
 
 ## What it does
 
@@ -112,12 +123,10 @@ Stated plainly, because a compatibility mod that hides its gaps wastes everyone'
 | issue | status |
 |---|---|
 | **No sky.** The `rfg-skybox` family (~50 draws/frame) is passed through rather than converted, and pass-through draws are skipped now that vertex capture is off. | open — needs conversion; the dome is 343 verts one unit from the camera, so it needs care |
-| **No HUD.** The UI is shader-drawn and never converted, so it disappears with vertex capture off. | open |
-| **The API character stands beside the game's own.** The Remix-API copy is deliberately offset 3 units so the two cannot z-fight while the pipeline is being built. Removing the game's copy is the last step. | by design, for now |
-| **The API character is frozen.** Handing Remix `MeshInfoSkinning` crashed its 64-bit server inside `CreateMesh`, so skinning is off (`remixApiSkinning=0`). | open |
-| **Clothes read too dark.** The recipe is proven correct against both the exe and the shader — a bake computes exactly what the shader produces — so the fault is in how Remix lights these meshes. `clothBrightness` is a tuning knob, not a fix. | open |
-| **Hair has no strand detail** — flat colour only. | open — the colour itself is now correct |
+| **The underwear.** The one garment class that genuinely needs the mesh to relate two UV sets — a varying pattern on a second texture coordinate set. The CPU baker produces it in the right colour; whether the islands land where the mesh samples is unestablished. | open — every other garment works |
+| **Clothes brightness overall.** The recipe is proven correct against both the exe and the shader, so the fault is in how Remix lights these meshes rather than in the albedo. `clothAlbedoPercent` is the single knob. | open |
 | ~11 draws/frame still have unreadable texcoords — their source vertex buffer is DYNAMIC, so the per-buffer UV conversion cannot cache them. | open — needs a per-draw ring |
+| **The Remix-API character path**, when enabled, is frozen and stands beside the game's own copy — handing Remix `MeshInfoSkinning` crashed its 64-bit server. It ships **off**, so this is not something you will see. | open, but not in the shipped config |
 | **Shim time grows across a session**, ~24% → ~44% of frame time, worst-case stalls around 300 ms. | open |
 | **Performance.** The occlusion-query hook deliberately answers "visible" to every query, so the game submits more geometry than it normally would. Functionality was prioritised over frame rate. | by design, for now |
 
@@ -125,7 +134,8 @@ Fixed and no longer a concern: z-fighting / doubled world, the crash on fast mov
 sky, white surfaces, frozen character animation, the camera-blocking particle plane, the flat
 untextured world, over-tiled roads, churning geometry hashes, black cars, objects popping out of
 existence as they entered the frustum, car parts and glass drifting in rhythm with character
-animation (v0.1.1), and the black character texture (v0.1.2).
+animation (v0.1.1), the black character texture (v0.1.2), and — in v0.1.4 — **the missing HUD**,
+the player's untinted clothing, and hair with no strand detail.
 
 Release history and what changed in each: **[CHANGELOG.md](CHANGELOG.md)**.
 
@@ -162,12 +172,30 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 │   ├── peg.py               read PEG (GEKV v13) texture containers -> PNG
 │   ├── fxo_scan.py          parse .fxo_pc shaders' CTABs -> named constants + registers
 │   └── fxo_disasm.py        disassemble one shader out of a .fxo_pc
-└── docs/
-    ├── HANDOFF-PROMPT.md    start here if you are picking the project up
-    ├── YOUR-INSTRUCTIONS.md current state, engine facts, and the dead ends not to retry
-    ├── engine-map.md        the renderer: command buffer, opcodes, dispatch table
-    └── worklog.md           the run-by-run history (~11,000 lines)
+├── docs/
+│   ├── HANDOFF-PROMPT.md    start here if you are picking the project up
+│   ├── YOUR-INSTRUCTIONS.md current state, engine facts, and the dead ends not to retry
+│   ├── engine-map.md        the renderer: command buffer, opcodes, dispatch table
+│   └── worklog.md           the run-by-run history
+├── engine-control/      a SEPARATE plugin, sr3-engine.asi — see below
+└── srttr-hair/          a SEPARATE mod, the SRTTR hair reshape — see below
 ```
+
+### Two sub-projects that ship separately
+
+**`engine-control/`** builds `sr3-engine.asi`, which hooks **the engine's own render-command
+dispatch table** at `0x013509F8` rather than the D3D9 device vtable. SR3 is a command-buffer
+renderer: a producer thread writes command blocks into a ring, a render thread consumes them and
+dispatches each through a 74-entry function-pointer table — and that table sits in writable
+`.data`. Hooking there puts our code *inside* the engine, one level above D3D9, where a command is
+still a command rather than six loose arguments. It shares no state with `sr3-rtx.asi`; either can
+be removed without affecting the other, and the ASI loader loads both.
+
+**`srttr-hair/`** is an unrelated mod that reshapes *Saints Row: The Third Remastered*'s hair
+meshes back onto the 2011 game's silhouette — the Remaster re-authored every style puffier, with
+stray strand cards over the crown. Only vertex positions change; vertex counts, UVs, bone weights,
+index buffers and textures stay byte for byte as SRTTR shipped them. Its tools are versioned here;
+its game data is not.
 
 Not in the repo, by design: the game copy, the Remix runtime, and extracted game assets (`re/`) —
 none of those are ours to redistribute. `tools/vpp_extract.py` regenerates the last one.
@@ -204,11 +232,9 @@ copy of the game.
 
 ## Roadmap
 
-1. **Finish the API character** — get skinning past Remix's server crash so it animates, solve the
-   lighting gap that makes clothes read dark, then remove the game's own copy and drop the
-   diagnostic offset.
-2. **Convert the sky** and **convert the UI** — the two populations lost when vertex capture was
-   turned off.
+1. **Convert the sky** — the last population lost when vertex capture was turned off. ~14 draws a
+   frame, still passed through.
+2. **The underwear**, and the lighting gap that makes clothes read dark overall.
 3. Performance: the growing shim time and its stalls.
 4. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
    fallback light.

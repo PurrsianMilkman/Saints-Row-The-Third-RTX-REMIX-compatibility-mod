@@ -223,6 +223,9 @@ struct Settings {
     // Pattern_Map on a second UV set - in the DIFFUSE map's own texture space, whenever the
     // pattern is a single uniform colour. See ClothAlbedoUniform.
     bool clothUniformFromDiffuse = true;
+    // Give hair its STRAND detail by modulating the hair colour with the Dob_Map's strand
+    // channel, instead of shipping one flat colour. 0 restores the flat constant.
+    bool hairStrandsFromDob = true;
     // Take the UV divide from the vertex shader's own def constant instead of assuming 1/1024.
     // 0 restores the hardcoded value, which is the A/B for anything this changes.
     bool uvScaleFromShader = true;
@@ -344,6 +347,7 @@ void LoadSettings() {
     g_settings.uiKeepPixelShader = flag("uiKeepPixelShader", true);
     g_settings.compositeFfp = flag("compositeFfp", true);
     g_settings.clothUniformFromDiffuse = flag("clothUniformFromDiffuse", true);
+    g_settings.hairStrandsFromDob = flag("hairStrandsFromDob", true);
     g_settings.uvScaleFromShader = flag("uvScaleFromShader", true);
     g_settings.passCensus = flag("passCensus", true);
     g_settings.atlasCompositeProbe = flag("atlasCompositeProbe", true);
@@ -769,6 +773,24 @@ struct ShaderInfo {
     // tinted by the three customisation colours. 34 shader entries across 19 files carry the
     // full set, the whole ir_*sr3pccloth* / ir_*sr3npccloth* family, player and NPC alike.
     char colourConstName[24] = {};        // which constant won the colour ranking
+    // WHICH TEXCOORD FEEDS EACH SAMPLER, read from the shader's own texld instructions.
+    //
+    // This shim has assumed since the fork that the albedo is sampled with TEXCOORD0 and the
+    // Pattern_Map with TEXCOORD1. Disassembling the player's cloth shaders shows that is not a
+    // rule, it is a coincidence that holds for some variants:
+    //
+    //   ir_sr3pccloth_bs   [6]   texld r6, v1, s0     s0 <- TEXCOORD1
+    //   ir_at_sr3pccloth_bs[8]   texld r5, v1, s2     s2 <- TEXCOORD1   (the pattern)
+    //                            texld r4, r4, s0     s0 <- a COMPUTED coordinate built from
+    //                                                       TEXCOORD6 and clamped against c2/c3
+    //
+    // So a garment's albedo can arrive through TEXCOORD6, and the CPU baker has been rasterising
+    // into TEXCOORD0 space regardless - which is exactly why its islands need not land where the
+    // mesh samples them. -1 means the coordinate is computed rather than taken straight from an
+    // input register, and that is worth knowing too: a computed coordinate cannot be reproduced
+    // by resampling and says so instead of being guessed at.
+    int samplerUv[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    bool sawTexld = false;
     int patternStage = -1;                // the Pattern_Map sampler
     int diffuseColorReg[3] = {-1, -1, -1};   // Diffuse_Color_a, _b, _c
     // Diffuse_Color, a SEPARATE uniform (c11 in the player cloth shaders) that scales the diffuse
@@ -860,6 +882,24 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
                 if (usage == 0 /* D3DDECLUSAGE_POSITION */ && ((t[1] >> 16) & 0xF) == 1 &&
                     regType == 1 /* INPUT */)
                     result.usesMorph = true;
+            }
+            // D3DSIO_TEX / texld (0x42) in ps_3_0: dst, source coordinate, sampler.
+            //
+            // The coordinate's register type lives in the same split field every register uses -
+            // bits 28-30 with bits 11-12 - and type 1 is D3DSPR_INPUT, the vN registers that
+            // dcl_texcoordN declares. The sampler's index is the low bits of the third token.
+            // A coordinate that is anything other than an input register was computed by the
+            // shader and is recorded as -1.
+            if (op == 0x42 && len >= 3 && t + 3 < end) {
+                const DWORD srcTok = t[2], smpTok = t[3];
+                const DWORD srcType = ((srcTok & 0x70000000) >> 28) | ((srcTok & 0x00001800) >> 8);
+                const DWORD smpType = ((smpTok & 0x70000000) >> 28) | ((smpTok & 0x00001800) >> 8);
+                const unsigned smp = smpTok & 0x7FF;
+                if (smpType == 10 /* D3DSPR_SAMPLER */ && smp < 8) {
+                    result.sawTexld = true;
+                    result.samplerUv[smp] =
+                        (srcType == 1 /* D3DSPR_INPUT */) ? static_cast<int>(srcTok & 0x7FF) : -1;
+                }
             }
             // D3DSIO_DEF (0x51): `def cN, x, y, z, w`. One destination token, then four floats.
             //
@@ -2453,6 +2493,264 @@ void ReleaseClothCache() {
     g_clothCache.clear();
 }
 
+// Does this draw sample the PATTERN at a single point?
+//
+// The pattern rides a second uv set, and the assumption all along was that a varying pattern
+// therefore needs the mesh to relate the two sets. The captured vertices say otherwise. Sampled
+// across a cloth draw, uv1 comes in three shapes:
+//
+//     uv1 == uv0                 the pattern shares the garment's own unwrap
+//     uv1 == one constant        every vertex reads the SAME pattern texel
+//     uv1 genuinely varying      the hard case
+//
+// The middle one is common - `uv1(864 269)` on every sampled vertex of one garment, `uv1(0 0)`
+// on another - and it means the whole surface takes ONE colour however detailed the pattern is.
+// pat_llheart01, the tiling heart the player has on her underwear, is a 64x64 texture with two
+// regions; read at a single uv it yields a single colour, which is exactly why the unmodded game
+// shows that garment as flat colour with the logo barely distinguishable.
+//
+// So the uniformity test was asking the wrong question. It asked whether the pattern TEXTURE has
+// more than one colour. What matters is whether this GARMENT samples more than one texel of it.
+unsigned g_onePointWhy = 0;
+
+// Every way out of this says which way it was. It returned false on the underwear and reported
+// nothing, which is the same silence that made "the draw is not converted" look like a finding
+// when the draw was converted all along. A predicate used as a gate has to be able to explain a
+// refusal, or the next step is guesswork again.
+bool ClothPatternIsSampledAtOnePoint(float* outU, float* outV) {
+    const bool tell = (g_onePointWhy < 6);
+    auto no = [&](const char* why) -> bool {
+        if (tell) { ++g_onePointWhy; Log("ONE-POINT declined: %s", why); }
+        return false;
+    };
+    if (g_curLayout.texcoord1Offset < 0)
+        return no("this vertex declaration has NO TEXCOORD1 - the pattern's own coordinates are "
+                  "not in the stream at all");
+    if (g_curLayout.texcoord1Type != D3DDECLTYPE_SHORT2) {
+        if (tell) {
+            ++g_onePointWhy;
+            Log("ONE-POINT declined: TEXCOORD1 is type %d, not SHORT2 - the reader only decodes "
+                "short2", g_curLayout.texcoord1Type);
+        }
+        return false;
+    }
+    if (!g_stream0 || !g_stream0Stride) return no("no stream 0 bound");
+    if (g_curDrawVertexCount < 8) {
+        if (tell) {
+            ++g_onePointWhy;
+            Log("ONE-POINT declined: only %u vertices in this draw, the sampler wants 8",
+                g_curDrawVertexCount);
+        }
+        return false;
+    }
+    if (!VertexRangeFits(g_stream0, g_stream0Offset, g_curDrawFirstVertex,
+                         g_curDrawVertexCount, g_stream0Stride))
+        return no("the vertex range does not fit the buffer - reading it would be out of bounds");
+    void* mapped = nullptr;
+    if (FAILED(g_stream0->Lock(g_stream0Offset + g_curDrawFirstVertex * g_stream0Stride,
+                               g_curDrawVertexCount * g_stream0Stride, &mapped,
+                               D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) || !mapped)
+        return no("the vertex buffer refused a read lock");
+    const unsigned char* base = static_cast<const unsigned char*>(mapped);
+    const UINT off = static_cast<UINT>(g_curLayout.texcoord1Offset);
+    const UINT step = g_curDrawVertexCount / 16 ? g_curDrawVertexCount / 16 : 1;
+    const short* first = reinterpret_cast<const short*>(base + off);
+    const short u0 = first[0], v0 = first[1];
+    bool constant = true;
+    for (UINT i = step; i < g_curDrawVertexCount && constant; i += step) {
+        const short* p = reinterpret_cast<const short*>(base + i * g_stream0Stride + off);
+        if (p[0] != u0 || p[1] != v0) constant = false;
+    }
+    // The spread, so "not constant" is a measurement rather than a verdict. A pattern read
+    // across a handful of texels is still nearly one colour; one read across the whole map is
+    // not, and the numbers separate those.
+    short lo[2] = {u0, v0}, hi[2] = {u0, v0};
+    for (UINT i = step; i < g_curDrawVertexCount; i += step) {
+        const short* p = reinterpret_cast<const short*>(base + i * g_stream0Stride + off);
+        for (int c = 0; c < 2; ++c) {
+            if (p[c] < lo[c]) lo[c] = p[c];
+            if (p[c] > hi[c]) hi[c] = p[c];
+        }
+    }
+    // IS UV1 AN AFFINE FUNCTION OF UV0?
+    //
+    // "It varies" closes the one-colour shortcut but not the problem. The pattern is a decal
+    // laid over the garment, and a decal is normally placed by SCALING the garment's own unwrap
+    // rather than by a second independent layout. If uv1 = uv0 * s + o holds, the pattern can be
+    // resolved per texel in the DIFFUSE's space - sample it at (uv * s + o) - and the mesh is not
+    // needed after all. If it does not hold, the mesh genuinely is required and that is worth
+    // knowing for certain rather than assuming in either direction.
+    //
+    // Least squares over the sampled vertices, then the WORST residual - a mean residual can hide
+    // a fit that is right in the middle and wrong at the edges, which for a decal is exactly
+    // where it would show.
+    double fitS[2] = {0, 0}, fitO[2] = {0, 0}, worst[2] = {0, 0};
+    bool fitted = false;
+    if (g_curLayout.texcoordOffset >= 0 && g_curLayout.texcoordType == D3DDECLTYPE_SHORT2) {
+        const UINT off0 = static_cast<UINT>(g_curLayout.texcoordOffset);
+        double n = 0, sx[2] = {0, 0}, sy[2] = {0, 0}, sxx[2] = {0, 0}, sxy[2] = {0, 0};
+        for (UINT i = 0; i < g_curDrawVertexCount; i += step) {
+            const short* a = reinterpret_cast<const short*>(base + i * g_stream0Stride + off0);
+            const short* b = reinterpret_cast<const short*>(base + i * g_stream0Stride + off);
+            for (int c = 0; c < 2; ++c) {
+                const double x = a[c], y = b[c];
+                sx[c] += x; sy[c] += y; sxx[c] += x * x; sxy[c] += x * y;
+            }
+            n += 1.0;
+        }
+        if (n >= 3.0) {
+            fitted = true;
+            for (int c = 0; c < 2 && fitted; ++c) {
+                const double den = n * sxx[c] - sx[c] * sx[c];
+                if (den == 0.0) { fitted = false; break; }
+                fitS[c] = (n * sxy[c] - sx[c] * sy[c]) / den;
+                fitO[c] = (sy[c] - fitS[c] * sx[c]) / n;
+            }
+            if (fitted)
+                for (UINT i = 0; i < g_curDrawVertexCount; i += step) {
+                    const short* a =
+                        reinterpret_cast<const short*>(base + i * g_stream0Stride + off0);
+                    const short* b =
+                        reinterpret_cast<const short*>(base + i * g_stream0Stride + off);
+                    for (int c = 0; c < 2; ++c) {
+                        const double r = fabs(fitS[c] * a[c] + fitO[c] - b[c]);
+                        if (r > worst[c]) worst[c] = r;
+                    }
+                }
+        }
+    }
+    g_stream0->Unlock();
+    if (!constant) {
+        if (tell) {
+            ++g_onePointWhy;
+            Log("ONE-POINT declined: TEXCOORD1 VARIES across this draw - u spans %d..%d, "
+                "v spans %d..%d (raw shorts, /1024).",
+                lo[0], hi[0], lo[1], hi[1]);
+            if (fitted)
+                Log("      UV1 vs UV0 least-squares fit: u = %.4f*u0 %+.1f (worst residual %.1f), "
+                    "v = %.4f*v0 %+.1f (worst residual %.1f) -> %s",
+                    fitS[0], fitO[0], worst[0], fitS[1], fitO[1], worst[1],
+                    (worst[0] < 8.0 && worst[1] < 8.0)
+                        ? "AFFINE. The pattern can be resolved in the diffuse's own texture space "
+                          "by sampling it at uv*s+o - NO MESH NEEDED."
+                        : "NOT affine - the two unwraps are independent and the mesh really is "
+                          "required to relate them.");
+            else
+                Log("      UV1 vs UV0 fit could not be computed (no short2 TEXCOORD0, or too few "
+                    "distinct samples) - this says nothing either way.");
+        }
+        return false;
+    }
+    *outU = static_cast<float>(u0) * kShortUVScale;
+    *outV = static_cast<float>(v0) * kShortUVScale;
+    return true;
+}
+
+unsigned g_clothOnePointGen = 0;
+unsigned g_clothNoPattern = 0;
+
+// ------------------------------------------------------------------ hair, for the REAL character
+//
+// The strand generator built earlier writes a DDS for the Remix API path - and that path turned
+// out not to be drawing at all. The fix belonged on the shared path from the start: this is the
+// same arithmetic, producing a D3D texture the fixed-function conversion can bind, so the strands
+// land on the character the game itself draws.
+//
+//     albedo = chosen hair colour * (Dob_Map.R / 255)
+//
+// Measured from the shipped asset: R carries the strands (16..222), G is flat at 247, B mirrors
+// R. Nothing here is lit - the mask is authored - so Remix still does all the lighting, which is
+// the objection the older note in ApiSlot raises against baking the hair SHADER. Different thing.
+unsigned g_hairAlbedoGen = 0, g_hairAlbedoFail = 0;
+
+IDirect3DBaseTexture9* HairAlbedo(IDirect3DDevice9* dev) {
+    if (!g_settings.hairStrandsFromDob) return nullptr;
+    const ShaderInfo& ps = g_curPS;
+    const int reg = (ps.hairColorReg[1] >= 0) ? ps.hairColorReg[1] : ps.hairColorReg[0];
+    if (reg < 0 || reg >= static_cast<int>(kMaxPsConst)) return nullptr;
+
+    IDirect3DBaseTexture9* dobTex = nullptr;
+    for (int st = 0; st < 8; ++st)
+        if (g_curTexture[st] && ps.samplerName[st][0] && StrStrIA(ps.samplerName[st], "dob")) {
+            dobTex = g_curTexture[st];
+            break;
+        }
+    if (!dobTex) return nullptr;
+
+    float col[3][4]{};
+    memcpy(col[0], g_psConst[reg], 16);
+    unsigned long long key = ClothKey(dobTex, col) ^ 0x9E3779B97F4A7C15ull;
+    const auto it = g_clothCache.find(key);
+    if (it != g_clothCache.end()) {
+        if (it->second.generated) ++g_clothBound;
+        return it->second.generated;
+    }
+    if (g_clothCache.size() >= kMaxClothTextures) { ReleaseClothCache(); ++g_clothCacheFlushes; }
+
+    std::vector<unsigned char> dob;
+    UINT w = 0, h = 0;
+    if (!TextureToBgra(dobTex, dob, w, h) || !w || !h || w > 2048 || h > 2048 ||
+        dob.size() < static_cast<size_t>(w) * h * 4) {
+        ++g_hairAlbedoFail;
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    std::vector<unsigned> pixels;
+    try { pixels.assign(static_cast<size_t>(w) * h, 0xFF000000u); }
+    catch (...) { ++g_hairAlbedoFail; return nullptr; }
+    double acc = 0.0;
+    for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i) {
+        const float m = dob[i * 4 + 2] / 255.0f;         // BGRA: R is the strand channel
+        unsigned char o[3];
+        for (int k = 0; k < 3; ++k) {
+            float v = col[0][k] * m * g_settings.clothTintScale;
+            v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+            o[k] = static_cast<unsigned char>(v * 255.0f + 0.5f);
+            acc += o[k];
+        }
+        pixels[i] = 0xFF000000u | (static_cast<unsigned>(o[0]) << 16) |
+                    (static_cast<unsigned>(o[1]) << 8) | static_cast<unsigned>(o[2]);
+    }
+
+    IDirect3DTexture9* staging = nullptr;
+    IDirect3DTexture9* generated = nullptr;
+    const bool wasInternal = g_internal;
+    g_internal = true;
+    if (SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
+                                     &staging, nullptr)) && staging) {
+        D3DLOCKED_RECT dst{};
+        if (SUCCEEDED(staging->LockRect(0, &dst, nullptr, 0)) && dst.pBits) {
+            for (UINT y = 0; y < h; ++y)
+                memcpy(static_cast<unsigned char*>(dst.pBits) + y * dst.Pitch,
+                       &pixels[static_cast<size_t>(y) * w], static_cast<size_t>(w) * 4);
+            staging->UnlockRect(0);
+        }
+        if (SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                         &generated, nullptr)) && generated &&
+            FAILED(dev->UpdateTexture(staging, generated))) {
+            generated->Release();
+            generated = nullptr;
+        }
+        staging->Release();
+    }
+    g_internal = wasInternal;
+    if (!generated) {
+        ++g_hairAlbedoFail;
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    ++g_hairAlbedoGen;
+    if (g_hairAlbedoGen <= 8)
+        Log("HAIR ALBEDO #%u (the GAME's own character): %ux%u = colour (%.3f %.3f %.3f) * the "
+            "Dob_Map strand channel | mean %.1f of 255",
+            g_hairAlbedoGen, w, h, col[0][0], col[0][1], col[0][2],
+            acc / (3.0 * static_cast<double>(w) * h));
+    dobTex->AddRef();
+    g_clothCache[key] = ClothTex{dobTex, generated};
+    ++g_clothBound;
+    return generated;
+}
+
 // The generated albedo for this draw's outfit, or null to leave the albedo choice alone.
 
 // The body of the declaration above. Placed here, after TextureToBgra, because it needs a decoder
@@ -2484,12 +2782,33 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     // UNIFORM? Every texel the same colour means the lerp chain has one answer for the whole
     // garment. Checked rather than assumed, and a varying pattern is declined here so the CPU
     // baker still owns that case.
+    unsigned char pick[4] = {pat[0], pat[1], pat[2], pat[3]};
+    bool texelUniform = true;
     for (size_t q = 4; q < pat.size(); q += 4)
         if (pat[q] != pat[0] || pat[q + 1] != pat[1] || pat[q + 2] != pat[2]) {
+            texelUniform = false; break;
+        }
+    if (!texelUniform) {
+        // Not uniform as a TEXTURE - but does this garment read more than one texel of it?
+        float pu = 0.0f, pv = 0.0f;
+        if (!ClothPatternIsSampledAtOnePoint(&pu, &pv)) {
             ++g_clothUniformNotUniform;
             g_clothCache[key] = ClothTex{nullptr, nullptr};
             return nullptr;
         }
+        int px = static_cast<int>(pu * static_cast<float>(pw)) % static_cast<int>(pw);
+        int py = static_cast<int>(pv * static_cast<float>(ph)) % static_cast<int>(ph);
+        if (px < 0) px += static_cast<int>(pw);
+        if (py < 0) py += static_cast<int>(ph);
+        const unsigned char* q = &pat[(static_cast<size_t>(py) * pw + px) * 4];
+        pick[0] = q[0]; pick[1] = q[1]; pick[2] = q[2]; pick[3] = q[3];
+        ++g_clothOnePointGen;
+        if (g_clothOnePointGen <= 8)
+            Log("CLOTH ONE-POINT #%u: the pattern varies, but this garment samples it at a "
+                "single uv (%.4f %.4f) -> texel BGRA %u %u %u. One colour for the surface, and "
+                "no mesh needed to work that out.",
+                g_clothOnePointGen, pu, pv, pick[0], pick[1], pick[2]);
+    }
     if (!TextureToBgra(diffuse, dif, dw, dh) || dif.empty() || !dw || !dh ||
         dw > 2048 || dh > 2048) {
         ++g_clothUniformNoDiffuse;
@@ -2519,7 +2838,7 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     // branch anyway - but it is copied rather than assumed away, because the next uniform
     // pattern may well be a grey one.
     BuildClothLUTs();
-    const unsigned char pR = pat[2], pG = pat[1], pB = pat[0];        // stored BGRA
+    const unsigned char pR = pick[2], pG = pick[1], pB = pick[0];     // stored BGRA
     float c[3];
     {
         const float fr = pR / 255.0f, fg = pG / 255.0f, fb = pB / 255.0f;
@@ -2634,7 +2953,17 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
 IDirect3DBaseTexture9* ClothAlbedo(IDirect3DDevice9* dev) {
     if (!g_settings.generateCloth) return nullptr;
     const ShaderInfo& ps = g_curPS;
-    if (ps.patternStage < 0 || ps.patternStage >= 8) return nullptr;
+    // Reported once per distinct reason. A silent `return nullptr` at the top of a generator
+    // is indistinguishable from "this draw never happened", and telling those apart is the whole
+    // question for the underwear.
+    if (ps.patternStage < 0 || ps.patternStage >= 8) {
+        if (ps.diffuseColorReg[0] >= 0 && g_clothNoPattern < 4) {
+            ++g_clothNoPattern;
+            Log("CLOTH DECLINED #%u: this draw carries Diffuse_Color_a/b/c but NO "
+                "Pattern_MapSampler, so the generator cannot run on it", g_clothNoPattern);
+        }
+        return nullptr;
+    }
     if (ps.diffuseColorReg[0] < 0 || ps.diffuseColorReg[1] < 0 || ps.diffuseColorReg[2] < 0)
         return nullptr;
     IDirect3DBaseTexture9* pattern = g_curTexture[ps.patternStage];
@@ -4132,10 +4461,18 @@ void ProbeClothMaterial(IDirect3DDevice9* dev) {
                         if (fabsf(sv * uvAt(i, uv0, 1) + ov - uvAt(i, uv1, 1)) > 2.0f) affine = false;
                     }
                 }
-                Log("    PLAYER cloth UV1 vs UV0: %s%s",
-                    affine ? "AFFINE - the fold into one texture is possible"
-                           : "INDEPENDENT unwraps - cannot be folded into one texture",
-                    affine ? "" : " (see the worklog for what that leaves)");
+                // "could not fit" is NOT "independent". The degenerate-span branch above
+                // gives up without establishing anything, and this line then reported that as
+                // INDEPENDENT UNWRAPS - a positive claim that folding is impossible. Same class
+                // of error as the slot-overlap warning: a diagnostic asserting a conclusion it
+                // never reached. A CONSTANT uv1 is the most foldable case there is - one pattern
+                // texel for the entire garment - and it was being reported as the least.
+                const bool fitFailed = (fabsf(d0u) < 1.0f || fabsf(d0v) < 1.0f);
+                Log("    PLAYER cloth UV1 vs UV0: %s",
+                    fitFailed ? "could not fit - the two sampled vertices share a uv0, so this "
+                                "says nothing either way"
+                              : (affine ? "AFFINE - the fold into one texture is possible"
+                                        : "INDEPENDENT unwraps - genuinely different unwraps"));
                 if (affine)
                     Log("        UV1 = UV0 * (%.4f, %.4f) + (%.1f, %.1f)", su, sv, ou, ov);
                 for (UINT k = 0; k < 4; ++k) {
@@ -5517,8 +5854,18 @@ bool RemixBuildCube() {
 
 // Once per frame, from Present. DrawInstance is a per-frame submission like a draw call, not a
 // persistent registration, so it has to be re-issued every frame or the cube exists for one.
+// NOTE, 2026-09-07: this function submits BOTH the step-2 test cube AND every built character
+// mesh, and the early return below is gated on remixApiTestCube. Setting that to 0 to remove the
+// floating cube therefore also stopped the character being submitted - `DrawInstance 0 calls`
+// against 10 built meshes and 21,990 triangles, silently, for several runs.
+//
+// The cube is a test artefact and the character is not. They must not share a switch. The
+// character's own gate is remixApiCharacter, and that is what decides it now.
 void RemixApiTestTick() {
-    if (!g_settings.remixApiTestCube || !g_remixMeshReady || g_remixCubeFailed) return;
+    if (!g_remixMeshReady) return;
+    const bool wantCube = g_settings.remixApiTestCube && !g_remixCubeFailed;
+    const bool wantCharacter = g_settings.remixApiCharacter && g_apiDoneCount > 0;
+    if (!wantCube && !wantCharacter) return;
     // Wait for the atlas before building, so the cube can wear it. Bounded: if no atlas has
     // appeared by ~1200 frames the cube is built with the green constant anyway, so a missing
     // atlas degrades the test rather than removing it.
@@ -6810,6 +7157,9 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     // alone would merge every mesh sharing a buffer onto one texture.
     // The player's chosen clothing colours, evaluated per texel into a texture of our own.
     if (IDirect3DBaseTexture9* cloth = ClothAlbedo(dev)) albedo = cloth;
+    // Hair takes the same route. Its ranked albedo is the Diffuse_Map, which for hair is
+    // DIRECTIONAL data rather than colour - binding it is what made hair render as a mask.
+    else if (IDirect3DBaseTexture9* hair = HairAlbedo(dev)) albedo = hair;
 
     g_lastAlbedoFromCache = false;
     if (g_settings.cacheMeshAlbedo && g_stream0 && !g_curLayout.skinned) {
@@ -8020,6 +8370,37 @@ bool DrawHudFixedFunction(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT cou
     if (!g_settings.uiKeepPixelShader) g_origSetPixelShader(dev, nullptr);
     dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
+    // STATE THIS DRAW CHANGES IS SAVED AND PUT BACK.
+    //
+    // Found by audit, not by a symptom, which is the only reason it was found at all. Everything
+    // below is written with g_origSetRenderState / g_origSetTextureStageState under g_internal,
+    // so it bypasses the hooks - which means the shim's own shadow copies keep the GAME's values
+    // while the device holds ours. ShadowGetRS and ShadowGetTSS are what the classifier reads to
+    // decide what a draw is, so letting the two drift is a way to make every later decision wrong
+    // on evidence that looks right.
+    //
+    // D3DRS_LIGHTING was the live one: it sat OUTSIDE the pixel-shader guard, so it ran on every
+    // HUD draw - about 28 a frame - and was never restored. Pre-transformed vertices skip D3D9
+    // lighting anyway, so the call was buying nothing and leaving the device changed.
+    DWORD prevLighting = 0;
+    dev->GetRenderState(D3DRS_LIGHTING, &prevLighting);
+    struct SavedTss { DWORD stage, type, value; };
+    SavedTss saved[10];
+    unsigned savedCount = 0;
+    if (!g_settings.uiKeepPixelShader) {
+        static const DWORD kStage[10] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1};
+        static const D3DTEXTURESTAGESTATETYPE kType[10] = {
+            D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2,
+            D3DTSS_ALPHAOP, D3DTSS_ALPHAARG1, D3DTSS_ALPHAARG2,
+            D3DTSS_TEXCOORDINDEX, D3DTSS_TEXTURETRANSFORMFLAGS,
+            D3DTSS_COLOROP, D3DTSS_ALPHAOP};
+        for (unsigned i = 0; i < 10; ++i) {
+            DWORD v = 0;
+            if (SUCCEEDED(dev->GetTextureStageState(kStage[i], kType[i], &v)))
+                saved[savedCount++] = SavedTss{kStage[i], static_cast<DWORD>(kType[i]), v};
+        }
+    }
+
     // Only when the FIXED-FUNCTION pixel pipeline is really in use. With the game's pixel
     // shader bound these stage states are ignored for colour, and setting stage 1 to DISABLE
     // would take away a texture the shader still samples - which is precisely how the video lost
@@ -8038,10 +8419,10 @@ bool DrawHudFixedFunction(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT cou
     g_origSetTextureStageState(dev, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
     g_origSetTextureStageState(dev, 1, D3DTSS_COLOROP, D3DTOP_DISABLE);
     g_origSetTextureStageState(dev, 1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-    }
-    // Pre-transformed vertices bypass D3D9 lighting anyway; set it off so nothing downstream has
-    // to know that.
+    // Only meaningful alongside the fixed-function pixel pipeline, and only inside this guard so
+    // it is always paired with the restore below.
     g_origSetRenderState(dev, D3DRS_LIGHTING, FALSE);
+    }
     g_internal = false;
 
     const HRESULT hr = g_origDrawPrimitiveUP(dev, type, count, g_hudVerts.data(),
@@ -8052,6 +8433,11 @@ bool DrawHudFixedFunction(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT cou
     g_origSetVertexDeclaration(dev, oldDecl);
     g_origSetVertexShader(dev, oldVS);
     if (!g_settings.uiKeepPixelShader) g_origSetPixelShader(dev, oldPS);
+    for (unsigned i = 0; i < savedCount; ++i)
+        g_origSetTextureStageState(dev, saved[i].stage,
+                                   static_cast<D3DTEXTURESTAGESTATETYPE>(saved[i].type),
+                                   saved[i].value);
+    g_origSetRenderState(dev, D3DRS_LIGHTING, prevLighting);
     g_internal = false;
 
     if (oldVS) oldVS->Release();
@@ -9853,6 +10239,20 @@ struct ApiSlot {
     // That shader is LIT - it samples the L-buffer - so baking its output would burn the game's
     // lighting into the albedo. The constant is taken instead and Remix lights it.
     bool hair;
+    // THE DOB MAP ITSELF, not just the colour.
+    //
+    // Measured from the shipped asset (game-textures\clothes\cf_hair_longasym-01_dob):
+    //     R  min 16  max 222   the STRANDS - fine filaments over the hair card
+    //     G  min 247 max 248   flat, carries nothing
+    //     B  identical to R
+    // so it is one greyscale channel duplicated, and the green it appears to be is just G
+    // sitting at 247 in an RGB view. The strand detail this project has been missing is in R.
+    //
+    // The note above is right that BAKING THE SHADER would burn the game's lighting into the
+    // albedo, because that shader samples the L-buffer. This does not bake the shader: it
+    // multiplies the chosen hair colour by an authored, unlit mask. Different operation, and it
+    // keeps Remix doing the lighting.
+    IDirect3DBaseTexture9* dob;
     float hairColor[4];
     float dcA[4], dcB[4], dcC[4];
 };
@@ -10899,6 +11299,8 @@ unsigned g_apiCapBoneCount = 0, g_apiCapBoneReg = 0;
 unsigned g_apiSlotsDuplicate = 0, g_apiDegenerate = 0, g_apiStripSlots = 0;
 unsigned g_apiDegeneratePrev = 0;   // so each part reports its OWN degenerate count
 unsigned g_apiClothGenerated = 0, g_apiClothApprox = 0, g_apiClothBlackConst = 0;
+// Diagnostics for the two generators that fired zero times on 2026-09-07.
+unsigned g_hairSlotReports = 0, g_clothSlotReports = 0;
 unsigned g_uv2Reports = 0;
 unsigned g_psDumped = 0;
 IDirect3DPixelShader9* g_psDumpedPtr[8] = {};
@@ -11404,15 +11806,83 @@ void RemixCollectCharacterSlot(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT
     strncpy_s(slot.albedoName, g_curPS.albedoSampler, _TRUNCATE);
     strncpy_s(slot.firstName, g_curPS.firstSampler, _TRUNCATE);
     slot.hair = false;
+    slot.dob = nullptr;
     slot.hairColor[0] = slot.hairColor[1] = slot.hairColor[2] = slot.hairColor[3] = 1.0f;
     if (g_curPS.hairColorReg[1] >= 0 &&
         g_curPS.hairColorReg[1] < static_cast<int>(kMaxPsConst)) {
         slot.hair = true;
         memcpy(slot.hairColor, g_psConst[g_curPS.hairColorReg[1]], sizeof(slot.hairColor));
+        // WIDENED, and it reports itself. "Dob_Map" was matched with a 7-character prefix
+        // compare, which is exact and therefore brittle - a sampler called Dob_Map_1 or dob_map
+        // would miss. A case-insensitive substring cannot miss those, and if it still finds
+        // nothing the log says what the stages WERE, so the next step is reading rather than
+        // another guess.
+        for (int st = 0; st < 8; ++st) {
+            const char* nm = g_curPS.samplerName[st];
+            if (g_curTexture[st] && nm[0] && StrStrIA(nm, "dob")) {
+                slot.dob = g_curTexture[st];
+                break;
+            }
+        }
+        if (g_hairSlotReports < 4) {
+            ++g_hairSlotReports;
+            char stages[256] = {0};
+            int p = 0;
+            for (int st = 0; st < 8 && p < 200; ++st)
+                if (g_curTexture[st] || g_curPS.samplerName[st][0])
+                    p += _snprintf_s(stages + p, sizeof(stages) - p, _TRUNCATE, "s%d='%s'%s ",
+                                     st, g_curPS.samplerName[st][0] ? g_curPS.samplerName[st]
+                                                                    : "(unnamed)",
+                                     g_curTexture[st] ? "" : "(NO TEXTURE)");
+            Log("HAIR SLOT #%u: Dob_Map %s | stages: %s", g_hairSlotReports,
+                slot.dob ? "FOUND" : "NOT FOUND - the strand generator cannot run", stages);
+        }
     } else if (g_curPS.hairColorReg[0] >= 0 &&
                g_curPS.hairColorReg[0] < static_cast<int>(kMaxPsConst)) {
         slot.hair = true;
         memcpy(slot.hairColor, g_psConst[g_curPS.hairColorReg[0]], sizeof(slot.hairColor));
+    }
+    // WHICH PATTERNS THE API PATH SEES.
+    //
+    // The 2026-09-07 run put ten garments through the texture-space generator and every pattern
+    // it saw was 32x32 - yet the CPU bake on this side handled a 64x64 one, the heart. So the
+    // underwear's draw reaches HERE and does not reach ClothAlbedo, which runs only for CONVERTED
+    // draws. Everything built for that garment sits downstream of a gate it never passes, and
+    // this says which gate by naming the pattern each slot carries.
+    if (g_clothSlotReports < 16 && g_curPS.patternStage >= 0 && g_curPS.patternStage < 8 &&
+        g_curTexture[g_curPS.patternStage]) {
+        UINT pw2 = 0, ph2 = 0;
+        if (g_curTexture[g_curPS.patternStage]->GetType() == D3DRTYPE_TEXTURE) {
+            D3DSURFACE_DESC sd{};
+            if (SUCCEEDED(static_cast<IDirect3DTexture9*>(g_curTexture[g_curPS.patternStage])
+                              ->GetLevelDesc(0, &sd))) { pw2 = sd.Width; ph2 = sd.Height; }
+        }
+        if (pw2 != 32 || ph2 != 32) {
+            ++g_clothSlotReports;
+            // AND WHAT THE CLASSIFIER DID WITH IT. ClothAlbedo runs only for a draw that
+            // Classify returns Convert for, so the disposition IS the gate. g_dispReason is set
+            // by Classify and this runs later in the same hook, so it still describes this draw.
+            char uvmap[160] = {0};
+            {
+                int q = 0;
+                for (int st = 0; st < 8 && q < 130; ++st)
+                    if (g_curPS.samplerName[st][0] || g_curTexture[st])
+                        q += _snprintf_s(uvmap + q, sizeof(uvmap) - q, _TRUNCATE, "s%d<-%s ", st,
+                                         g_curPS.samplerUv[st] < 0
+                                             ? "computed"
+                                             : (g_curPS.samplerUv[st] == 0 ? "TEXCOORD0"
+                                                : g_curPS.samplerUv[st] == 1 ? "TEXCOORD1"
+                                                : g_curPS.samplerUv[st] == 6 ? "TEXCOORD6"
+                                                : "TEXCOORDn"));
+            }
+            Log("      UV SET PER SAMPLER (from the shader's own texld): %s", uvmap);
+            Log("CLOTH SLOT (API) #%u: pattern %ux%u at stage %d, albedo stage %d, "
+                "blend %lu (src %lu dst %lu) | CLASSIFIED AS: %s",
+                g_clothSlotReports, pw2, ph2, g_curPS.patternStage, g_curPS.albedoStage,
+                ShadowGetRS(dev, D3DRS_ALPHABLENDENABLE), ShadowGetRS(dev, D3DRS_SRCBLEND),
+                ShadowGetRS(dev, D3DRS_DESTBLEND),
+                g_dispReason && g_dispReason[0] ? g_dispReason : "(no reason recorded)");
+        }
     }
     slot.pattern = (g_curPS.patternStage >= 0 && g_curPS.patternStage < 8)
                        ? g_curTexture[g_curPS.patternStage] : nullptr;
@@ -11791,6 +12261,7 @@ unsigned g_cpuBakeCount = 0, g_cpuBakeFail = 0;
 // after all, and the two must not be confused for each other.
 unsigned g_cpuBakeWrapped = 0, g_cpuBakeClipped = 0;
 unsigned g_clothBakedRegistered = 0;
+unsigned g_hairGenerated = 0;
 
 inline float SrgbPow22(float v) { return powf(v < 0.0f ? 0.0f : v, 2.2f); }
 
@@ -12128,9 +12599,17 @@ const char* CpuBakeCloth(const std::vector<RemixHardcodedVertex>& verts,
             // Overwrites the "declined, do not retry" entry ClothAlbedoUniform left behind, which
             // is what that entry is for: it stops the decode running every draw without claiming
             // the answer is permanently nothing.
+            // BOTH old references, not just the texture. ReleaseClothCache releases pattern
+            // AND generated, so an entry that already held a pattern owns a reference to it -
+            // dropping only the generated one and then AddRef'ing the pattern again leaks a
+            // reference every time an outfit is re-baked. The common case is overwriting the
+            // {nullptr, nullptr} entry the decline path leaves, where this is a no-op; it is the
+            // second bake of the same garment that would have leaked.
             const auto old = g_clothCache.find(bkey);
-            if (old != g_clothCache.end() && old->second.generated)
-                old->second.generated->Release();
+            if (old != g_clothCache.end()) {
+                if (old->second.generated) old->second.generated->Release();
+                if (old->second.pattern) old->second.pattern->Release();
+            }
             if (pattern) pattern->AddRef();
             g_clothCache[bkey] = ClothTex{pattern, baked};
             ++g_clothBakedRegistered;
@@ -12494,6 +12973,54 @@ void RemixBuildCharacter() {
 
         const char* slotTex = texPath;
         if (sl.hair) {
+            // STRANDS, when the Dob_Map is available.
+            //
+            // albedo = chosen hair colour * (dob.R / 255). The mask is authored and unlit, so
+            // this adds the strand variation the flat constant could never have while leaving
+            // every photon to Remix.
+            if (g_settings.hairStrandsFromDob && sl.dob) {
+                std::vector<unsigned char> dob;
+                UINT hw = 0, hh = 0;
+                if (TextureToBgra(sl.dob, dob, hw, hh) && hw && hh &&
+                    dob.size() >= static_cast<size_t>(hw) * hh * 4) {
+                    std::vector<unsigned char> out;
+                    bool ok = true;
+                    try { out.assign(static_cast<size_t>(hw) * hh * 4, 0); }
+                    catch (...) { ok = false; }
+                    if (ok) {
+                        double acc = 0.0;
+                        for (size_t i = 0; i < static_cast<size_t>(hw) * hh; ++i) {
+                            const float m = dob[i * 4 + 2] / 255.0f;   // BGRA -> R is the strands
+                            for (int k = 0; k < 3; ++k) {
+                                float v = sl.hairColor[k] * m * g_settings.clothTintScale;
+                                v = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+                                const unsigned char q =
+                                    static_cast<unsigned char>(v * 255.0f + 0.5f);
+                                out[i * 4 + (2 - k)] = q;      // write B,G,R
+                                acc += q;
+                            }
+                            out[i * 4 + 3] = 255;
+                        }
+                        char hdir[MAX_PATH] = {0};
+                        GetModuleFileNameA(GetModuleHandleW(nullptr), hdir, MAX_PATH);
+                        char* hsl = strrchr(hdir, 0x5C);
+                        if (hsl) *(hsl + 1) = 0;
+                        static char hairPath[MAX_PATH];
+                        ++g_hairGenerated;
+                        sprintf_s(hairPath, "%ssr3-remix-hair-%u.dds", hdir, g_hairGenerated);
+                        if (WriteBgraDds(hairPath, hw, hh, out.data())) {
+                            Log("HAIR STRANDS #%u: %ux%u = colour (%.3f %.3f %.3f) * the Dob_Map "
+                                "strand channel | mean %.1f of 255 -> %s",
+                                g_hairGenerated, hw, hh, sl.hairColor[0], sl.hairColor[1],
+                                sl.hairColor[2],
+                                acc / (3.0 * static_cast<double>(hw) * hh), hairPath);
+                            slotTex = hairPath;
+                            goto hairDone;
+                        }
+                        --g_hairGenerated;
+                    }
+                }
+            }
             // NO TEXTURE FOR HAIR.
             //
             // The hair slot's chosen albedo is its Diffuse_Map, and for hair that map is smooth
@@ -12502,6 +13029,7 @@ void RemixBuildCharacter() {
             // Hair_Spec_Color2 carries the chosen colour; a flat constant with no texture is
             // closer to right than a mask, and the strand detail is a later problem.
             slotTex = nullptr;
+            hairDone: ;
         } else if (clothTex) {
             slotTex = clothTex;
         } else if (sl.bakedPath[0]) {
@@ -13339,6 +13867,11 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                     g_passCensus[i].sampler[0] ? g_passCensus[i].sampler : "(no sampler)",
                     g_passCensus[i].w, g_passCensus[i].h, g_passCensus[i].count);
         }
+        Log("    CLOTH generator: %u one-colour garments generated, %u one-POINT (a varying "
+            "pattern read at a single uv), %u declined as genuinely varying, %u had no usable "
+            "diffuse",
+            g_clothUniformGen, g_clothOnePointGen, g_clothUniformNotUniform,
+            g_clothUniformNoDiffuse);
         Log("      the game's PIXEL SHADER is %s on the rebuilt draw (nulling it is what made the "
             "video greyscale and the text vanish) | D3D9 REFUSED the rebuilt draw %u times, "
             "last hr 0x%08lX",

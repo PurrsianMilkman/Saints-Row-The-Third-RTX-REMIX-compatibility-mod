@@ -43,3 +43,18 @@ mc_dis.txt
 # Regenerate from your own copy with tools/peg.py and tools/vpp.py.
 game-textures/
 player-textures/
+
+# --- srttr-hair: the SRTTR hair reshape sub-project ---
+# Packed/unpacked Remastered game data and QA renders of it. Not ours to redistribute.
+# The tools that produce them ARE versioned.
+srttr-hair/build/
+srttr-hair/evidence/
+
+# --- engine-control: the standalone engine-dispatch plugin ---
+engine-control/build/*.map
+engine-control/build/*.obj
+engine-control/docs/*.reference
+engine-control/src/*.cpp.before-*
+
+# Doc backups
+docs/*.md.before-*

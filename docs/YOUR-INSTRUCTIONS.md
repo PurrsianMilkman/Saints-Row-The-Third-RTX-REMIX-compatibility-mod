@@ -11,7 +11,152 @@ Start Claude Code in `D:\SR3RTXREMIXCOMP` and say:
 
 ---
 
-# STATE, 2026-09-04 - THE REMIX API IS THE ARCHITECTURE NOW. READ THIS FIRST.
+# THE WORKING CLOTH COLOUR FORMULA - CONFIRMED CORRECT, DO NOT CHANGE IT
+
+Confirmed by the user 2026-09-07: **shoes, wrist wraps and headwear render with the correct
+colour.** This is the formula that does it. Anything that changes colour output has to keep these
+garments right, and there must be exactly ONE pipeline - writing a second one is what made the
+bracelets the right hue and the wrong brightness.
+
+## The formula, as implemented (ClothAlbedo and ClothAlbedoUniform)
+
+    // 1. the pattern texel decides WHICH of the three chosen colours applies
+    fr,fg,fb = pattern texel / 255
+    sum  = fr+fg+fb ;  mean = sum/3 ;  dev = |fr-mean|+|fg-mean|+|fb-mean|
+    test = sum - (dev*165.016495 + 256)/255
+
+    if (test < 0)                                   // a COLOURED pattern texel
+        wr,wg,wb = gammaLUT[pR], gammaLUT[pG], gammaLUT[pB]      // x^2.2, to linear
+        colour[k] = wr*A[k] + wg*B[k] + wb*C[k]                  // weighted SUM, not a lerp
+    else                                            // a NEAR-GREY texel: no customisation here
+        colour[k] = desatLUT[p[k]]                  // saturate((x-0.372549)*1.59375)^2.2
+
+    // 2. and it multiplies the diffuse map, in LINEAR, encoded once on the way out
+    albedo[k] = LinearToSrgb( gammaLUT[diffuse[k]] * colour[k] * clothTintScale )
+
+    clothTintScale = clothAlbedoPercent / 100, and the ini carries 200.
+
+## The five things that are easy to get wrong here
+
+1. **The pattern channels go to linear, the COLOURS do not.** gammaLUT is applied to the pattern,
+   and the swatches are used as authored. The game's own shader does the opposite - it raises the
+   COLOURS to 2.2 and lerps by raw pattern channels - and both land on the same answer for the
+   pure-primary patterns SR3 actually ships. Remix lights from an sRGB albedo, which is why the
+   swatch goes over as authored.
+2. **The diffuse texel goes to linear too**, and the product is encoded ONCE. Multiplying two
+   sRGB values and encoding the product is a different curve and reads dull.
+3. **clothTintScale, not clothBrightness.** clothBrightness is the CPU baker's separate knob and
+   is ALREADY normalised at parse time - dividing it by 100 again scaled every garment down by a
+   hundred (`result mean 0.3 of 255`).
+4. **The desaturation escape is not optional.** A near-grey pattern texel means "the game applies
+   no customisation colour here". Dropping that branch tints regions the game leaves alone.
+5. **A white or grey diffuse map is not a bug.** It is the detail layer, shipped to be tinted.
+   White bracelets and a green beanie were those maps rendered untinted, nothing more.
+
+## Which garments this covers
+
+Everything whose PATTERN IS ONE FLAT COLOUR, plus everything whose pattern IS the albedo:
+
+    shoes, wrist wraps, headwear, choker, earrings, gem   -> ClothAlbedoUniform (flat pattern)
+    the corset                                            -> ClothAlbedo (pattern is the albedo)
+
+The pattern being flat means the lerp/sum has one answer for the whole surface, so no mesh and no
+uv assumption is involved. That is why this class was tractable.
+
+## THE UNDERWEAR AND THE BRA are the other class - same system, harder case
+
+Both use a REAL diffuse map plus a VARYING pattern (`pat_llheart01`, a tiling heart from the
+22-pattern library in `game-textures\clothes\pat\`) carried on a SECOND, INDEPENDENT uv set.
+
+Measured 2026-09-07, and each of these closes a shortcut:
+
+- the pattern is sampled at MANY texels, not one - `TEXCOORD1 varies, u 0..1904 v -192..1881`;
+- `uv1` is NOT an affine function of `uv0` - least squares gives worst residuals 1598 and 1544
+  against a span of ~1900, so no `uv*s+o` resampling can relate them;
+- and from the shader itself, `ir_at_sr3pccloth_bs[8]`, the albedo is not even on TEXCOORD0:
+
+        texld_pp r4, r4, s0      ; s0  <- a COMPUTED coordinate built from TEXCOORD6,
+                                 ;        clamped against c2/c3 with a 512 scale
+        texld_pp r5, v1, s2      ; s2  <- TEXCOORD1        the pattern
+        lrp/lrp/lrp then mul     ; the recipe above
+
+  while a sibling variant, `ir_sr3pccloth_bs[6]`, does `texld r6, v1, s0` - s0 on TEXCOORD1.
+
+**So "albedo is TEXCOORD0, pattern is TEXCOORD1" is not a rule of this engine.** It is a
+coincidence that holds for some variants. The CPU baker rasterises into TEXCOORD0 space
+regardless, which is a concrete reason its islands need not land where the mesh samples them.
+
+---
+
+# STATE, 2026-09-07 - VERTEX CAPTURE IS OFF AND THE CHARACTER WORKS. READ THIS FIRST.
+
+Anything below that says capture must be ON is superseded. The mechanism that made it possible:
+
+## The one technique that unlocked all of this
+
+**Remix's refusal is about the VERTEX shader, not the draw.** Its own message says so -
+`Skipping draw call with shader usage as vertex capture is not enabled` - because vertex capture
+exists to capture vertex-shader output. The pixel shader was never the problem.
+
+So a draw re-issued with FIXED-FUNCTION VERTEX PROCESSING and THE GAME'S OWN PIXEL SHADER still
+bound is a combination Remix executes with capture off. That single fact fixed three things:
+
+| what | how |
+|---|---|
+| the HUD | `DrawPrimitiveUP` draws rebuilt as `D3DFVF_XYZRHW` quads; positions are already screen pixels, so it is a 28-byte field reorder |
+| the character's skin | the atlas composites re-issued as a full-target quad with their own pixel shader kept - `4 done, 0 failed`, atlas means back to 182.7 and 169.6, IDENTICAL to the pre-breakage values |
+| the menu video | proved the rule. Nulling the pixel shader made it greyscale, because Bink is Y/Cr/Cb across three stages and stage 0 alone is luma |
+
+## Customisation, as it now stands
+
+`ClothAlbedo()` used to refuse any material whose albedo was not the Pattern_Map itself, which
+declined all fourteen of the player's items and left them showing raw untinted maps - white
+bracelets, a white choker, a green beanie. Three garment shapes exist:
+
+1. **pattern IS the albedo** - resolved in the pattern's own texture space. The corset. Always worked.
+2. **separate diffuse + FLAT pattern** - one colour for the whole garment, multiplied into the
+   diffuse in ITS texture space. No mesh, no uv assumptions. `ClothAlbedoUniform`. Fixed 2026-09-06.
+3. **separate diffuse + VARYING pattern on a SECOND uv set** - genuinely needs the mesh to relate
+   the two uv sets. Only the underwear. The CPU baker does this and its result is now registered
+   into the same cache the game's own draw reads.
+
+**There is ONE colour pipeline and both paths must use it**: pattern channels to linear through
+`g_gammaLUT`, weighted SUM of A/B/C (not a lerp from white), `* clothTintScale`
+(`clothAlbedoPercent/100`, currently 200), then `LinearToSrgb` once. Writing a second pipeline is
+what made the bracelets the right hue and the wrong brightness.
+
+## Traps paid for in this stretch
+
+- **`clothBrightness` is already normalised at parse time.** Dividing by 100 again scaled every
+  garment down by a hundred - `result mean 0.3 of 255`.
+- **The cloth cache key must include the diffuse.** `ClothKey(pattern, col) ^ diffuse*prime`
+  collapses to the pattern-space key when diffuse is null, so registering a UV-space bake there
+  overwrote the corset and the shoes. Shoes went black; that is the collision, not a colour bug.
+- **A white or grey diffuse map is not a bug.** It is the detail layer, shipped to be tinted.
+- **PEG entry stride is 72 bytes**, and a single-bitmap PEG cannot reveal that - `24 + 72` lands
+  on the name table either way. Only a three-bitmap PEG shows it.
+- **`.str2_pc` is condensed**: the whole data block is ONE zlib stream and entry offsets index the
+  DECOMPRESSED result. The header's compressed size is a sum, not a stream length.
+
+## Where the assets actually live
+
+    game-textures\      unpacked from the retail packfiles by tools/vpp.py + tools/peg.py
+                        3,467 bitmaps, 697 items, with a README explaining the naming and recipe
+    player-textures\    the player's own captured parts, pattern/diffuse/result per garment
+
+## Open
+
+1. **The underwear.** Class 3 above. Its bake produces two tapered panels and a waistband in the
+   right wine colour; whether those islands land where the mesh samples is not yet established.
+2. Clothes brightness overall - `clothAlbedoPercent` is the single knob now that there is one pipeline.
+3. The character is FROZEN (`remixApiSkinning=0`); skinning crashed Remix's server.
+4. The game's own character copy still stands beside ours (`remixApiCharacterOffset=3`).
+5. Hair strand detail - the material binds five textures and three are unnamed, including two
+   512x512 maps nothing has ever looked at.
+
+---
+
+# EARLIER STATE, 2026-09-04
 
 The project has moved off the fixed-function conversion. Characters are described to RTX Remix
 through its own programmatic API: we create the meshes, name the materials, and choose the
@@ -278,7 +423,7 @@ Both of these independently produce a black character:
 
 | cause | why |
 |---|---|
-| `rtx.useVertexCapture = False` | Remix declines the game's shader draws, so the composite never executes |
+| `rtx.useVertexCapture = False` | ~~Remix declines the game's shader draws, so the composite never executes~~ **SOLVED 2026-09-06 - see STATE at the top. The composite is re-issued with fixed-function vertex processing and the game's own pixel shader, and Remix executes it.** |
 | `hiddenPassMode=2` + `screenSpaceMode=2` | the SHIM skipped those same composite quads |
 
 Fixing one while the other was broken is why every single-variable test came back negative for two
@@ -411,7 +556,8 @@ TARGET is not screen-sized (41 draws/frame; the 357 screen-sized ones are untouc
 
     ffp=1  convertSkinned=1  hiddenPassMode=2  forceOcclusionVisible=1  skinRigidSingleBone=1
     screenSpaceMode=2  compositeToTexturePass=1  rtx.useVertexCapture = True
-    <- capture ON and the off-screen composites surviving are BOTH required for the character bake
+    <- NO LONGER TRUE. Superseded 2026-09-06: capture is OFF and the character bake works.
+       See the STATE section at the top of this file before acting on anything in this block.
     skinRequireBoneDecl=1  applyMorph=1  skipDeferredGBuffer=1  skipNonColourTargets=1
     dedupSkinned=1  dedupAll=1  skinRingMB=24  dumpFrame=60
     generateCloth=1  clothAlbedoPercent=200  diffuseColorProbe=1  compositeToTexturePass=0  rtAlbedoCopy=1

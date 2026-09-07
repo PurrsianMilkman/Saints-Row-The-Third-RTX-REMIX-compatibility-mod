@@ -1,5 +1,89 @@
 # Changelog
 
+## v0.1.4 — 2026-09-07
+
+**The HUD is back.** So is the character's skin, and the player's clothing colours. All three came
+from one observation.
+
+### The technique
+
+**Remix's refusal is about the vertex shader, not the draw.** Its own message says so —
+`Skipping draw call with shader usage as vertex capture is not enabled` — because vertex capture
+exists to capture *vertex-shader* output. The pixel shader was never the problem.
+
+So a draw re-issued with **fixed-function vertex processing** while **the game's own pixel shader
+stays bound** is a combination Remix executes happily with vertex capture off. That single fact
+fixed three separate things:
+
+| what | how |
+|---|---|
+| **the HUD** | `DrawPrimitiveUP` draws rebuilt as `D3DFVF_XYZRHW` quads. Positions are already screen pixels, so it is a 28-byte field reorder. 21.9 draws/frame rebuilt. |
+| **the character's skin** | the atlas composites re-issued as a full-target quad with their own pixel shader kept — `4 done, 0 failed`, and the atlas means came back to 182.7 and 169.6, identical to their pre-breakage values |
+| the menu video | proved the rule. Nulling the pixel shader made it greyscale, because Bink is Y/Cr/Cb across three stages and stage 0 alone is luma. |
+
+### Fixed: the player's clothing was untinted
+
+`ClothAlbedo()` refused any material whose albedo was not the `Pattern_Map` itself, which declined
+**all fourteen** of the player's items — white bracelets, a white choker, a green beanie. There are
+three garment shapes, and only the first was handled:
+
+1. **pattern *is* the albedo** — resolved in the pattern's own texture space. Always worked.
+2. **separate diffuse + flat pattern** — one colour for the whole garment, multiplied into the
+   diffuse in its texture space. No mesh needed, no UV assumptions. Fixed in v0.1.3.
+3. **separate diffuse + varying pattern on a second UV set** — genuinely needs the mesh to relate
+   the two UV sets. Only the underwear. The CPU baker handles it and its result is now registered
+   into the same cache the game's own draw reads.
+
+A fourth case turned out to exist and is now handled too: a pattern that *varies* but which a given
+garment samples at a **single point**, which needs no mesh at all.
+
+There is now **one** colour pipeline, and both paths use it: pattern channels to linear through a
+gamma LUT, weighted **sum** of the three colour constants (not a lerp from white), scaled, then
+converted to sRGB once. Writing a second pipeline is what previously made the bracelets the right
+hue at the wrong brightness.
+
+### Fixed: hair has strand detail
+
+`hairStrandsFromDob=1` modulates the hair colour with the `Dob_Map`'s strand detail, which adds the
+variation a flat constant never could. The `Dob_Map` is directional data rather than colour, which
+is why it took a while to find the right way to use it.
+
+### Changed: the Remix-API character path ships off
+
+`remixApiCharacter=0`. The game's own character now renders correctly through the technique above,
+so the API copy is not needed — which retires **both** the duplicate character and the frozen one
+that v0.1.2 and v0.1.3 shipped with. The API path itself is unchanged and still available; its
+skinning crash is unresolved, but nothing in the shipped configuration reaches it.
+
+### Two sub-projects, both new
+
+**`engine-control/`** — a standalone `sr3-engine.asi` that hooks **the engine's own
+render-command dispatch table** at `0x013509F8` instead of the D3D9 device vtable. SR3 is a
+command-buffer renderer: a producer thread writes command blocks into a ring and a render thread
+dispatches each through a 74-entry function-pointer table, which sits in writable `.data`. Hooking
+there puts our code inside the engine, one level above D3D9, where a command is still a command
+rather than six loose arguments — instead of reconstructing engine intent from samplers and render
+target formats, which has blacked out the world three separate times. It shares no state with
+`sr3-rtx.asi` and either can be removed without affecting the other.
+
+**`srttr-hair/`** — an unrelated mod that reshapes *Saints Row: The Third Remastered*'s hair meshes
+back onto the 2011 game's silhouette. The Remaster re-authored every style fuller and puffier, with
+a spray of stray strand cards over the crown; on one measured style it went from 1,246 triangles to
+10,751, and alpha coverage from 25% to 60%. Only vertex positions change — vertex counts, stride,
+UVs, bone weights, index buffers, LOD ranges, morph data, textures and materials all stay byte for
+byte as SRTTR shipped them. Its tools are versioned here; its game data is not.
+
+### Known issues
+
+**The sky is now the only headline gap** — ~14 draws a frame, still passed through, so still absent
+with vertex capture off.
+
+Also open: the underwear (garment class 3 above), overall cloth brightness — which remains a
+difference in how Remix lights these meshes rather than an error in the recipe — and the ~11
+draws/frame whose texcoords cannot be cached.
+
+---
+
 ## v0.1.3 — 2026-09-07
 
 Mostly groundwork for asset replacement, plus a cloth fix.
