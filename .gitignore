@@ -38,3 +38,8 @@ configs/*.bak
 # Build intermediates and scratch
 build/*.map
 mc_dis.txt
+
+# Extracted game textures — NOT redistributable (Volition/Deep Silver art).
+# Regenerate from your own copy with tools/peg.py and tools/vpp.py.
+game-textures/
+player-textures/

@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.1.3 — 2026-09-07
+
+Mostly groundwork for asset replacement, plus a cloth fix.
+
+### The game's own texture library is now readable
+
+Two new readers, written because the existing tooling could not do it:
+
+- **`tools/peg.py`** — reads SR3's PEG (`GEKV` v13) texture containers. A texture is a *pair*: the
+  `.cvbm_pc` / `.cpeg_pc` holds the directory and the `.gvbm_pc` / `.gpeg_pc` holds the pixels.
+  The layout was confirmed byte by byte against a known texture (128×128, format 400,
+  `frame_size` 8192 — exactly 128×128/2, which is what makes format 400 DXT1).
+- **`tools/vpp.py`** — reads `VPP_PC` / `STR2_PC` v6 containers directly. The bundled
+  `vpp_extract.py` wrote zero-length files for `customize_player.vpp_pc`; this one does not.
+
+Together they extract **3,467 bitmaps** from the retail packfiles — 443 from
+`customize_player.vpp_pc` and 3,024 from `customize_item.vpp_pc` — at full resolution, with alpha
+channels split out where they carry real data (on this engine alpha often carries the cut-out and
+is invisible in an RGB view).
+
+That is the last missing piece for authoring replacements: the shim can already name the texture a
+draw is using, and now the shipped source art for that name can be found and read.
+
+**The extracted textures are not in this repository and never will be** — they are Volition/Deep
+Silver art. `game-textures/` and `player-textures/` are gitignored. Regenerate them from your own
+copy of the game with the two readers above.
+
+### Fixed: garments with a flat pattern map came out wrong
+
+SR3's `Pattern_Map` is often a 32×32 **uniform** selector — it picks the customisation colour and
+carries no detail at all, with the visible detail living in the `Diffuse_Map`. The generator was
+treating the pattern as the source of detail regardless, so those garments lost theirs.
+
+`clothUniformFromDiffuse=1` detects a flat pattern and composes the garment as
+`diffuse × one colour` instead. The frame report names each one it catches:
+
+```
+CLOTH UNIFORM #N: diffuse WxH * one colour (r g b) from a flat pattern
+```
+
+The cloth bake also now writes what it *read* — the pattern and diffuse it used, with the pattern's
+first texel — so a wrong result can be traced to a wrong input rather than guessed at.
+
+### New, and deliberately off: `uvScaleFromShader`
+
+The UV divide has been the literal 1/1024 read out of the disassembly. This reads it instead from
+each vertex shader's own `def` constant, per shader, and reports when the value is ambiguous. It is
+`0` by default because the hardcoded value is correct everywhere measured so far; the switch exists
+so the assumption can be tested rather than trusted.
+
+### Changed
+
+- `clothDump` and `charTexDump` are back **off**. They write `.raw` dumps into the game directory
+  and were left on during the texture investigation.
+- `remixApiTestCube` off — the API test cube has done its job.
+
+### Known issues
+
+Unchanged from v0.1.2. Still **no sky** and **no HUD**; the Remix-API character still stands beside
+the game's own copy, is still frozen, and clothes still read darker than they should — that last one
+remains a lighting difference rather than a recipe error.
+
+---
+
 ## v0.1.2 — 2026-09-04
 
 The architecture changed, and a conclusion that stood for weeks turned out to be wrong.

@@ -21,8 +21,12 @@ function Copy-Tree($from, $to) {
     cmd /c exit 0
 }
 
+# game-textures/ and player-textures/ are DERIVED, not authored. game-textures is unpacked
+# from the retail packfiles by tools/vpp.py + tools/peg.py; player-textures is built from a
+# run's own dumps. Copied anyway: re-extracting is ~15 minutes, and the dumps player-textures
+# came from are overwritten by the next run, so that one is not reproducible at all.
 Write-Host 'copying project...'
-foreach ($d in '.git','build','configs','dist','docs','re','runtime','src','tools') {
+foreach ($d in '.git','build','configs','dist','docs','game-textures','player-textures','re','runtime','src','tools') {
     if (Test-Path (Join-Path $root $d)) {
         Write-Host "  $d"
         Copy-Tree (Join-Path $root $d) (Join-Path $dest $d)
@@ -48,7 +52,7 @@ $files = Get-ChildItem $dest -Recurse -File -Force
 "{0} files, {1:N0} MB -> {2}" -f $files.Count, (($files|Measure-Object Length -Sum).Sum/1MB), $dest
 
 # Verify rather than trust: robocopy reports per-directory, not per-file.
-foreach ($d in '.git','build','configs','dist','docs','re','runtime','src','tools') {
+foreach ($d in '.git','build','configs','dist','docs','game-textures','player-textures','re','runtime','src','tools') {
     $a = (Get-ChildItem (Join-Path $root $d) -Recurse -File -Force -EA SilentlyContinue).Count
     $b = (Get-ChildItem (Join-Path $dest $d) -Recurse -File -Force -EA SilentlyContinue).Count
     "{0,-10} {1,7} -> {2,-7} {3}" -f $d, $a, $b, $(if ($a -eq $b) { 'OK' } else { '** DIFF **' })
