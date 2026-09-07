@@ -1,0 +1,2016 @@
+{
+ "orig": {
+  "custmesh_769927692f.str2_pc": [
+   "cf_hair_med-01.ccmesh_pc",
+   "cf_hair_med-01.gcmesh_pc",
+   "cf_hair_med-01.rig_pc",
+   "cf_hair_med-01_pc.cmorph_pc",
+   "cm_hair_med-01.cpeg_pc",
+   "cm_hair_med-01.gpeg_pc"
+  ],
+  "custmesh_-273572083f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-2064075120f.str2_pc": [
+   "cf_hair_short.ccmesh_pc",
+   "cf_hair_short.gcmesh_pc",
+   "cf_hair_short_pc.cmorph_pc",
+   "cf_hair_short_scr.cmorph_pc",
+   "cm_hair_short.cpeg_pc",
+   "cm_hair_short.gpeg_pc"
+  ],
+  "custmesh_1491814465f.str2_pc": [
+   "cf_hair_cornrows1.ccmesh_pc",
+   "cf_hair_cornrows1.gcmesh_pc",
+   "cf_hair_cornrows1_pc.cmorph_pc",
+   "cm_hair_cornrows1.cpeg_pc",
+   "cm_hair_cornrows1.gpeg_pc"
+  ],
+  "custmesh_2049351437.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_2056691469.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_2056663783.str2_pc": [
+   "cm_hair_longbangs.ccmesh_pc",
+   "cm_hair_longbangs.cpeg_pc",
+   "cm_hair_longbangs.gcmesh_pc",
+   "cm_hair_longbangs.gpeg_pc",
+   "cm_hair_longbangs.rig_pc",
+   "cm_hair_longbangs_pc.cmorph_pc"
+  ],
+  "custmesh_1482618777f.str2_pc": [
+   "cf_hair_longasym.ccmesh_pc",
+   "cf_hair_longasym.gcmesh_pc",
+   "cf_hair_longasym.rig_pc",
+   "cf_hair_longasym_pc.cmorph_pc",
+   "cf_hair_longasym_scr.cmorph_pc",
+   "cm_hair_longasym.cpeg_pc",
+   "cm_hair_longasym.gpeg_pc"
+  ],
+  "custmesh_-2107860809.str2_pc": [
+   "cm_hair_wildmessy02.ccmesh_pc",
+   "cm_hair_wildmessy02.cpeg_pc",
+   "cm_hair_wildmessy02.gcmesh_pc",
+   "cm_hair_wildmessy02.gpeg_pc",
+   "cm_hair_wildmessy02.rig_pc",
+   "cm_hair_wildmessy02_pc.cmorph_pc"
+  ],
+  "custmesh_1482618777.str2_pc": [
+   "cm_hair_longasym.ccmesh_pc",
+   "cm_hair_longasym.cpeg_pc",
+   "cm_hair_longasym.gcmesh_pc",
+   "cm_hair_longasym.gpeg_pc",
+   "cm_hair_longasym.rig_pc",
+   "cm_hair_longasym_pc.cmorph_pc",
+   "cm_hair_longasym_scr.cmorph_pc"
+  ],
+  "custmesh_-129951475f.str2_pc": [
+   "cf_hair_guy.ccmesh_pc",
+   "cf_hair_guy.gcmesh_pc",
+   "cf_hair_guy_pc.cmorph_pc",
+   "cm_hair_guy.cpeg_pc",
+   "cm_hair_guy.gpeg_pc"
+  ],
+  "custmesh_2056704210.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_-725308459f.str2_pc": [
+   "cf_hair_starlet.ccmesh_pc",
+   "cf_hair_starlet.gcmesh_pc",
+   "cf_hair_starlet.rig_pc",
+   "cf_hair_starlet_pc.cmorph_pc",
+   "cf_hair_starlet_scr.cmorph_pc",
+   "cm_hair_starlet.cpeg_pc",
+   "cm_hair_starlet.gpeg_pc"
+  ],
+  "custmesh_-725308459.str2_pc": [
+   "cm_hair_starlet.ccmesh_pc",
+   "cm_hair_starlet.cpeg_pc",
+   "cm_hair_starlet.gcmesh_pc",
+   "cm_hair_starlet.gpeg_pc",
+   "cm_hair_starlet.rig_pc",
+   "cm_hair_starlet_pc.cmorph_pc",
+   "cm_hair_starlet_scr.cmorph_pc"
+  ],
+  "custmesh_-1798235891.str2_pc": [
+   "cm_hair_guy.ccmesh_pc",
+   "cm_hair_guy.cpeg_pc",
+   "cm_hair_guy.gcmesh_pc",
+   "cm_hair_guy.gpeg_pc",
+   "cm_hair_guy_pc.cmorph_pc"
+  ],
+  "custmesh_1128046349f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_1920835341.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1920835341f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_1482608850.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_973713332.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_550647364f.str2_pc": [
+   "cf_hair_mohawk.ccmesh_pc",
+   "cf_hair_mohawk.gcmesh_pc",
+   "cf_hair_mohawk_pc.cmorph_pc",
+   "cf_hair_mohawk_scr.cmorph_pc",
+   "cm_hair_mohawk.cpeg_pc",
+   "cm_hair_mohawk.gpeg_pc"
+  ],
+  "custmesh_-2043411022f.str2_pc": [
+   "cf_hair_afro.ccmesh_pc",
+   "cf_hair_afro.gcmesh_pc",
+   "cf_hair_afro.rig_pc",
+   "cf_hair_afro_pc.cmorph_pc",
+   "cf_hair_afro_scr.cmorph_pc",
+   "cm_hair_afro.cpeg_pc",
+   "cm_hair_afro.gpeg_pc"
+  ],
+  "custmesh_-1302817773f.str2_pc": [
+   "cf_hair_sidespiked.ccmesh_pc",
+   "cf_hair_sidespiked.gcmesh_pc",
+   "cf_hair_sidespiked.rig_pc",
+   "cf_hair_sidespiked_pc.cmorph_pc",
+   "cf_hair_sidespiked_scr.cmorph_pc",
+   "cm_hair_sidespiked.cpeg_pc",
+   "cm_hair_sidespiked.gpeg_pc"
+  ],
+  "custmesh_1491806867.str2_pc": [
+   "cm_hair_cornrows.ccmesh_pc",
+   "cm_hair_cornrows.cpeg_pc",
+   "cm_hair_cornrows.gcmesh_pc",
+   "cm_hair_cornrows.gpeg_pc",
+   "cm_hair_cornrows.rig_pc",
+   "cm_hair_cornrows_pc.cmorph_pc"
+  ],
+  "custmesh_769957645f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-1744560444.str2_pc": [
+   "cm_hair_sidepartmed_01.ccmesh_pc",
+   "cm_hair_sidepartmed_01.cpeg_pc",
+   "cm_hair_sidepartmed_01.gcmesh_pc",
+   "cm_hair_sidepartmed_01.gpeg_pc",
+   "cm_hair_sidepartmed_01.rig_pc",
+   "cm_hair_sidepartmed_01_pc.cmorph_pc",
+   "cm_hair_sidepartmed_01_scr.cmorph_pc"
+  ],
+  "custmesh_-129951475.str2_pc": [
+   "cm_hair_guy.ccmesh_pc",
+   "cm_hair_guy.cpeg_pc",
+   "cm_hair_guy.gcmesh_pc",
+   "cm_hair_guy.gpeg_pc",
+   "cm_hair_guy_pc.cmorph_pc"
+  ],
+  "custmesh_1346834483f.str2_pc": [
+   "cf_hair_downjagged.ccmesh_pc",
+   "cf_hair_downjagged.gcmesh_pc",
+   "cf_hair_downjagged.rig_pc",
+   "cf_hair_downjagged_pc.cmorph_pc",
+   "cm_hair_downjagged.cpeg_pc",
+   "cm_hair_downjagged.gpeg_pc"
+  ],
+  "custmesh_1346834483.str2_pc": [
+   "cm_hair_downjagged.ccmesh_pc",
+   "cm_hair_downjagged.cpeg_pc",
+   "cm_hair_downjagged.gcmesh_pc",
+   "cm_hair_downjagged.gpeg_pc",
+   "cm_hair_downjagged.rig_pc",
+   "cm_hair_downjagged_pc.cmorph_pc",
+   "cm_hair_downjagged_scr.cmorph_pc"
+  ],
+  "custmesh_-129948489f.str2_pc": [
+   "cf_hair_guy_glasses.ccmesh_pc",
+   "cf_hair_guy_glasses.gcmesh_pc",
+   "cf_hair_guy_glasses.rig_pc",
+   "cf_hair_guy_glasses_pc.cmorph_pc",
+   "cm_hair_guy_glasses.cpeg_pc",
+   "cm_hair_guy_glasses.gpeg_pc"
+  ],
+  "custmesh_-404250867f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_2056691469f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-1302817773.str2_pc": [
+   "cm_hair_sidespiked.ccmesh_pc",
+   "cm_hair_sidespiked.cpeg_pc",
+   "cm_hair_sidespiked.gcmesh_pc",
+   "cm_hair_sidespiked.gpeg_pc",
+   "cm_hair_sidespiked.rig_pc",
+   "cm_hair_sidespiked_pc.cmorph_pc",
+   "cm_hair_sidespiked_scr.cmorph_pc"
+  ],
+  "custmesh_-2004181235.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1920828244.str2_pc": [
+   "cm_hair_butterfly.ccmesh_pc",
+   "cm_hair_butterfly.cpeg_pc",
+   "cm_hair_butterfly.gcmesh_pc",
+   "cm_hair_butterfly.gpeg_pc",
+   "cm_hair_butterfly.rig_pc",
+   "cm_hair_butterfly_pc.cmorph_pc",
+   "cm_hair_butterfly_scr.cmorph_pc"
+  ],
+  "custmesh_2049344611f.str2_pc": [
+   "cf_hair_ponytail.ccmesh_pc",
+   "cf_hair_ponytail.gcmesh_pc",
+   "cf_hair_ponytail.rig_pc",
+   "cf_hair_ponytail_pc.cmorph_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gpeg_pc"
+  ],
+  "custmesh_-725311731.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1128039523f.str2_pc": [
+   "cf_hair_ponytail.ccmesh_pc",
+   "cf_hair_ponytail.gcmesh_pc",
+   "cf_hair_ponytail.rig_pc",
+   "cf_hair_ponytail_pc.cmorph_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gpeg_pc"
+  ],
+  "custmesh_-378953898f.str2_pc": [
+   "cf_hair_wildmessy01.ccmesh_pc",
+   "cf_hair_wildmessy01.gcmesh_pc",
+   "cf_hair_wildmessy01.rig_pc",
+   "cf_hair_wildmessy01_pc.cmorph_pc",
+   "cm_hair_wildmessy01.cpeg_pc",
+   "cm_hair_wildmessy01.gpeg_pc"
+  ],
+  "custmesh_-404226424.str2_pc": [
+   "cm_hair_longdreads.ccmesh_pc",
+   "cm_hair_longdreads.cpeg_pc",
+   "cm_hair_longdreads.gcmesh_pc",
+   "cm_hair_longdreads.gpeg_pc",
+   "cm_hair_longdreads.rig_pc",
+   "cm_hair_longdreads_pc.cmorph_pc"
+  ],
+  "custmesh_2056663783f.str2_pc": [
+   "cf_hair_longbangs.ccmesh_pc",
+   "cf_hair_longbangs.gcmesh_pc",
+   "cf_hair_longbangs.rig_pc",
+   "cf_hair_longbangs_pc.cmorph_pc",
+   "cm_hair_longbangs.cpeg_pc",
+   "cm_hair_longbangs.gpeg_pc"
+  ],
+  "custmesh_-1481793779.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-342364706f.str2_pc": [
+   "cf_hair_mediumbob.ccmesh_pc",
+   "cf_hair_mediumbob.gcmesh_pc",
+   "cf_hair_mediumbob.rig_pc",
+   "cf_hair_mediumbob_pc.cmorph_pc",
+   "cm_hair_mediumbob.cpeg_pc",
+   "cm_hair_mediumbob.gpeg_pc"
+  ],
+  "custmesh_-129948489.str2_pc": [
+   "cm_hair_guy_glasses.ccmesh_pc",
+   "cm_hair_guy_glasses.cpeg_pc",
+   "cm_hair_guy_glasses.gcmesh_pc",
+   "cm_hair_guy_glasses.gpeg_pc",
+   "cm_hair_guy_glasses.rig_pc",
+   "cm_hair_guy_glasses_pc.cmorph_pc"
+  ],
+  "custmesh_1482596109.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_2049351437f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-1798235891f.str2_pc": [
+   "cf_hair_guy.ccmesh_pc",
+   "cf_hair_guy.gcmesh_pc",
+   "cf_hair_guy_pc.cmorph_pc",
+   "cm_hair_guy.cpeg_pc",
+   "cm_hair_guy.gpeg_pc"
+  ],
+  "custmesh_-1481793779f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-342364706.str2_pc": [
+   "cm_hair_mediumbob.ccmesh_pc",
+   "cm_hair_mediumbob.cpeg_pc",
+   "cm_hair_mediumbob.gcmesh_pc",
+   "cm_hair_mediumbob.gpeg_pc",
+   "cm_hair_mediumbob.rig_pc",
+   "cm_hair_mediumbob_pc.cmorph_pc"
+  ],
+  "custmesh_-1896552508f.str2_pc": [
+   "cf_hair_tribalmullet.ccmesh_pc",
+   "cf_hair_tribalmullet.gcmesh_pc",
+   "cf_hair_tribalmullet_pc.cmorph_pc",
+   "cf_hair_tribalmullet_scr.cmorph_pc",
+   "cm_hair_tribalmullet.cpeg_pc",
+   "cm_hair_tribalmullet.gpeg_pc"
+  ],
+  "custmesh_-910288607f.str2_pc": [
+   "cf_hair_sidepartmed_02.ccmesh_pc",
+   "cf_hair_sidepartmed_02.gcmesh_pc",
+   "cf_hair_sidepartmed_02.rig_pc",
+   "cf_hair_sidepartmed_02_pc.cmorph_pc",
+   "cf_hair_sidepartmed_02_scr.cmorph_pc",
+   "cm_hair_sidepartmed_02.cpeg_pc",
+   "cm_hair_sidepartmed_02.gpeg_pc"
+  ],
+  "custmesh_-604328012.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_-993939532f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gpeg_pc"
+  ],
+  "custmesh_-2107860809f.str2_pc": [
+   "cf_hair_wildmessy02.ccmesh_pc",
+   "cf_hair_wildmessy02.gcmesh_pc",
+   "cf_hair_wildmessy02.rig_pc",
+   "cf_hair_wildmessy02_pc.cmorph_pc",
+   "cm_hair_wildmessy02.cpeg_pc",
+   "cm_hair_wildmessy02.gpeg_pc"
+  ],
+  "custmesh_973682244.str2_pc": [
+   "cm_hair_mohawk.ccmesh_pc",
+   "cm_hair_mohawk.cpeg_pc",
+   "cm_hair_mohawk.gcmesh_pc",
+   "cm_hair_mohawk.gpeg_pc",
+   "cm_hair_mohawk_pc.cmorph_pc",
+   "cm_hair_mohawk_scr.cmorph_pc"
+  ],
+  "custmesh_-1481800605f.str2_pc": [
+   "cf_hair_ponytail.ccmesh_pc",
+   "cf_hair_ponytail.gcmesh_pc",
+   "cf_hair_ponytail.rig_pc",
+   "cf_hair_ponytail_pc.cmorph_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gpeg_pc"
+  ],
+  "custmesh_-1481800605.str2_pc": [
+   "cm_hair_ponytail.ccmesh_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gcmesh_pc",
+   "cm_hair_ponytail.gpeg_pc",
+   "cm_hair_ponytail.rig_pc",
+   "cm_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-2064075120.str2_pc": [
+   "cm_hair_short.ccmesh_pc",
+   "cm_hair_short.cpeg_pc",
+   "cm_hair_short.gcmesh_pc",
+   "cm_hair_short.gpeg_pc",
+   "cm_hair_short_pc.cmorph_pc",
+   "cm_hair_short_scr.cmorph_pc"
+  ],
+  "custmesh_139168360f.str2_pc": [
+   "cf_hair_pigtails.ccmesh_pc",
+   "cf_hair_pigtails.gcmesh_pc",
+   "cf_hair_pigtails.rig_pc",
+   "cf_hair_pigtails_pc.cmorph_pc",
+   "cm_hair_pigtails.cpeg_pc",
+   "cm_hair_pigtails.gpeg_pc"
+  ],
+  "custmesh_-273559342.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_2049329076.str2_pc": [
+   "cm_hair_longbg.ccmesh_pc",
+   "cm_hair_longbg.cpeg_pc",
+   "cm_hair_longbg.gcmesh_pc",
+   "cm_hair_longbg.gpeg_pc",
+   "cm_hair_longbg.rig_pc",
+   "cm_hair_longbg_pc.cmorph_pc"
+  ],
+  "custmesh_-378953898.str2_pc": [
+   "cm_hair_wildmessy01.ccmesh_pc",
+   "cm_hair_wildmessy01.cpeg_pc",
+   "cm_hair_wildmessy01.gcmesh_pc",
+   "cm_hair_wildmessy01.gpeg_pc",
+   "cm_hair_wildmessy01.rig_pc",
+   "cm_hair_wildmessy01_pc.cmorph_pc"
+  ],
+  "custmesh_-604328012f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gpeg_pc"
+  ],
+  "custmesh_590399893f.str2_pc": [
+   "cf_hair_dreads.ccmesh_pc",
+   "cf_hair_dreads.gcmesh_pc",
+   "cf_hair_dreads.rig_pc",
+   "cf_hair_dreads_pc.cmorph_pc",
+   "cf_hair_dreads_scr.cmorph_pc",
+   "cm_hair_dreads.cpeg_pc",
+   "cm_hair_dreads.gpeg_pc"
+  ],
+  "custmesh_1466675124f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gpeg_pc"
+  ],
+  "custmesh_769927692.str2_pc": [
+   "cm_hair_med-01.ccmesh_pc",
+   "cm_hair_med-01.cpeg_pc",
+   "cm_hair_med-01.gcmesh_pc",
+   "cm_hair_med-01.gpeg_pc",
+   "cm_hair_med-01.rig_pc",
+   "cm_hair_med-01_pc.cmorph_pc"
+  ],
+  "custmesh_139173645f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-273590074.str2_pc": [
+   "cm_hair_longwavy.ccmesh_pc",
+   "cm_hair_longwavy.cpeg_pc",
+   "cm_hair_longwavy.gcmesh_pc",
+   "cm_hair_longwavy.gpeg_pc",
+   "cm_hair_longwavy.rig_pc",
+   "cm_hair_longwavy_pc.cmorph_pc"
+  ],
+  "custmesh_540027621.str2_pc": [
+   "cm_hair_beehive.ccmesh_pc",
+   "cm_hair_beehive.cpeg_pc",
+   "cm_hair_beehive.gcmesh_pc",
+   "cm_hair_beehive.gpeg_pc",
+   "cm_hair_beehive.rig_pc",
+   "cm_hair_beehive_pc.cmorph_pc",
+   "cm_hair_beehive_scr.cmorph_pc"
+  ],
+  "custmesh_973682244f.str2_pc": [
+   "cf_hair_mohawk.ccmesh_pc",
+   "cf_hair_mohawk.gcmesh_pc",
+   "cf_hair_mohawk_pc.cmorph_pc",
+   "cf_hair_mohawk_scr.cmorph_pc",
+   "cm_hair_mohawk.cpeg_pc",
+   "cm_hair_mohawk.gpeg_pc"
+  ],
+  "custmesh_2056704210f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gpeg_pc"
+  ],
+  "custmesh_1128059090.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_2049344611.str2_pc": [
+   "cm_hair_ponytail.ccmesh_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gcmesh_pc",
+   "cm_hair_ponytail.gpeg_pc",
+   "cm_hair_ponytail.rig_pc",
+   "cm_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_973713332f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gpeg_pc"
+  ],
+  "custmesh_139173645.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_786867782f.str2_pc": [
+   "cf_hathair_balding.ccmesh_pc",
+   "cf_hathair_balding.gcmesh_pc",
+   "cf_hathair_balding_pc.cmorph_pc",
+   "cm_hathair_balding.cpeg_pc",
+   "cm_hathair_balding.gpeg_pc"
+  ],
+  "custmesh_1128059090f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gpeg_pc"
+  ],
+  "custmesh_1920828244f.str2_pc": [
+   "cf_hair_butterfly.ccmesh_pc",
+   "cf_hair_butterfly.gcmesh_pc",
+   "cf_hair_butterfly.rig_pc",
+   "cf_hair_butterfly_pc.cmorph_pc",
+   "cm_hair_butterfly.cpeg_pc",
+   "cm_hair_butterfly.gpeg_pc"
+  ],
+  "custmesh_-1008209877f.str2_pc": [
+   "cf_hair_chopsticks.ccmesh_pc",
+   "cf_hair_chopsticks.gcmesh_pc",
+   "cf_hair_chopsticks.rig_pc",
+   "cf_hair_chopsticks_pc.cmorph_pc",
+   "cf_hair_chopsticks_scr.cmorph_pc",
+   "cm_hair_chopsticks.cpeg_pc",
+   "cm_hair_chopsticks.gpeg_pc"
+  ],
+  "custmesh_-273559342f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gpeg_pc"
+  ],
+  "custmesh_1491814465.str2_pc": [
+   "cm_hair_cornrows1.ccmesh_pc",
+   "cm_hair_cornrows1.cpeg_pc",
+   "cm_hair_cornrows1.gcmesh_pc",
+   "cm_hair_cornrows1.gpeg_pc",
+   "cm_hair_cornrows1_pc.cmorph_pc"
+  ],
+  "custmesh_-2043411022.str2_pc": [
+   "cm_hair_afro.ccmesh_pc",
+   "cm_hair_afro.cpeg_pc",
+   "cm_hair_afro.gcmesh_pc",
+   "cm_hair_afro.gpeg_pc",
+   "cm_hair_afro.rig_pc",
+   "cm_hair_afro_pc.cmorph_pc",
+   "cm_hair_afro_scr.cmorph_pc"
+  ],
+  "custmesh_-1284844674f.str2_pc": [
+   "cf_hair_midpartmed.ccmesh_pc",
+   "cf_hair_midpartmed.gcmesh_pc",
+   "cf_hair_midpartmed.rig_pc",
+   "cf_hair_midpartmed_pc.cmorph_pc",
+   "cm_hair_midpartmed.cpeg_pc",
+   "cm_hair_midpartmed.gpeg_pc"
+  ],
+  "custmesh_540027621f.str2_pc": [
+   "cf_hair_beehive.ccmesh_pc",
+   "cf_hair_beehive.gcmesh_pc",
+   "cf_hair_beehive.rig_pc",
+   "cf_hair_beehive_pc.cmorph_pc",
+   "cf_hair_beehive_scr.cmorph_pc",
+   "cm_hair_beehive.cpeg_pc",
+   "cm_hair_beehive.gpeg_pc"
+  ],
+  "custmesh_1482608850f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gpeg_pc"
+  ],
+  "custmesh_1128039523.str2_pc": [
+   "cm_hair_ponytail.ccmesh_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gcmesh_pc",
+   "cm_hair_ponytail.gpeg_pc",
+   "cm_hair_ponytail.rig_pc",
+   "cm_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1482596109f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_-1284844674.str2_pc": [
+   "cm_hair_midpartmed.ccmesh_pc",
+   "cm_hair_midpartmed.cpeg_pc",
+   "cm_hair_midpartmed.gcmesh_pc",
+   "cm_hair_midpartmed.gpeg_pc",
+   "cm_hair_midpartmed.rig_pc",
+   "cm_hair_midpartmed_pc.cmorph_pc"
+  ],
+  "custmesh_1491806867f.str2_pc": [
+   "cf_hair_cornrows.ccmesh_pc",
+   "cf_hair_cornrows.gcmesh_pc",
+   "cf_hair_cornrows.rig_pc",
+   "cf_hair_cornrows_pc.cmorph_pc",
+   "cm_hair_cornrows.cpeg_pc",
+   "cm_hair_cornrows.gpeg_pc"
+  ],
+  "custmesh_2049329076f.str2_pc": [
+   "cf_hair_longbg.ccmesh_pc",
+   "cf_hair_longbg.gcmesh_pc",
+   "cf_hair_longbg.rig_pc",
+   "cf_hair_longbg_pc.cmorph_pc",
+   "cm_hair_longbg.cpeg_pc",
+   "cm_hair_longbg.gpeg_pc"
+  ],
+  "custmesh_590389005f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_796371404f.str2_pc": [
+   "cf_hair_m_longup.ccmesh_pc",
+   "cf_hair_m_longup.gcmesh_pc",
+   "cf_hair_m_longup.rig_pc",
+   "cf_hair_m_longup_pc.cmorph_pc",
+   "cm_hair_m_longup.cpeg_pc",
+   "cm_hair_m_longup.gpeg_pc"
+  ],
+  "custmesh_1128046349.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1008209877.str2_pc": [
+   "cm_hair_chopsticks.ccmesh_pc",
+   "cm_hair_chopsticks.cpeg_pc",
+   "cm_hair_chopsticks.gcmesh_pc",
+   "cm_hair_chopsticks.gpeg_pc",
+   "cm_hair_chopsticks.rig_pc",
+   "cm_hair_chopsticks_pc.cmorph_pc",
+   "cm_hair_chopsticks_scr.cmorph_pc"
+  ],
+  "custmesh_786867782.str2_pc": [
+   "cm_hathair_balding.ccmesh_pc",
+   "cm_hathair_balding.cpeg_pc",
+   "cm_hathair_balding.gcmesh_pc",
+   "cm_hathair_balding.gpeg_pc",
+   "cm_hathair_balding_pc.cmorph_pc"
+  ],
+  "custmesh_-404226424f.str2_pc": [
+   "cf_hair_longdreads.ccmesh_pc",
+   "cf_hair_longdreads.gcmesh_pc",
+   "cf_hair_longdreads.rig_pc",
+   "cf_hair_longdreads_pc.cmorph_pc",
+   "cm_hair_longdreads.cpeg_pc",
+   "cm_hair_longdreads.gpeg_pc"
+  ],
+  "custmesh_-725311731f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ],
+  "custmesh_590399893.str2_pc": [
+   "cm_hair_dreads.ccmesh_pc",
+   "cm_hair_dreads.cpeg_pc",
+   "cm_hair_dreads.gcmesh_pc",
+   "cm_hair_dreads.gpeg_pc",
+   "cm_hair_dreads.rig_pc",
+   "cm_hair_dreads_pc.cmorph_pc",
+   "cm_hair_dreads_scr.cmorph_pc"
+  ],
+  "custmesh_-273590074f.str2_pc": [
+   "cf_hair_longwavy.ccmesh_pc",
+   "cf_hair_longwavy.gcmesh_pc",
+   "cf_hair_longwavy.rig_pc",
+   "cf_hair_longwavy_pc.cmorph_pc",
+   "cm_hair_longwavy.cpeg_pc",
+   "cm_hair_longwavy.gpeg_pc"
+  ],
+  "custmesh_1466675124.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_-1744560444f.str2_pc": [
+   "cf_hair_sidepartmed_01.ccmesh_pc",
+   "cf_hair_sidepartmed_01.gcmesh_pc",
+   "cf_hair_sidepartmed_01.rig_pc",
+   "cf_hair_sidepartmed_01_pc.cmorph_pc",
+   "cf_hair_sidepartmed_01_scr.cmorph_pc",
+   "cm_hair_sidepartmed_01.cpeg_pc",
+   "cm_hair_sidepartmed_01.gpeg_pc"
+  ],
+  "custmesh_590389005.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-273572083.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_550647364.str2_pc": [
+   "cm_hair_mohawk.ccmesh_pc",
+   "cm_hair_mohawk.cpeg_pc",
+   "cm_hair_mohawk.gcmesh_pc",
+   "cm_hair_mohawk.gpeg_pc",
+   "cm_hair_mohawk_pc.cmorph_pc",
+   "cm_hair_mohawk_scr.cmorph_pc"
+  ],
+  "custmesh_-910288607.str2_pc": [
+   "cm_hair_sidepartmed_02.ccmesh_pc",
+   "cm_hair_sidepartmed_02.cpeg_pc",
+   "cm_hair_sidepartmed_02.gcmesh_pc",
+   "cm_hair_sidepartmed_02.gpeg_pc",
+   "cm_hair_sidepartmed_02.rig_pc",
+   "cm_hair_sidepartmed_02_pc.cmorph_pc",
+   "cm_hair_sidepartmed_02_scr.cmorph_pc"
+  ],
+  "custmesh_-993939532.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_796371404.str2_pc": [
+   "cm_hair_m_longup.ccmesh_pc",
+   "cm_hair_m_longup.cpeg_pc",
+   "cm_hair_m_longup.gcmesh_pc",
+   "cm_hair_m_longup.gpeg_pc",
+   "cm_hair_m_longup.rig_pc",
+   "cm_hair_m_longup_pc.cmorph_pc"
+  ],
+  "custmesh_139168360.str2_pc": [
+   "cm_hair_pigtails.ccmesh_pc",
+   "cm_hair_pigtails.cpeg_pc",
+   "cm_hair_pigtails.gcmesh_pc",
+   "cm_hair_pigtails.gpeg_pc",
+   "cm_hair_pigtails.rig_pc",
+   "cm_hair_pigtails_pc.cmorph_pc"
+  ],
+  "custmesh_-1896552508.str2_pc": [
+   "cm_hair_tribalmullet.ccmesh_pc",
+   "cm_hair_tribalmullet.cpeg_pc",
+   "cm_hair_tribalmullet.gcmesh_pc",
+   "cm_hair_tribalmullet.gpeg_pc",
+   "cm_hair_tribalmullet_pc.cmorph_pc",
+   "cm_hair_tribalmullet_scr.cmorph_pc"
+  ],
+  "custmesh_-404250867.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_769957645.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-2004181235f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gpeg_pc"
+  ]
+ },
+ "rema": {
+  "custmesh_973713332.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_2049344611.str2_pc": [
+   "cm_hair_ponytail.ccmesh_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gcmesh_pc",
+   "cm_hair_ponytail.gpeg_pc",
+   "cm_hair_ponytail.rig_pc",
+   "cm_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_769927692f.str2_pc": [
+   "cf_hair_med-01.ccmesh_pc",
+   "cf_hair_med-01.cpeg_pc",
+   "cf_hair_med-01.gcmesh_pc",
+   "cf_hair_med-01.gpeg_pc",
+   "cf_hair_med-01.rig_pc",
+   "cf_hair_med-01_pc.cmorph_pc"
+  ],
+  "custmesh_-129928997.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1482618777f.str2_pc": [
+   "cf_hair_longasym.ccmesh_pc",
+   "cf_hair_longasym.cpeg_pc",
+   "cf_hair_longasym.gcmesh_pc",
+   "cf_hair_longasym.gpeg_pc",
+   "cf_hair_longasym.rig_pc",
+   "cf_hair_longasym_pc.cmorph_pc",
+   "cf_hair_longasym_scr.cmorph_pc"
+  ],
+  "custmesh_-2107860809.str2_pc": [
+   "cm_hair_wildmessy02.ccmesh_pc",
+   "cm_hair_wildmessy02.cpeg_pc",
+   "cm_hair_wildmessy02.gcmesh_pc",
+   "cm_hair_wildmessy02.gpeg_pc",
+   "cm_hair_wildmessy02.rig_pc",
+   "cm_hair_wildmessy02_pc.cmorph_pc"
+  ],
+  "custmesh_-910288607.str2_pc": [
+   "cm_hair_sidepartmed_02.ccmesh_pc",
+   "cm_hair_sidepartmed_02.cpeg_pc",
+   "cm_hair_sidepartmed_02.gcmesh_pc",
+   "cm_hair_sidepartmed_02.gpeg_pc",
+   "cm_hair_sidepartmed_02.rig_pc",
+   "cm_hair_sidepartmed_02_pc.cmorph_pc",
+   "cm_hair_sidepartmed_02_scr.cmorph_pc"
+  ],
+  "custmesh_-404226424f.str2_pc": [
+   "cf_hair_longdreads.ccmesh_pc",
+   "cf_hair_longdreads.cpeg_pc",
+   "cf_hair_longdreads.gcmesh_pc",
+   "cf_hair_longdreads.gpeg_pc",
+   "cf_hair_longdreads.rig_pc",
+   "cf_hair_longdreads_pc.cmorph_pc"
+  ],
+  "custmesh_-1850969893f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-378953898f.str2_pc": [
+   "cf_hair_wildmessy01.ccmesh_pc",
+   "cf_hair_wildmessy01.cpeg_pc",
+   "cf_hair_wildmessy01.gcmesh_pc",
+   "cf_hair_wildmessy01.gpeg_pc",
+   "cf_hair_wildmessy01.rig_pc",
+   "cf_hair_wildmessy01_pc.cmorph_pc"
+  ],
+  "custmesh_697463003f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1346834483f.str2_pc": [
+   "cf_hair_downjagged.ccmesh_pc",
+   "cf_hair_downjagged.cpeg_pc",
+   "cf_hair_downjagged.gcmesh_pc",
+   "cf_hair_downjagged.gpeg_pc",
+   "cf_hair_downjagged.rig_pc",
+   "cf_hair_downjagged_pc.cmorph_pc"
+  ],
+  "custmesh_1491814465f.str2_pc": [
+   "cf_hair_cornrows1.ccmesh_pc",
+   "cf_hair_cornrows1.cpeg_pc",
+   "cf_hair_cornrows1.gcmesh_pc",
+   "cf_hair_cornrows1.gpeg_pc",
+   "cf_hair_cornrows1_pc.cmorph_pc"
+  ],
+  "custmesh_-129948489f.str2_pc": [
+   "cf_hair_guy_glasses.ccmesh_pc",
+   "cf_hair_guy_glasses.cpeg_pc",
+   "cf_hair_guy_glasses.gcmesh_pc",
+   "cf_hair_guy_glasses.gpeg_pc",
+   "cf_hair_guy_glasses.rig_pc",
+   "cf_hair_guy_glasses_pc.cmorph_pc"
+  ],
+  "custmesh_1128046349f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1896582949f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_139173645f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-273590074.str2_pc": [
+   "cm_hair_longwavy.ccmesh_pc",
+   "cm_hair_longwavy.cpeg_pc",
+   "cm_hair_longwavy.gcmesh_pc",
+   "cm_hair_longwavy.gpeg_pc",
+   "cm_hair_longwavy.rig_pc",
+   "cm_hair_longwavy_pc.cmorph_pc"
+  ],
+  "custmesh_769957645.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_590389005f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_590399893f.str2_pc": [
+   "cf_hair_dreads.ccmesh_pc",
+   "cf_hair_dreads.cpeg_pc",
+   "cf_hair_dreads.gcmesh_pc",
+   "cf_hair_dreads.gpeg_pc",
+   "cf_hair_dreads.rig_pc",
+   "cf_hair_dreads_pc.cmorph_pc",
+   "cf_hair_dreads_scr.cmorph_pc"
+  ],
+  "custmesh_-1209437989f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_769927692.str2_pc": [
+   "cm_hair_med-01.ccmesh_pc",
+   "cm_hair_med-01.cpeg_pc",
+   "cm_hair_med-01.gcmesh_pc",
+   "cm_hair_med-01.gpeg_pc",
+   "cm_hair_med-01.rig_pc",
+   "cm_hair_med-01_pc.cmorph_pc"
+  ],
+  "custmesh_-1896552508f.str2_pc": [
+   "cf_hair_tribalmullet.ccmesh_pc",
+   "cf_hair_tribalmullet.cpeg_pc",
+   "cf_hair_tribalmullet.gcmesh_pc",
+   "cf_hair_tribalmullet.gpeg_pc",
+   "cf_hair_tribalmullet_pc.cmorph_pc",
+   "cf_hair_tribalmullet_scr.cmorph_pc"
+  ],
+  "custmesh_1920835341f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_973682244f.str2_pc": [
+   "cf_hair_mohawk.ccmesh_pc",
+   "cf_hair_mohawk.cpeg_pc",
+   "cf_hair_mohawk.gcmesh_pc",
+   "cf_hair_mohawk.gpeg_pc",
+   "cf_hair_mohawk_pc.cmorph_pc",
+   "cf_hair_mohawk_scr.cmorph_pc"
+  ],
+  "custmesh_2049351437.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-378953898.str2_pc": [
+   "cm_hair_wildmessy01.ccmesh_pc",
+   "cm_hair_wildmessy01.cpeg_pc",
+   "cm_hair_wildmessy01.gcmesh_pc",
+   "cm_hair_wildmessy01.gpeg_pc",
+   "cm_hair_wildmessy01.rig_pc",
+   "cm_hair_wildmessy01_pc.cmorph_pc"
+  ],
+  "custmesh_-1302817773.str2_pc": [
+   "cm_hair_sidespiked.ccmesh_pc",
+   "cm_hair_sidespiked.cpeg_pc",
+   "cm_hair_sidespiked.gcmesh_pc",
+   "cm_hair_sidespiked.gpeg_pc",
+   "cm_hair_sidespiked.rig_pc",
+   "cm_hair_sidespiked_pc.cmorph_pc",
+   "cm_hair_sidespiked_scr.cmorph_pc"
+  ],
+  "custmesh_-604328012f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.cpeg_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz.gpeg_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_769957645f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-2064092965f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-273572083f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1284869925f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-1209437989.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_139168360f.str2_pc": [
+   "cf_hair_pigtails.ccmesh_pc",
+   "cf_hair_pigtails.cpeg_pc",
+   "cf_hair_pigtails.gcmesh_pc",
+   "cf_hair_pigtails.gpeg_pc",
+   "cf_hair_pigtails.rig_pc",
+   "cf_hair_pigtails_pc.cmorph_pc"
+  ],
+  "custmesh_-725308459.str2_pc": [
+   "cm_hair_starlet.ccmesh_pc",
+   "cm_hair_starlet.cpeg_pc",
+   "cm_hair_starlet.gcmesh_pc",
+   "cm_hair_starlet.gpeg_pc",
+   "cm_hair_starlet.rig_pc",
+   "cm_hair_starlet_pc.cmorph_pc",
+   "cm_hair_starlet_scr.cmorph_pc"
+  ],
+  "custmesh_-1302817773f.str2_pc": [
+   "cf_hair_sidespiked.ccmesh_pc",
+   "cf_hair_sidespiked.cpeg_pc",
+   "cf_hair_sidespiked.gcmesh_pc",
+   "cf_hair_sidespiked.gpeg_pc",
+   "cf_hair_sidespiked.rig_pc",
+   "cf_hair_sidespiked_pc.cmorph_pc",
+   "cf_hair_sidespiked_scr.cmorph_pc"
+  ],
+  "custmesh_1482596109.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1798235891.str2_pc": [
+   "cm_hair_guy.ccmesh_pc",
+   "cm_hair_guy.cpeg_pc",
+   "cm_hair_guy.gcmesh_pc",
+   "cm_hair_guy.gpeg_pc",
+   "cm_hair_guy_pc.cmorph_pc"
+  ],
+  "custmesh_-725311731f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1850969893.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-129951475.str2_pc": [
+   "cm_hair_guy.ccmesh_pc",
+   "cm_hair_guy.cpeg_pc",
+   "cm_hair_guy.gcmesh_pc",
+   "cm_hair_guy.gpeg_pc",
+   "cm_hair_guy_pc.cmorph_pc"
+  ],
+  "custmesh_-273590074f.str2_pc": [
+   "cf_hair_longwavy.ccmesh_pc",
+   "cf_hair_longwavy.cpeg_pc",
+   "cf_hair_longwavy.gcmesh_pc",
+   "cf_hair_longwavy.gpeg_pc",
+   "cf_hair_longwavy.rig_pc",
+   "cf_hair_longwavy_pc.cmorph_pc"
+  ],
+  "custmesh_1466675124.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_973713332f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.cpeg_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz.gpeg_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_2056691469.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-725311731.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1896582949.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-1284844674f.str2_pc": [
+   "cf_hair_midpartmed.ccmesh_pc",
+   "cf_hair_midpartmed.cpeg_pc",
+   "cf_hair_midpartmed.gcmesh_pc",
+   "cf_hair_midpartmed.gpeg_pc",
+   "cf_hair_midpartmed.rig_pc",
+   "cf_hair_midpartmed_pc.cmorph_pc"
+  ],
+  "custmesh_540027621f.str2_pc": [
+   "cf_hair_beehive.ccmesh_pc",
+   "cf_hair_beehive.cpeg_pc",
+   "cf_hair_beehive.gcmesh_pc",
+   "cf_hair_beehive.gpeg_pc",
+   "cf_hair_beehive.rig_pc",
+   "cf_hair_beehive_pc.cmorph_pc",
+   "cf_hair_beehive_scr.cmorph_pc"
+  ],
+  "custmesh_-1284869925.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-2107860809f.str2_pc": [
+   "cf_hair_wildmessy02.ccmesh_pc",
+   "cf_hair_wildmessy02.cpeg_pc",
+   "cf_hair_wildmessy02.gcmesh_pc",
+   "cf_hair_wildmessy02.gpeg_pc",
+   "cf_hair_wildmessy02.rig_pc",
+   "cf_hair_wildmessy02_pc.cmorph_pc"
+  ],
+  "custmesh_1128059090.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_-1744560444f.str2_pc": [
+   "cf_hair_sidepartmed_01.ccmesh_pc",
+   "cf_hair_sidepartmed_01.cpeg_pc",
+   "cf_hair_sidepartmed_01.gcmesh_pc",
+   "cf_hair_sidepartmed_01.gpeg_pc",
+   "cf_hair_sidepartmed_01.rig_pc",
+   "cf_hair_sidepartmed_01_pc.cmorph_pc",
+   "cf_hair_sidepartmed_01_scr.cmorph_pc"
+  ],
+  "custmesh_-1744539429f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-1008209877f.str2_pc": [
+   "cf_hair_chopsticks.ccmesh_pc",
+   "cf_hair_chopsticks.cpeg_pc",
+   "cf_hair_chopsticks.gcmesh_pc",
+   "cf_hair_chopsticks.gpeg_pc",
+   "cf_hair_chopsticks.rig_pc",
+   "cf_hair_chopsticks_pc.cmorph_pc",
+   "cf_hair_chopsticks_scr.cmorph_pc"
+  ],
+  "custmesh_-342364706f.str2_pc": [
+   "cf_hair_mediumbob.ccmesh_pc",
+   "cf_hair_mediumbob.cpeg_pc",
+   "cf_hair_mediumbob.gcmesh_pc",
+   "cf_hair_mediumbob.gpeg_pc",
+   "cf_hair_mediumbob.rig_pc",
+   "cf_hair_mediumbob_pc.cmorph_pc"
+  ],
+  "custmesh_-1008209877.str2_pc": [
+   "cm_hair_chopsticks.ccmesh_pc",
+   "cm_hair_chopsticks.cpeg_pc",
+   "cm_hair_chopsticks.gcmesh_pc",
+   "cm_hair_chopsticks.gpeg_pc",
+   "cm_hair_chopsticks.rig_pc",
+   "cm_hair_chopsticks_pc.cmorph_pc",
+   "cm_hair_chopsticks_scr.cmorph_pc"
+  ],
+  "custmesh_-273559342.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_2056704210.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_-2004181235.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1128039523.str2_pc": [
+   "cm_hair_ponytail.ccmesh_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gcmesh_pc",
+   "cm_hair_ponytail.gpeg_pc",
+   "cm_hair_ponytail.rig_pc",
+   "cm_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1744560444.str2_pc": [
+   "cm_hair_sidepartmed_01.ccmesh_pc",
+   "cm_hair_sidepartmed_01.cpeg_pc",
+   "cm_hair_sidepartmed_01.gcmesh_pc",
+   "cm_hair_sidepartmed_01.gpeg_pc",
+   "cm_hair_sidepartmed_01.rig_pc",
+   "cm_hair_sidepartmed_01_pc.cmorph_pc",
+   "cm_hair_sidepartmed_01_scr.cmorph_pc"
+  ],
+  "custmesh_-1284844674.str2_pc": [
+   "cm_hair_midpartmed.ccmesh_pc",
+   "cm_hair_midpartmed.cpeg_pc",
+   "cm_hair_midpartmed.gcmesh_pc",
+   "cm_hair_midpartmed.gpeg_pc",
+   "cm_hair_midpartmed.rig_pc",
+   "cm_hair_midpartmed_pc.cmorph_pc"
+  ],
+  "custmesh_-1481793779.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-993939532.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_139173645.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-378965797.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-1798235891f.str2_pc": [
+   "cf_hair_guy.ccmesh_pc",
+   "cf_hair_guy.cpeg_pc",
+   "cf_hair_guy.gcmesh_pc",
+   "cf_hair_guy.gpeg_pc",
+   "cf_hair_guy_pc.cmorph_pc"
+  ],
+  "custmesh_-598445861f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-910288607f.str2_pc": [
+   "cf_hair_sidepartmed_02.ccmesh_pc",
+   "cf_hair_sidepartmed_02.cpeg_pc",
+   "cf_hair_sidepartmed_02.gcmesh_pc",
+   "cf_hair_sidepartmed_02.gpeg_pc",
+   "cf_hair_sidepartmed_02.rig_pc",
+   "cf_hair_sidepartmed_02_pc.cmorph_pc",
+   "cf_hair_sidepartmed_02_scr.cmorph_pc"
+  ],
+  "custmesh_1491806867.str2_pc": [
+   "cm_hair_cornrows.ccmesh_pc",
+   "cm_hair_cornrows.cpeg_pc",
+   "cm_hair_cornrows.gcmesh_pc",
+   "cm_hair_cornrows.gpeg_pc",
+   "cm_hair_cornrows.rig_pc",
+   "cm_hair_cornrows_pc.cmorph_pc"
+  ],
+  "custmesh_-378965797f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-1481800605.str2_pc": [
+   "cm_hair_ponytail.ccmesh_pc",
+   "cm_hair_ponytail.cpeg_pc",
+   "cm_hair_ponytail.gcmesh_pc",
+   "cm_hair_ponytail.gpeg_pc",
+   "cm_hair_ponytail.rig_pc",
+   "cm_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-2043411022f.str2_pc": [
+   "cf_hair_afro.ccmesh_pc",
+   "cf_hair_afro.cpeg_pc",
+   "cf_hair_afro.gcmesh_pc",
+   "cf_hair_afro.gpeg_pc",
+   "cf_hair_afro.rig_pc",
+   "cf_hair_afro_pc.cmorph_pc",
+   "cf_hair_afro_scr.cmorph_pc"
+  ],
+  "custmesh_1491814465.str2_pc": [
+   "cm_hair_cornrows1.ccmesh_pc",
+   "cm_hair_cornrows1.cpeg_pc",
+   "cm_hair_cornrows1.gcmesh_pc",
+   "cm_hair_cornrows1.gpeg_pc",
+   "cm_hair_cornrows1_pc.cmorph_pc"
+  ],
+  "custmesh_1466675124f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.cpeg_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz.gpeg_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_-1896552508.str2_pc": [
+   "cm_hair_tribalmullet.ccmesh_pc",
+   "cm_hair_tribalmullet.cpeg_pc",
+   "cm_hair_tribalmullet.gcmesh_pc",
+   "cm_hair_tribalmullet.gpeg_pc",
+   "cm_hair_tribalmullet_pc.cmorph_pc",
+   "cm_hair_tribalmullet_scr.cmorph_pc"
+  ],
+  "custmesh_540027621.str2_pc": [
+   "cm_hair_beehive.ccmesh_pc",
+   "cm_hair_beehive.cpeg_pc",
+   "cm_hair_beehive.gcmesh_pc",
+   "cm_hair_beehive.gpeg_pc",
+   "cm_hair_beehive.rig_pc",
+   "cm_hair_beehive_pc.cmorph_pc",
+   "cm_hair_beehive_scr.cmorph_pc"
+  ],
+  "custmesh_-910266149f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_2056663783f.str2_pc": [
+   "cf_hair_longbangs.ccmesh_pc",
+   "cf_hair_longbangs.cpeg_pc",
+   "cf_hair_longbangs.gcmesh_pc",
+   "cf_hair_longbangs.gpeg_pc",
+   "cf_hair_longbangs.rig_pc",
+   "cf_hair_longbangs_pc.cmorph_pc"
+  ],
+  "custmesh_-2064075120f.str2_pc": [
+   "cf_hair_short.ccmesh_pc",
+   "cf_hair_short.cpeg_pc",
+   "cf_hair_short.gcmesh_pc",
+   "cf_hair_short.gpeg_pc",
+   "cf_hair_short_pc.cmorph_pc",
+   "cf_hair_short_scr.cmorph_pc"
+  ],
+  "custmesh_-2064092965.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-910266149.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_2049344611f.str2_pc": [
+   "cf_hair_ponytail.ccmesh_pc",
+   "cf_hair_ponytail.cpeg_pc",
+   "cf_hair_ponytail.gcmesh_pc",
+   "cf_hair_ponytail.gpeg_pc",
+   "cf_hair_ponytail.rig_pc",
+   "cf_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1162113243f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1128039523f.str2_pc": [
+   "cf_hair_ponytail.ccmesh_pc",
+   "cf_hair_ponytail.cpeg_pc",
+   "cf_hair_ponytail.gcmesh_pc",
+   "cf_hair_ponytail.gpeg_pc",
+   "cf_hair_ponytail.rig_pc",
+   "cf_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-404226424.str2_pc": [
+   "cm_hair_longdreads.ccmesh_pc",
+   "cm_hair_longdreads.cpeg_pc",
+   "cm_hair_longdreads.gcmesh_pc",
+   "cm_hair_longdreads.gpeg_pc",
+   "cm_hair_longdreads.rig_pc",
+   "cm_hair_longdreads_pc.cmorph_pc"
+  ],
+  "custmesh_1491806867f.str2_pc": [
+   "cf_hair_cornrows.ccmesh_pc",
+   "cf_hair_cornrows.cpeg_pc",
+   "cf_hair_cornrows.gcmesh_pc",
+   "cf_hair_cornrows.gpeg_pc",
+   "cf_hair_cornrows.rig_pc",
+   "cf_hair_cornrows_pc.cmorph_pc"
+  ],
+  "custmesh_2049329076f.str2_pc": [
+   "cf_hair_longbg.ccmesh_pc",
+   "cf_hair_longbg.cpeg_pc",
+   "cf_hair_longbg.gcmesh_pc",
+   "cf_hair_longbg.gpeg_pc",
+   "cf_hair_longbg.rig_pc",
+   "cf_hair_longbg_pc.cmorph_pc"
+  ],
+  "custmesh_-2064075120.str2_pc": [
+   "cm_hair_short.ccmesh_pc",
+   "cm_hair_short.cpeg_pc",
+   "cm_hair_short.gcmesh_pc",
+   "cm_hair_short.gpeg_pc",
+   "cm_hair_short_pc.cmorph_pc",
+   "cm_hair_short_scr.cmorph_pc"
+  ],
+  "custmesh_786867782.str2_pc": [
+   "cm_hathair_balding.ccmesh_pc",
+   "cm_hathair_balding.cpeg_pc",
+   "cm_hathair_balding.gcmesh_pc",
+   "cm_hathair_balding.gpeg_pc",
+   "cm_hathair_balding_pc.cmorph_pc"
+  ],
+  "custmesh_-129951475f.str2_pc": [
+   "cf_hair_guy.ccmesh_pc",
+   "cf_hair_guy.cpeg_pc",
+   "cf_hair_guy.gcmesh_pc",
+   "cf_hair_guy.gpeg_pc",
+   "cf_hair_guy_pc.cmorph_pc"
+  ],
+  "custmesh_796371404.str2_pc": [
+   "cm_hair_m_longup.ccmesh_pc",
+   "cm_hair_m_longup.cpeg_pc",
+   "cm_hair_m_longup.gcmesh_pc",
+   "cm_hair_m_longup.gpeg_pc",
+   "cm_hair_m_longup.rig_pc",
+   "cm_hair_m_longup_pc.cmorph_pc"
+  ],
+  "custmesh_139168360.str2_pc": [
+   "cm_hair_pigtails.ccmesh_pc",
+   "cm_hair_pigtails.cpeg_pc",
+   "cm_hair_pigtails.gcmesh_pc",
+   "cm_hair_pigtails.gpeg_pc",
+   "cm_hair_pigtails.rig_pc",
+   "cm_hair_pigtails_pc.cmorph_pc"
+  ],
+  "custmesh_-404250867.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1482608850.str2_pc": [
+   "cm_hair_longhiponybangs.ccmesh_pc",
+   "cm_hair_longhiponybangs.cpeg_pc",
+   "cm_hair_longhiponybangs.gcmesh_pc",
+   "cm_hair_longhiponybangs.gpeg_pc",
+   "cm_hair_longhiponybangs.rig_pc",
+   "cm_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_796371404f.str2_pc": [
+   "cf_hair_m_longup.ccmesh_pc",
+   "cf_hair_m_longup.cpeg_pc",
+   "cf_hair_m_longup.gcmesh_pc",
+   "cf_hair_m_longup.gpeg_pc",
+   "cf_hair_m_longup.rig_pc",
+   "cf_hair_m_longup_pc.cmorph_pc"
+  ],
+  "custmesh_590389005.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_550647364.str2_pc": [
+   "cm_hair_mohawk.ccmesh_pc",
+   "cm_hair_mohawk.cpeg_pc",
+   "cm_hair_mohawk.gcmesh_pc",
+   "cm_hair_mohawk.gpeg_pc",
+   "cm_hair_mohawk_pc.cmorph_pc",
+   "cm_hair_mohawk_scr.cmorph_pc"
+  ],
+  "custmesh_2049329076.str2_pc": [
+   "cm_hair_longbg.ccmesh_pc",
+   "cm_hair_longbg.cpeg_pc",
+   "cm_hair_longbg.gcmesh_pc",
+   "cm_hair_longbg.gpeg_pc",
+   "cm_hair_longbg.rig_pc",
+   "cm_hair_longbg_pc.cmorph_pc"
+  ],
+  "custmesh_-129928997f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_2049351437f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-1798213413.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-1481793779f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1482608850f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.cpeg_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.gpeg_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_-404250867f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1346859227.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1920835341.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1162113243.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1482596109f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-2004181235f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1346859227f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1920828244f.str2_pc": [
+   "cf_hair_butterfly.ccmesh_pc",
+   "cf_hair_butterfly.cpeg_pc",
+   "cf_hair_butterfly.gcmesh_pc",
+   "cf_hair_butterfly.gpeg_pc",
+   "cf_hair_butterfly.rig_pc",
+   "cf_hair_butterfly_pc.cmorph_pc"
+  ],
+  "custmesh_-1481800605f.str2_pc": [
+   "cf_hair_ponytail.ccmesh_pc",
+   "cf_hair_ponytail.cpeg_pc",
+   "cf_hair_ponytail.gcmesh_pc",
+   "cf_hair_ponytail.gpeg_pc",
+   "cf_hair_ponytail.rig_pc",
+   "cf_hair_ponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1346834483.str2_pc": [
+   "cm_hair_downjagged.ccmesh_pc",
+   "cm_hair_downjagged.cpeg_pc",
+   "cm_hair_downjagged.gcmesh_pc",
+   "cm_hair_downjagged.gpeg_pc",
+   "cm_hair_downjagged.rig_pc",
+   "cm_hair_downjagged_pc.cmorph_pc",
+   "cm_hair_downjagged_scr.cmorph_pc"
+  ],
+  "custmesh_-1744539429.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_697463003.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_550647364f.str2_pc": [
+   "cf_hair_mohawk.ccmesh_pc",
+   "cf_hair_mohawk.cpeg_pc",
+   "cf_hair_mohawk.gcmesh_pc",
+   "cf_hair_mohawk.gpeg_pc",
+   "cf_hair_mohawk_pc.cmorph_pc",
+   "cf_hair_mohawk_scr.cmorph_pc"
+  ],
+  "custmesh_1920828244.str2_pc": [
+   "cm_hair_butterfly.ccmesh_pc",
+   "cm_hair_butterfly.cpeg_pc",
+   "cm_hair_butterfly.gcmesh_pc",
+   "cm_hair_butterfly.gpeg_pc",
+   "cm_hair_butterfly.rig_pc",
+   "cm_hair_butterfly_pc.cmorph_pc",
+   "cm_hair_butterfly_scr.cmorph_pc"
+  ],
+  "custmesh_-1798213413f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_2056704210f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.cpeg_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.gpeg_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_973682244.str2_pc": [
+   "cm_hair_mohawk.ccmesh_pc",
+   "cm_hair_mohawk.cpeg_pc",
+   "cm_hair_mohawk.gcmesh_pc",
+   "cm_hair_mohawk.gpeg_pc",
+   "cm_hair_mohawk_pc.cmorph_pc",
+   "cm_hair_mohawk_scr.cmorph_pc"
+  ],
+  "custmesh_2056663783.str2_pc": [
+   "cm_hair_longbangs.ccmesh_pc",
+   "cm_hair_longbangs.cpeg_pc",
+   "cm_hair_longbangs.gcmesh_pc",
+   "cm_hair_longbangs.gpeg_pc",
+   "cm_hair_longbangs.rig_pc",
+   "cm_hair_longbangs_pc.cmorph_pc"
+  ],
+  "custmesh_-273572083.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_1482618777.str2_pc": [
+   "cm_hair_longasym.ccmesh_pc",
+   "cm_hair_longasym.cpeg_pc",
+   "cm_hair_longasym.gcmesh_pc",
+   "cm_hair_longasym.gpeg_pc",
+   "cm_hair_longasym.rig_pc",
+   "cm_hair_longasym_pc.cmorph_pc",
+   "cm_hair_longasym_scr.cmorph_pc"
+  ],
+  "custmesh_-129948489.str2_pc": [
+   "cm_hair_guy_glasses.ccmesh_pc",
+   "cm_hair_guy_glasses.cpeg_pc",
+   "cm_hair_guy_glasses.gcmesh_pc",
+   "cm_hair_guy_glasses.gpeg_pc",
+   "cm_hair_guy_glasses.rig_pc",
+   "cm_hair_guy_glasses_pc.cmorph_pc"
+  ],
+  "custmesh_-2107871013.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_-2043411022.str2_pc": [
+   "cm_hair_afro.ccmesh_pc",
+   "cm_hair_afro.cpeg_pc",
+   "cm_hair_afro.gcmesh_pc",
+   "cm_hair_afro.gpeg_pc",
+   "cm_hair_afro.rig_pc",
+   "cm_hair_afro_pc.cmorph_pc",
+   "cm_hair_afro_scr.cmorph_pc"
+  ],
+  "custmesh_786867782f.str2_pc": [
+   "cf_hathair_balding.ccmesh_pc",
+   "cf_hathair_balding.cpeg_pc",
+   "cf_hathair_balding.gcmesh_pc",
+   "cf_hathair_balding.gpeg_pc",
+   "cf_hathair_balding_pc.cmorph_pc"
+  ],
+  "custmesh_-993939532f.str2_pc": [
+   "cf_hair_m_buzz.ccmesh_pc",
+   "cf_hair_m_buzz.cpeg_pc",
+   "cf_hair_m_buzz.gcmesh_pc",
+   "cf_hair_m_buzz.gpeg_pc",
+   "cf_hair_m_buzz_pc.cmorph_pc"
+  ],
+  "custmesh_-2107871013f.str2_pc": [
+   "cf_hathair_clipperedshort.ccmesh_pc",
+   "cf_hathair_clipperedshort.cpeg_pc",
+   "cf_hathair_clipperedshort.gcmesh_pc",
+   "cf_hathair_clipperedshort.gpeg_pc",
+   "cf_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_1128059090f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.cpeg_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.gpeg_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_-273559342f.str2_pc": [
+   "cf_hair_longhiponybangs.ccmesh_pc",
+   "cf_hair_longhiponybangs.cpeg_pc",
+   "cf_hair_longhiponybangs.gcmesh_pc",
+   "cf_hair_longhiponybangs.gpeg_pc",
+   "cf_hair_longhiponybangs.rig_pc",
+   "cf_hair_longhiponybangs_pc.cmorph_pc"
+  ],
+  "custmesh_1128046349.str2_pc": [
+   "cm_hathair_pulledponytail.ccmesh_pc",
+   "cm_hathair_pulledponytail.cpeg_pc",
+   "cm_hathair_pulledponytail.gcmesh_pc",
+   "cm_hathair_pulledponytail.gpeg_pc",
+   "cm_hathair_pulledponytail.rig_pc",
+   "cm_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-598445861.str2_pc": [
+   "cm_hathair_clipperedshort.ccmesh_pc",
+   "cm_hathair_clipperedshort.cpeg_pc",
+   "cm_hathair_clipperedshort.gcmesh_pc",
+   "cm_hathair_clipperedshort.gpeg_pc",
+   "cm_hathair_clipperedshort_pc.cmorph_pc"
+  ],
+  "custmesh_2056691469f.str2_pc": [
+   "cf_hathair_pulledponytail.ccmesh_pc",
+   "cf_hathair_pulledponytail.cpeg_pc",
+   "cf_hathair_pulledponytail.gcmesh_pc",
+   "cf_hathair_pulledponytail.gpeg_pc",
+   "cf_hathair_pulledponytail.rig_pc",
+   "cf_hathair_pulledponytail_pc.cmorph_pc"
+  ],
+  "custmesh_-725308459f.str2_pc": [
+   "cf_hair_starlet.ccmesh_pc",
+   "cf_hair_starlet.cpeg_pc",
+   "cf_hair_starlet.gcmesh_pc",
+   "cf_hair_starlet.gpeg_pc",
+   "cf_hair_starlet.rig_pc",
+   "cf_hair_starlet_pc.cmorph_pc",
+   "cf_hair_starlet_scr.cmorph_pc"
+  ],
+  "custmesh_590399893.str2_pc": [
+   "cm_hair_dreads.ccmesh_pc",
+   "cm_hair_dreads.cpeg_pc",
+   "cm_hair_dreads.gcmesh_pc",
+   "cm_hair_dreads.gpeg_pc",
+   "cm_hair_dreads.rig_pc",
+   "cm_hair_dreads_pc.cmorph_pc",
+   "cm_hair_dreads_scr.cmorph_pc"
+  ],
+  "custmesh_-342364706.str2_pc": [
+   "cm_hair_mediumbob.ccmesh_pc",
+   "cm_hair_mediumbob.cpeg_pc",
+   "cm_hair_mediumbob.gcmesh_pc",
+   "cm_hair_mediumbob.gpeg_pc",
+   "cm_hair_mediumbob.rig_pc",
+   "cm_hair_mediumbob_pc.cmorph_pc"
+  ],
+  "custmesh_-604328012.str2_pc": [
+   "cm_hair_m_buzz.ccmesh_pc",
+   "cm_hair_m_buzz.cpeg_pc",
+   "cm_hair_m_buzz.gcmesh_pc",
+   "cm_hair_m_buzz.gpeg_pc",
+   "cm_hair_m_buzz_pc.cmorph_pc"
+  ]
+ }
+}
