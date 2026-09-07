@@ -158,7 +158,8 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 │   ├── deploy-conf.ps1      push configs/ into the game dir (backs up originals)
 │   ├── pull-conf.ps1        pull the in-game-tuned rtx.conf back into configs/
 │   ├── launch.ps1           launch the DX9 exe
-│   ├── vpp_extract.py       unpack Volition VPP_PC v6 packfiles (format documented in-file)
+│   ├── vpp.py               read VPP_PC / STR2_PC v6 containers
+│   ├── peg.py               read PEG (GEKV v13) texture containers -> PNG
 │   ├── fxo_scan.py          parse .fxo_pc shaders' CTABs -> named constants + registers
 │   └── fxo_disasm.py        disassemble one shader out of a .fxo_pc
 └── docs/
@@ -185,12 +186,21 @@ Output lands in `build\sr3-rtx.asi`.
 
 ```powershell
 # Unpack the shader library (1,693 files) and map every named shader constant
-python tools\vpp_extract.py "Saints Row 3\packfiles\pc\cache\shaders.vpp_pc" re\shaders
-python tools\fxo_scan.py re\shaders re\shader_constants.csv
+py -3 tools\vpp_extract.py "Saints Row 3\packfiles\pc\cache\shaders.vpp_pc" re\shaders
+py -3 tools\fxo_scan.py re\shaders re\shader_constants.csv
 ```
 
 That produces 52,990 named constants across 7,276 shaders. `tools/fxo_disasm.py <file> <index>`
 disassembles an individual shader.
+
+`tools/vpp.py` and `tools/peg.py` read the game's texture containers — `VPP_PC`/`STR2_PC` v6
+archives and the `GEKV` v13 PEG format, where a texture is a *pair* of files: one holding the
+directory, one holding the pixels. Together they extract the 3,467 customisation bitmaps the game
+ships, which is what asset replacement will be authored against.
+
+**Extracted game assets are not in this repository** — they are Volition/Deep Silver art, and
+`game-textures/`, `player-textures/` and `re/` are all gitignored. Regenerate them from your own
+copy of the game.
 
 ## Roadmap
 
