@@ -6,6 +6,14 @@ $ErrorActionPreference = 'Stop'
 $root = 'D:\SR3RTXREMIXCOMP'
 $game = Join-Path $root 'Saints Row 3'
 $dest = "D:\SR3RTXREMIXCOMP-backup-$(Get-Date -Format yyyy-MM-dd)"
+# A SECOND backup on the same day is a normal thing to want - a day of work can change everything
+# that matters. Refusing outright meant the only ways forward were to overwrite the morning's copy
+# or to rename it by hand, and both are worse than keeping both. The time is appended instead, so
+# the earlier snapshot survives untouched.
+if (Test-Path $dest) {
+    $dest = "D:\SR3RTXREMIXCOMP-backup-$(Get-Date -Format yyyy-MM-dd-HHmm)"
+    Write-Host "today's backup already exists; writing $dest instead"
+}
 if (Test-Path $dest) { throw "$dest already exists - move or remove it first" }
 New-Item -ItemType Directory -Path $dest | Out-Null
 $gdest = Join-Path $dest '_deployed-game-dir'

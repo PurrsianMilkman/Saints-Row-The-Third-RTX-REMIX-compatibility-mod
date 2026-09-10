@@ -1,9 +1,107 @@
 # Changelog
 
+## v0.1.5 — 2026-09-10
+
+**The player's clothing colours are correct on every garment.** Confirmed on screen, piece by
+piece: shoes, wrist wraps, headwear, choker, earrings, armband, bracelets, corset, backpack,
+underwear, and the bra with its star on the left cup only, exactly as the game has it.
+
+This is the release where the cloth recipe stopped being "close" and started being *right*, and it
+took four separate mechanisms to get there. Every one is behind its own ini switch.
+
+### The colour chain, and why brightness knobs never worked
+
+Earlier releases scaled cloth albedo with a percentage and called the remainder a lighting gap.
+Both halves of that were wrong.
+
+The player's shader has its own chain — `lerp(lerp(lerp(1, C, blue), B, green), A, red)` — which is
+**not** the weighted sum plus desaturation branch used by the NPC family. And the game's
+`Tint_color` is (5, 5, 5), applied through a **Reinhard tonemap**, `x/(1+x)` per channel.
+
+That distinction is the whole thing. A linear ×2 preserves hue and could never turn
+(0.059, 0.220, 0.298) into the cyan the game shows; saturation at ×5 does exactly that. The
+tonemap now reads the tint from the constant rather than assuming it. `clothColourCurve=1`.
+
+### The template garments were being cut by alpha all along
+
+The bra and the underwear are template meshes whose diffuse maps are **63–90% transparent**. Two
+thirds of the mesh lands on what looked like "black squares" — that is the invisible part of the
+template, not a colour bug.
+
+The generated texture now carries the alpha through untouched, the dilation leaves it alone, and
+the converted draw is alpha-tested at 128, which is also what Remix reads as a cutout.
+`clothCutout=1`.
+
+A day was lost here to a tool rather than the engine: **the DDS writer fabricated alpha 255**, so
+every dump looked opaque and the cutout was invisible in the evidence. Check the channel your
+viewer is actually showing you.
+
+### Independent UV sets are related by the mesh
+
+Some garments put the pattern on a second UV set that has no arithmetic relationship to the first.
+That was previously treated as a structural limit. It is not — **the mesh relates them.**
+
+`BakeDecal` rasterises every triangle with a visible vertex into the diffuse's space, interpolating
+the second UV set barycentrically, and records the pattern texel for each visible albedo texel.
+Coverage: 78.9% of visible texels on the underwear, 91.4% on the bra; the remainder keep the
+dominant colour, which is the background anyway. `clothMeshDecal=1`.
+
+The full taxonomy, measured per draw rather than assumed: **ONE-POINT** (the second UV set is
+constant across the draw — one texel, one colour), **AFFINE** (a scale and offset from the first),
+and **INDEPENDENT** (two unrelated unwraps).
+
+### Two surfaces on one island
+
+The bra's two cups share a single diffuse island with mirrored UVs, and want *different* images —
+the star belongs on the left cup only. One texture cannot hold two answers for one texel.
+
+So the bake records every disagreement as an edge between two triangles, colours that conflict
+graph greedily, and lays the generated texture out as **tiles** — each with enough side-by-side
+copies that a panel crossing the wrap seam never leaves its region. At bind time the skinned copy's
+u is shifted by whole tiles per triangle, seam vertices are duplicated with the other tile's shift
+behind the draw's own vertices, a private 32-bit index list references them, and the draw hook
+swaps it in for that one call. `clothDecalTiles=1`.
+
+Splitting by connectivity and by winding were both tried first, and both were refused by their own
+guards — one component, 257 same-winding conflicts. Those routes are closed.
+
+### Also
+
+`docs/cloth-uv-map.md` records which UV set feeds which sampler per shader, because
+*"albedo is TEXCOORD0, pattern is TEXCOORD1" is not a rule* — it is measured per draw. It also
+records that the clamp registers are inactive at runtime: the game wraps, and so does the
+conversion.
+
+`tools/cloth_uv_table.py` produces that table from the shader corpus.
+
+### Known issues
+
+- **The UI.** The HUD's draws are found and rebuilt, but the **in-game HUD is still not visible**
+  and sub-menu text and backgrounds are missing. The menu video works. See the correction on
+  v0.1.4 below — this was reported as fixed and was not. Parked for now.
+- **The sky**, still passed through and so still absent with vertex capture off.
+- **Other outfits.** Every mechanism above is general, but only one outfit is confirmed on screen.
+  A garment needing more than 4 tiles, or with a visible panel wider than 12 texture widths, is
+  refused by its own guard and falls back to a single tile.
+- Frustum popping.
+
+---
+
 ## v0.1.4 — 2026-09-07
 
-**The HUD is back.** So is the character's skin, and the player's clothing colours. All three came
-from one observation.
+> **Correction, 2026-09-10: the HUD is not back.** This entry and the v0.1.4 release notes said it
+> was. What was actually true is that the HUD's draws are now *found* and *rebuilt* — a whole D3D9
+> entry point, `DrawPrimitiveUP`, had never been hooked, so 13–30 draws a frame had been invisible
+> to the shim since the fork — and the rebuild fires 16.6 times a frame. But **the in-game HUD is
+> still not visible and sub-menu text and backgrounds are still missing.** The menu video does
+> work.
+>
+> The counter said the rebuild happened. That is the *process*, not the *result*, and reporting it
+> as the result was the mistake. The character-skin fix and the technique below are unaffected and
+> were verified on screen.
+
+**The character's skin is back**, and so are the player's clothing colours. Both came from one
+observation.
 
 ### The technique
 

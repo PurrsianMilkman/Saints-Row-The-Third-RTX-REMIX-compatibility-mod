@@ -11,82 +11,94 @@ Start Claude Code in `D:\SR3RTXREMIXCOMP` and say:
 
 ---
 
-# THE WORKING CLOTH COLOUR FORMULA - CONFIRMED CORRECT, DO NOT CHANGE IT
+# THE CLOTH COLOUR FORMULA - CONFIRMED CORRECT ON EVERY GARMENT, 2026-09-10
 
-Confirmed by the user 2026-09-07: **shoes, wrist wraps and headwear render with the correct
-colour.** This is the formula that does it. Anything that changes colour output has to keep these
-garments right, and there must be exactly ONE pipeline - writing a second one is what made the
-bracelets the right hue and the wrong brightness.
+Confirmed on screen by the user: shoes, wrist wraps, headwear, choker, earrings, armband,
+bracelets, corset, backpack (stomach yellow), underwear (panel cyan, magenta cat, yellow eyes),
+bra (fuchsia, yellow star on the left cup only, as in the game). There is exactly ONE generator
+for the player's clothing, `ClothAlbedoUniform`; anything that changes colour must keep all of
+those right. Every piece below is behind an ini switch.
 
-## The formula, as implemented (ClothAlbedo and ClothAlbedoUniform)
+## The formula, as implemented
 
-    // 1. the pattern texel decides WHICH of the three chosen colours applies
-    fr,fg,fb = pattern texel / 255
-    sum  = fr+fg+fb ;  mean = sum/3 ;  dev = |fr-mean|+|fg-mean|+|fb-mean|
-    test = sum - (dev*165.016495 + 256)/255
+    // 1. the three chosen colours: Diffuse_Color_a/b/c (c1/c2/c3), selected by the pattern
+    //    texel's channels through THE PLAYER SHADER'S OWN CHAIN (ir_sr3pccloth_c ps[6]):
+    //      add r5, -1, c3 ; mad r5 = blue*r5 + 1        -> lerp(1, C, blue)
+    //      lrp r7 = lerp(r5, c2, green)
+    //      lrp r5 = lerp(r7, c1, red)
+    r,g,b   = gammaLUT[pattern texel]                                   // x^2.2
+    colour  = lerp(lerp(lerp(1, C, b), B, g), A, r)                     // colourFromPatternTexelChain
+    // used on the PER-TEXEL paths (mesh decal, AFFINE). The one-point/dominant `pick` still goes
+    // through colourFromPatternTexel (weighted sum + desaturation branch, the NPC family's rule):
+    // on a pure-channel texel the two agree exactly, and that is the only texel it is ever given.
 
-    if (test < 0)                                   // a COLOURED pattern texel
-        wr,wg,wb = gammaLUT[pR], gammaLUT[pG], gammaLUT[pB]      // x^2.2, to linear
-        colour[k] = wr*A[k] + wg*B[k] + wb*C[k]                  // weighted SUM, not a lerp
-    else                                            // a NEAR-GREY texel: no customisation here
-        colour[k] = desatLUT[p[k]]                  // saturate((x-0.372549)*1.59375)^2.2
+    // 2. the game's Tint_color (c37 = 5,5,5, READ from the constant) and its tonemap:
+    colour' = (Tint*colour) / (1 + Tint*colour)                         // Reinhard, per channel
+    // clothColourCurve=1. A linear x2 (clothAlbedoPercent=200, still the fallback when the
+    // switch is 0) keeps hue and could never turn (0.059,0.220,0.298) into cyan.
 
-    // 2. and it multiplies the diffuse map, in LINEAR, encoded once on the way out
-    albedo[k] = LinearToSrgb( gammaLUT[diffuse[k]] * colour[k] * clothTintScale )
+    // 3. times the diffuse, in LINEAR, encoded once; the diffuse's ALPHA rides through untouched
+    albedo = LinearToSrgb( gammaLUT[diffuse] * colour' ),   alpha = diffuse.a
 
-    clothTintScale = clothAlbedoPercent / 100, and the ini carries 200.
+Diffuse_Color (c14) is (1,1,1,1) on every garment measured; the generator does not apply it.
 
-## The five things that are easy to get wrong here
+## Where the pattern colour comes from, per garment - THE TAXONOMY, measured per draw
 
-1. **The pattern channels go to linear, the COLOURS do not.** gammaLUT is applied to the pattern,
-   and the swatches are used as authored. The game's own shader does the opposite - it raises the
-   COLOURS to 2.2 and lerps by raw pattern channels - and both land on the same answer for the
-   pure-primary patterns SR3 actually ships. Remix lights from an sRGB albedo, which is why the
-   swatch goes over as authored.
-2. **The diffuse texel goes to linear too**, and the product is encoded ONCE. Multiplying two
-   sRGB values and encoding the product is a different curve and reads dull.
-3. **clothTintScale, not clothBrightness.** clothBrightness is the CPU baker's separate knob and
-   is ALREADY normalised at parse time - dividing it by 100 again scaled every garment down by a
-   hundred (`result mean 0.3 of 255`).
-4. **The desaturation escape is not optional.** A near-grey pattern texel means "the game applies
-   no customisation colour here". Dropping that branch tints regions the game leaves alone.
-5. **A white or grey diffuse map is not a bug.** It is the detail layer, shipped to be tinted.
-   White bracelets and a green beanie were those maps rendered untinted, nothing more.
+    ONE-POINT      uv1 constant across the draw: one pattern texel, one colour. Shoes, wraps,
+                   headwear, choker, earrings, armband.
+    AFFINE         uv1 = s*uv0 + o (the backpack: identity, residual 0.0). Resolved per texel in
+                   the diffuse's space with no mesh.
+    INDEPENDENT    two unrelated unwraps (bra, underwear). NOT a structural limit: the MESH
+                   relates them. `BakeDecal` rasterises every triangle with a visible vertex into
+                   the diffuse's space, interpolating uv1 barycentrically, and records the pattern
+                   texel for each visible albedo texel (underwear 78.9% of visible texels, bra
+                   91.4%; the rest keep the dominant colour, which is the background anyway).
+                   clothMeshDecal=1.
 
-## Which garments this covers
+## The cutout - the bra and the underwear are template meshes cut by their texture's alpha
 
-Everything whose PATTERN IS ONE FLAT COLOUR, plus everything whose pattern IS the albedo:
+Their diffuse maps are 63-90% transparent (DXT5 at draw time; every cm_bra_f_* and cm_unwr_f_*
+in the game files agrees), and ps[6] ends `mul oC0, r3, c37` with r3.w straight from the
+Diffuse_Map fetch; the game blends it (src=5 dst=6). Two thirds of the mesh landing on "black"
+is the invisible part of the template, and it was the whole "black squares" report. The
+generated texture carries the alpha; the dilation must leave it alone (colour only, for bilinear
+edges); BeginFFP alpha-tests the converted draw at 128 when it binds such a texture, which is
+also what Remix reads as "cutout". clothCutout=1. Check the ALPHA channel of a dump before
+reasoning about its colour - and check that the dump writer kept it (it did not, for a day).
 
-    shoes, wrist wraps, headwear, choker, earrings, gem   -> ClothAlbedoUniform (flat pattern)
-    the corset                                            -> ClothAlbedo (pattern is the albedo)
+## Two surfaces on one island - tiles
 
-The pattern being flat means the lerp/sum has one answer for the whole surface, so no mesh and no
-uv assumption is involved. That is why this class was tractable.
+The bra's two cups share one diffuse island with mirrored uv0 and want different images (the
+star is on the left cup only). One texture cannot hold two answers for a texel, so the bake
+records every disagreement as an edge between two TRIANGLES, colours that graph greedily (each
+triangle takes the lowest tile holding nothing it disagrees with; non-conflicting triangles stay
+in tile 0 - any tile is correct for them), and lays the generated texture out as tiles, each as
+enough side-by-side COPIES of its image that a panel crossing the wrap seam never leaves its
+region (bra: 4+2 copies, 6 texture widths). At bind time the skinned copy's u0 is shifted by
+whole tiles per triangle, 18 seam vertices are duplicated behind the draw's own vertices with
+the other tile's shift, a private INDEX32 triangle list references them, the draw hook swaps it
+in for the one call, and the texture matrix is scaled by 1/width. Cut geometry keeps its
+within-tile position and every tile carries the same alpha, so it stays invisible. Splits by
+connectivity (one component) and by winding (257 same-winding conflicts) were both refused by
+their own guards and are closed. clothDecalTiles=1.
 
-## THE UNDERWEAR AND THE BRA are the other class - same system, harder case
+## The things that are easy to get wrong here
 
-Both use a REAL diffuse map plus a VARYING pattern (`pat_llheart01`, a tiling heart from the
-22-pattern library in `game-textures\clothes\pat\`) carried on a SECOND, INDEPENDENT uv set.
-
-Measured 2026-09-07, and each of these closes a shortcut:
-
-- the pattern is sampled at MANY texels, not one - `TEXCOORD1 varies, u 0..1904 v -192..1881`;
-- `uv1` is NOT an affine function of `uv0` - least squares gives worst residuals 1598 and 1544
-  against a span of ~1900, so no `uv*s+o` resampling can relate them;
-- and from the shader itself, `ir_at_sr3pccloth_bs[8]`, the albedo is not even on TEXCOORD0:
-
-        texld_pp r4, r4, s0      ; s0  <- a COMPUTED coordinate built from TEXCOORD6,
-                                 ;        clamped against c2/c3 with a 512 scale
-        texld_pp r5, v1, s2      ; s2  <- TEXCOORD1        the pattern
-        lrp/lrp/lrp then mul     ; the recipe above
-
-  while a sibling variant, `ir_sr3pccloth_bs[6]`, does `texld r6, v1, s0` - s0 on TEXCOORD1.
-
-**So "albedo is TEXCOORD0, pattern is TEXCOORD1" is not a rule of this engine.** It is a
-coincidence that holds for some variants. The CPU baker rasterises into TEXCOORD0 space
-regardless, which is a concrete reason its islands need not land where the mesh samples them.
-
----
+1. **Mixed pattern texels.** The desaturation branch is the NPC family's; the player's shader
+   has none. Cyan is B, white is A. Use the chain on any per-texel path.
+2. **The colour curve is not a brightness knob.** A linear scale preserves hue; the game's
+   cyan comes from saturation at x5. Reinhard on the MEASURED Tint, never a hard-coded 5.
+3. **Alpha.** Keep it through every stage that rewrites pixels; test it on the converted draw.
+4. **The diffuse texel goes to linear, the product is encoded once.** Two sRGB values
+   multiplied and encoded is a different curve and reads dull.
+5. **clothTintScale is `clothAlbedoPercent/100`**, and only the x2 fallback now. Never
+   clothBrightness (already normalised at parse).
+6. **A white or grey diffuse map is the detail layer**, shipped to be tinted. Not a bug.
+7. **"Albedo is TEXCOORD0, pattern is TEXCOORD1" is not a rule** - see docs/cloth-uv-map.md.
+   On the player family the albedo IS TEXCOORD0*1/1024 (vs[2]: `mul o6.xy, c1.x, v1`) and the
+   pattern is TEXCOORD1*Pattern_Map_Tiling/1024 (`mul o2.xy, r2, c1.x`). Measured, per draw.
+8. **The clamp registers are inactive** (ClampU1 = ClampV1 = 0 -> `cmp` takes the unclamped
+   coordinate; U window [-512,513]). The game WRAPS. So does the conversion.
 
 # STATE, 2026-09-07 - VERTEX CAPTURE IS OFF AND THE CHARACTER WORKS. READ THIS FIRST.
 
@@ -146,13 +158,24 @@ what made the bracelets the right hue and the wrong brightness.
 
 ## Open
 
-1. **The underwear.** Class 3 above. Its bake produces two tapered panels and a waistband in the
-   right wine colour; whether those islands land where the mesh samples is not yet established.
-2. Clothes brightness overall - `clothAlbedoPercent` is the single knob now that there is one pipeline.
-3. The character is FROZEN (`remixApiSkinning=0`); skinning crashed Remix's server.
-4. The game's own character copy still stands beside ours (`remixApiCharacterOffset=3`).
-5. Hair strand detail - the material binds five textures and three are unnamed, including two
-   512x512 maps nothing has ever looked at.
+*Updated 2026-09-07 evening.*
+
+1. **The underwear AND THE BRA - they share the system.** Class 3 above. Three shortcuts are now
+   closed by measurement, not opinion: the pattern is read at many texels; `uv1` is not affine in
+   `uv0` (worst residual ~1550 of a ~1900 span); and from the shader itself the albedo is not even
+   on TEXCOORD0 - `ir_at_sr3pccloth_bs[8]` samples s0 through a coordinate COMPUTED from TEXCOORD6
+   while the pattern is s2 on TEXCOORD1. The deployed build reflects the real UV set per sampler
+   and prints `UV SET PER SAMPLER`; **THAT RUN HAS NOT HAPPENED YET and is the next thing to read.**
+2. **The UI**, parked at the user's request. In-game HUD invisible, sub-menu text and backgrounds
+   missing; the menu video works. With capture off, anything passed through is not drawn - the
+   pass census names what is being lost.
+3. Clothes brightness overall - `clothAlbedoPercent` is the single knob now there is one pipeline.
+4. The sky, lost to capture-off, and the frustum popping that comes with it.
+
+**CLOSED since this section was written:** hair strand detail (the Dob_Map R channel), the
+character copy (`remixApiCharacter=0` - it was silently un-submitted by the test-cube switch, and
+everything that fixed the real character lives in the shared path instead), and the frozen-skinning
+problem, which is moot while the API character is off.
 
 ---
 

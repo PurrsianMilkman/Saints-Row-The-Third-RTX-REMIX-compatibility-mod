@@ -11068,3 +11068,628 @@ Everything from this session is written up as "STATE, 2026-09-04" at the top of
 docs/YOUR-INSTRUCTIONS.md: the Remix API contract and its six paid-for traps, the character
 pipeline, the customisation facts verified from the exe and the shaders, what is open, the routes
 that are closed and must not be reopened, and the method lessons that actually paid.
+
+
+================================================================================================
+SESSION, 2026-09-04 .. 2026-09-07 - CAPTURE OFF, THE UI REBUILT, CLOTH COLOUR SOLVED,
+                                    THE GAME'S OWN ASSETS UNPACKED
+================================================================================================
+
+The headline: `rtx.useVertexCapture = False` is now the configuration, the character renders
+correctly through the GAME's own draw rather than through the Remix API, and the customisation
+colour system is solved for every garment except two.
+
+------------------------------------------------------------------------------------------------
+1. THE ONE TECHNIQUE THAT UNLOCKED EVERYTHING
+------------------------------------------------------------------------------------------------
+Remix's refusal is about the VERTEX shader, not the draw. Its own message says so:
+
+    [RTX-Compatibility-Info] Skipping draw call with shader usage as vertex capture is not enabled.
+
+Vertex capture exists to capture vertex-shader output, so a vertex shader is the thing it cannot
+handle. THE PIXEL SHADER WAS NEVER THE PROBLEM. A draw re-issued with fixed-function vertex
+processing and the game's own pixel shader still bound is a combination Remix executes with
+capture off.
+
+Proved by accident, on the menu video. Nulling the pixel shader on the HUD turned the video
+BLACK AND WHITE - Bink is Y/Cr/Cb across three L8 stages (1280x720, 640x360, 640x360) and stage 0
+alone is luma. Keeping the shader brought the colour back, and that was the proof.
+
+Applied in three places:
+  the HUD              DrawPrimitiveUP draws rebuilt as D3DFVF_XYZRHW quads
+  the character skin   the atlas composites re-issued as a full-target quad
+  (the world already had its own fixed-function conversion)
+
+------------------------------------------------------------------------------------------------
+2. THE UI - A WHOLE DRAW ENTRY POINT WAS NEVER HOOKED
+------------------------------------------------------------------------------------------------
+The complete frame dump of 5,200 draws contained NO HUD at all. D3D9 has FOUR draw entry points
+and this shim hooked two. DrawPrimitiveUP (slot 83) carries ~13-30 draws a frame; every one had
+been invisible to the shim since the fork - unclassified, uncounted, absent from every dump.
+
+The HUD is 56 of them, into the BACK BUFFER, after the frame's final composite:
+
+    zw=1 zt=0 blend=1 | no projTM | Diffuse_MapSampler | 6 textures | 6-48 vertices
+
+Depth test OFF is what "draw on top of everything" means. The other 20 UP draws are depth-TESTED
+Orbital_map quads in the world passes and must not be touched; zt separates them exactly.
+
+Format, asked of the DEVICE rather than our own tracking (SetFVF is slot 89 and is also unhooked,
+so a cached declaration could describe another mesh entirely):
+
+    stride 28 | float4 POSITION | float2 TEXCOORD0 | d3dcolor COLOR0
+    vtx0 pos 2560.0    0.0   uv 1,0   FFFFFFFF
+    vtx1 pos 2560.0 1440.0   uv 1,1   FFFFFFFF
+
+2560x1440 is the screen: the positions are ALREADY SCREEN PIXELS, which is exactly what D3D9
+wants from a D3DFVF_XYZRHW vertex. So the rebuild is a 28-byte field reorder - no projection to
+invert, no space to convert. FVF field order is position, diffuse, texcoord; the game stores
+texcoord BEFORE colour, so the two must swap or the colour bytes land in the uv.
+
+STILL OPEN: the in-game HUD is not visible and sub-menu text/backgrounds are missing. The menu
+video works. With capture off, anything PASSED THROUGH is simply not drawn, and the pass census
+was added to name what is being lost. This work is parked at the user's request.
+
+------------------------------------------------------------------------------------------------
+3. THE CHARACTER SKIN - AND HOW IT WAS VERIFIED
+------------------------------------------------------------------------------------------------
+Capture-off blacked the character. Measured on both sides rather than inferred:
+
+    capture ON    atlas 2048x1024 mean 182.7    atlas 1024x512 mean 169.6
+    capture OFF   atlas 2048x1024 mean   0.0    atlas 1024x512 mean   0.0
+    (atlas 1280x768 reads 14.3 in BOTH - it is CPU-written through LockRect, which is what
+     proves the other two are GPU composites)
+
+The probe named the four draws that build them: screen-space quads, 6 verts, 2 triangles, running
+a real pixel shader over two DXT5 textures the same size as the target. A 1:1 blit - so the
+game's vertices are not needed at all; a full-target XYZRHW quad reproduces them.
+
+AFTER THE FIX:  ATLAS COMPOSITE re-issued: 4 done, 0 failed
+                atlas 2048x1024 mean 182.7    atlas 1024x512 mean 169.6
+
+Identical to the pre-breakage values, not merely non-zero. That is what makes it conclusive: a
+wrong quad or a wrong half-texel offset would give non-zero-but-different.
+
+Gated on aspect ratio, not size alone. The size test also admitted the 1280x720 IR_GBuffer_Depth
+resolve; the post chain is screen-shaped (16:9) and the atlases are 2:1, which separates them with
+nothing needing to be observed first.
+
+------------------------------------------------------------------------------------------------
+4. CLOTH CUSTOMISATION - SOLVED FOR EVERY GARMENT BUT TWO
+------------------------------------------------------------------------------------------------
+See the section "THE WORKING CLOTH COLOUR FORMULA" at the top of YOUR-INSTRUCTIONS.md - it is the
+authoritative copy and is confirmed correct by the user.
+
+The bug: ClothAlbedo() refused any material whose albedo was not the Pattern_Map itself, which
+declined all FOURTEEN of the player's items and left them showing raw untinted maps. White
+bracelets, a white choker and a green beanie were those shipped maps rendered untinted - not a
+colour bug at all.
+
+Three garment shapes, and they need three treatments:
+  1. pattern IS the albedo            -> resolve in the pattern's own texture space (the corset)
+  2. separate diffuse + FLAT pattern  -> one colour for the surface, multiplied into the diffuse
+                                         in ITS space. No mesh, no uv assumption. FIXED.
+  3. separate diffuse + VARYING pattern on a SECOND uv set -> the underwear and the bra. OPEN.
+
+Traps paid for here:
+  - clothBrightness is ALREADY normalised at parse time; dividing by 100 again scaled every
+    garment down by a hundred (result mean 0.3 of 255, predicted 43, measured 42.8 after the fix);
+  - the cloth cache key must include the DIFFUSE. ClothKey(pattern,col) ^ diffuse*prime collapses
+    to the pattern-space key when diffuse is null, so registering a UV-space bake there overwrote
+    the corset and the shoes - the shoes went BLACK because their bake covers 11% of its texture;
+  - there must be ONE pipeline. A second one gave the right hue and the wrong brightness.
+
+------------------------------------------------------------------------------------------------
+5. THE GAME'S OWN ASSETS - THREE CONTAINER FORMATS UNPACKED
+------------------------------------------------------------------------------------------------
+tools/vpp.py and tools/peg.py, written this session, produce game-textures/ - 3,467 bitmaps,
+697 items, with a README explaining the naming and the recipe.
+
+VPP_PC / STR2_PC v6, index entry at 0x800, 24 bytes:
+    name offset | pad | DATA OFFSET | UNCOMPRESSED size | COMPRESSED size | pad
+The bundled tools/vpp_extract.py had these fields off by one slot and wrote zero-length files for
+customize_player.vpp_pc.
+
+THREE different storage layouts, and each needs its own read:
+    flags 0x0000  uncompressed          slice at the data offset
+    flags 0x4803  compressed+CONDENSED  ONE zlib stream for the whole block, offsets index the
+                                        DECOMPRESSED result (.str2_pc)
+    flags 0x4801  compressed            per-entry streams at an ALIGNED RUNNING CURSOR, decoded as
+                                        RAW DEFLATE - they carry a zlib header but NO adler32
+                                        trailer (shaders.vpp_pc)
+In all three the stored "compressed size" is NOT a stream length. Do not trust it as one.
+
+PEG / GEKV v13: header 24 bytes, ENTRY STRIDE 72. A single-bitmap PEG cannot reveal the stride -
+24 + 72 lands exactly where the name table starts either way - so it only showed itself on a
+three-bitmap PEG, where the names came out as garbage. Formats seen: 400 = DXT1, 402 = DXT5.
+
+What the assets say:
+  _n 564  _d 338  _dp 126  _p 68  _sb 57  _flow 46  _dob 36
+  A white or grey DIFFUSE map is CORRECT - it is the detail layer, shipped to be tinted.
+  Patterns are a SHARED LIBRARY of 22 selectable decals in clothes/pat/ - pat_star01,
+  pat_saints01, pat_llheart01 ... applied OVER garments, which is the entire reason a second uv
+  set exists.
+  The player's underwear pattern is pat_llheart01, confirmed by rendering it beside the runtime
+  capture. It is a TILING heart; the "devil horns" are the corners of neighbouring hearts.
+
+------------------------------------------------------------------------------------------------
+6. HAIR
+------------------------------------------------------------------------------------------------
+A hair item ships THREE maps - _dob, _flow, _n - and NO _d at all. So what the shader calls
+Diffuse_Map for hair is the FLOW map, which is why it looks like green/teal/magenta directional
+data. Colour comes from a separate 128x128 swatch per menu choice (hair_black_01_sb ...).
+
+The strands are in the Dob_Map, measured per channel:
+    R  min 16  max 222   THE STRANDS
+    G  min 247 max 248   flat, carries nothing
+    B  identical to R
+One greyscale channel duplicated; the green it appears to be is just G at 247 in an RGB view.
+
+    hair albedo = chosen colour * (dob.R / 255) * clothTintScale
+
+This is NOT baking the hair shader - that shader samples the L-buffer and baking it would burn the
+game's lighting into the albedo. This multiplies by an authored, unlit mask. Remix still lights.
+
+------------------------------------------------------------------------------------------------
+7. THE REMIX API CHARACTER IS OFF, AND WHY
+------------------------------------------------------------------------------------------------
+The character's DrawInstance loop lives INSIDE RemixApiTestTick(), which returns early on
+!remixApiTestCube. Turning off the step-2 test cube therefore silently stopped the character being
+submitted - `DrawInstance 0 calls` against 10 built meshes and 21,990 triangles, for several runs.
+The gates are separated now.
+
+It is left OFF (remixApiCharacter=0). Everything that fixed the real character - the atlas
+composite, the cloth colours, the hair - lives in the SHARED path. The API copy was frozen
+(skinning crashes Remix's server), duplicated, and a second path to keep in sync; several of this
+session's bugs came from exactly that. remixApiCharacter=1 restores it, no rebuild.
+
+------------------------------------------------------------------------------------------------
+8. THE UNDERWEAR AND THE BRA - WHAT IS PROVEN, AND WHAT IS LEFT
+------------------------------------------------------------------------------------------------
+Same system, same class. THREE shortcuts are closed BY MEASUREMENT, not by opinion:
+
+  - the pattern is read at MANY texels, not one:
+        ONE-POINT declined: TEXCOORD1 VARIES - u spans 0..1904, v spans -192..1881
+  - uv1 is NOT an affine function of uv0:
+        u = 0.0416*u0 +1590.0 (worst residual 1598.4)
+        v = 0.2303*v0 +1292.5 (worst residual 1543.9)   against a span of ~1900. Not a near miss.
+  - and from the shader itself, THE ALBEDO IS NOT ON TEXCOORD0:
+
+        ir_at_sr3pccloth_bs[8]:  texld_pp r4, r4, s0   ; s0 <- COMPUTED from TEXCOORD6,
+                                                       ;       clamped against c2/c3, scale 512
+                                 texld_pp r5, v1, s2   ; s2 <- TEXCOORD1     the pattern
+        ir_sr3pccloth_bs [6]:    texld_pp r6, v1, s0   ; s0 <- TEXCOORD1
+
+"Albedo is TEXCOORD0, pattern is TEXCOORD1" is NOT A RULE OF THIS ENGINE. It is a coincidence that
+holds for some variants. The CPU baker rasterises into TEXCOORD0 space regardless, which is a
+concrete reason its islands need not land where the mesh samples them.
+
+The deployed build reflects the real mapping out of each shader's texld instructions and reports
+    UV SET PER SAMPLER (from the shader's own texld): s0<-... s2<-...
+THAT RUN HAS NOT HAPPENED YET. It is the next thing to read.
+
+------------------------------------------------------------------------------------------------
+9. METHOD - WHAT ACTUALLY WENT WRONG THIS SESSION
+------------------------------------------------------------------------------------------------
+Four mistakes, all the same shape: a conclusion drawn from something that did not establish it.
+
+  - ABSENCE FROM A CAPPED LOG IS NOT EVIDENCE. The 64x64 pattern was missing from a probe that
+    only prints a few entries, and that was read as "the draw is not converted". It was converted
+    all along. Two builds were spent on code downstream of a gate that did not exist.
+  - A PREDICATE USED AS A GATE MUST EXPLAIN ITS REFUSALS. ClothPatternIsSampledAtOnePoint returned
+    false silently, which is indistinguishable from "this draw never happened".
+  - DIAGNOSTICS THAT ASSERT CONCLUSIONS THEY NEVER REACHED. The slot dump computed strip ranges
+    with the triangle-LIST formula and then declared "coplanar duplicates that z-fight"; the
+    UV1-vs-UV0 probe reported "INDEPENDENT unwraps" when it had actually just given up on a
+    degenerate span. Both sent a reader chasing something that was never there.
+  - CHECK REACHABILITY BEFORE WRITING THE FIX. Twice: the one-point sampling, and the hair strand
+    generator, which was put on the Remix API path while that path was not drawing at all.
+
+And what worked, every time: LOOKING AT THE THING. The contact sheet that showed cloth-9 was EMPTY
+rather than scrambled; rendering pat_llheart01 beside the runtime capture; the Dob_Map channel
+statistics; disassembling the shader instead of reasoning about it. Reasoning from summary numbers
+- a mean, a coverage percentage, a uv range - lost every time it was tried.
+
+------------------------------------------------------------------------------------------------
+10. AN AUDIT FOUND THREE BUGS NO SYMPTOM HAD SHOWN
+------------------------------------------------------------------------------------------------
+  - DrawHudFixedFunction set D3DRS_LIGHTING and ten texture stage states through g_orig* under
+    g_internal, which bypasses the hooks - so the shim's SHADOW copies kept the game's values
+    while the device held ours. ShadowGetRS/ShadowGetTSS are what the classifier reads. The
+    lighting one was LIVE: outside the pixel-shader guard, ~28 draws a frame, never restored.
+  - The bake bridge released only the old `generated` and then AddRef'd the pattern again,
+    leaking a pattern reference on every re-bake.
+  - Two doc claims stated the opposite of current behaviour as settled fact.
+
+================================================================================================
+
+
+================================================================================================
+SESSION, 2026-09-08 .. 2026-09-09 - THE GARMENT TAXONOMY, READ OUT OF THE SHADERS
+================================================================================================
+
+Where it ended: every customised item on the character renders in its correct colour EXCEPT the
+decals on the bra and the underwear, and the last defect chased was a bug of mine in the atlas
+padding rather than anything about the game.
+
+------------------------------------------------------------------------------------------------
+1. THE SAMPLER -> TEXCOORD MAPPING IS NOT FIXED, AND THE SHIM ASSUMED IT WAS
+------------------------------------------------------------------------------------------------
+Since the fork this shim has assumed "albedo is TEXCOORD0, pattern is TEXCOORD1". Disassembling
+every cloth shader (tools/cloth_uv_table.py, output in docs/cloth-uv-map.md) shows that is a
+coincidence which holds for some variants:
+
+    ir_at_sr3pccloth_*  [8][9]   Pattern s2 <- TEXCOORD1   Diffuse s0 <- computed from TEXCOORD6
+    ir_sr3pccloth_*     [6]      Pattern s0 <- TEXCOORD1   Diffuse s3 <- computed from TEXCOORD5
+    ir_sr3npcclothfull_*[8][9]   Pattern s0 <- TEXCOORD0   (no diffuse sampled)
+    ir_sr3npccloth_glow_*        Pattern s0 <- TEXCOORD3   (no diffuse sampled)
+
+The player's own clothing is `ir_sr3pccloth_*` shader [6], identified by matching the runtime
+report `pattern at stage 0, albedo stage 3` against the table - one variant, no ambiguity.
+
+ReflectShader now reads this out of the `texld` instructions (D3DSIO_TEX, 0x42) instead of
+assuming it, and carries a one-step DATAFLOW TRACE so a coordinate built through a clamp chain
+still resolves: for every temporary, the input register that last fed it. `samplerUvDirect`
+records whether an answer was READ from a texld source or TRACED through temporaries, because a
+traced answer is an inference and a caller may want to treat it differently. Runtime confirmed the
+static reading exactly:
+
+    s0=Pattern_MapSampler<-TEXCOORD1  s3=Diffuse_MapSampler<-TEXCOORD5*traced
+
+------------------------------------------------------------------------------------------------
+2. kShortUVScale = 1/1024 IS CONFIRMED, AND THE BAKER'S SPACE WAS ALWAYS RIGHT
+------------------------------------------------------------------------------------------------
+From the vertex shader of the same effect:
+
+    def c1, 0.0009765625, ...        exactly 1/1024
+    mul o6.xy, c1.x, v1              v1 = the mesh's TEXCOORD0 attribute
+    dcl_texcoord5 o6                 so o6 IS pixel-shader TEXCOORD5
+
+The albedo's coordinate is the mesh's own TEXCOORD0 attribute times 1/1024. A hardcoded constant
+that had been a guess since session 1 is now read out of the game's own bytecode.
+
+This RETRACTS a claim made earlier in this session - that the baker rasterises into the wrong
+space. It does not. The space was right; the failure was elsewhere.
+
+------------------------------------------------------------------------------------------------
+3. THE CLAMP WAS A DEAD END, AND WAS RETRACTED TWICE
+------------------------------------------------------------------------------------------------
+The pixel shader clamps its albedo coordinate through ClampU1/ClampV1, and that looked like the
+explanation for two messages. It is not:
+
+  - only TWO of the four Clamp constants exist in this shader, and an all-or-nothing check in the
+    probe reported "declares no clamp constants" when two were sitting there - a partial truth
+    turned into a total absence;
+  - both read 0.0000 at runtime, which makes the window degenerate;
+  - and the SAMPLER STATE settles it: addressU=1, addressV=1, i.e. D3DTADDRESS_WRAP. The game
+    TILES the albedo. Measured from the device, not inferred from arithmetic.
+
+So the wrap added to the CPU baker on 2026-09-06 was right, and the "the game pins, we tile"
+reading was wrong. The one durable thing the clamp taught: a CONVERTED draw has no pixel shader
+at all - BeginFFP nulls it - so whatever the shader did with its coordinate is simply gone.
+
+------------------------------------------------------------------------------------------------
+4. THE TAXONOMY - THREE WAYS A PATTERN RELATES TO ITS GARMENT
+------------------------------------------------------------------------------------------------
+Measured per draw from the vertex stream, and this is what finally organised the problem:
+
+    ONE-POINT      uv1 is CONSTANT across the draw. Every vertex reads the same pattern texel, so
+                   the whole surface takes one colour however detailed the pattern is.
+    AFFINE         uv1 = s*uv0 + o. The pattern rides the garment's own unwrap, so it can be
+                   resolved PER TEXEL in the albedo's texture space with no mesh at all.
+                   The backpack fits u = 1.0000*u0 + 0.0 with a worst residual of EXACTLY 0.0.
+    INDEPENDENT    two genuinely separate unwraps. The bra and the underwear: worst residuals
+                   ~1700 and ~1000 against a span of ~1900.
+
+For the INDEPENDENT case there is a real structural limit, not a missing trick. The albedo is a
+TILING detail map (the underwear's uv0 spans about 3.7 tiles) and the pattern is a DECAL placed
+independently, so one albedo texel is visited by many surface points carrying different pattern
+colours. NO single texture in the albedo's space can hold that. Four separate attempts at a
+shortcut failed because they were looking for something that does not exist.
+
+What ships instead is a named approximation: the garment takes the pattern's DOMINANT texel
+(53% and 62% of the map respectively, both the blue background). That selects colour C, which for
+these two is teal and magenta - the correct garment colours, confirmed against the unmodded
+screenshot. The decal is lost; the alternative was white, which is wrong in every respect.
+
+------------------------------------------------------------------------------------------------
+5. THE PADDING, AND THE BUG THAT MADE IT LOOK LIKE THE GAME'S FAULT
+------------------------------------------------------------------------------------------------
+These diffuse maps are mostly EMPTY: 88.7% of the underwear's and 74.0% of the bra's is black
+padding around a few bright islands. A converted draw has no pixel shader, so the shader's clamp
+is gone and the raw uv wanders across the whole map - into the padding, which multiplied to black.
+The user saw black square patches on both.
+
+The fix is to pad: dilate the islands outward so a sample that strays gets the island's colour.
+That took three tries and the last two failures were mine:
+
+  a. A FLAT FILL with one average removed the black but left every island with a visible border,
+     because the islands carry shading and a flat fill does not. Reported as "similar color to the
+     main parts" - still visible.
+  b. DILATION then spread BLACK. It decided "is this texel filled?" from the DIFFUSE being above
+     8, but propagated the GENERATED colour - and a diffuse of 10 through gamma 2.2 times a colour
+     times a scale of 2 is about 1 of 255. The near-black rim of every island became a seed. The
+     dumped texture shows it exactly: dark wedges radiating from the island edges.
+
+  Now only a texel carrying real COLOUR may seed or spread.
+
+THE DIAGNOSTIC WAS THE WORSE HALF. It reported "0 texels left unreached", which was TRUE - every
+empty texel really was reached, with black. A statement that is accurate and tells you nothing is
+more dangerous than one that is wrong; two further hypotheses were built on top of it before the
+artifact contradicted it. The report is now measured on the RESULT ("N% of the FINAL texture is
+still black") rather than on the loop counter.
+
+------------------------------------------------------------------------------------------------
+6. HOW THAT BUG WAS ACTUALLY CAUGHT - THE REMIX CAPTURE
+------------------------------------------------------------------------------------------------
+Worth recording as a technique. A Remix capture (Ctrl+Shift+P, lands in rtx-remix/captures/)
+writes out every texture Remix received. Ours are findable by SIZE - they are the only
+uncompressed BGRA8 at the garment's dimensions:
+
+    29F520D5  128x256  the bra        39.7% black
+    4FD02CBB  256x128  the underwear  19.4% black
+    80238026  256x128  the armband     0.9% black
+
+and our own dump of the same textures measured 39.7% and 19.4% - identical. That comparison
+eliminated Remix, the binding, and any second draw in one step, and pointed the finger squarely
+back at the generator. The armband at 0.9% is why it looked right while the other two did not.
+
+------------------------------------------------------------------------------------------------
+7. THE REMIX API CHARACTER IS OFF, AND WAS SILENTLY OFF BEFORE THAT
+------------------------------------------------------------------------------------------------
+The character's DrawInstance loop lives INSIDE RemixApiTestTick(), which returns early on
+!remixApiTestCube. Turning off the step-2 test cube therefore stopped the character being
+submitted - `DrawInstance 0 calls` against 10 built meshes and 21,990 triangles, for several runs,
+silently. The gates are separated now.
+
+It is deliberately left OFF. Everything that fixes the real character - the atlas composites, the
+cloth colours, the hair - lives in the SHARED fixed-function path.
+
+------------------------------------------------------------------------------------------------
+8. HAIR
+------------------------------------------------------------------------------------------------
+A hair item ships _dob, _flow and _n and NO _d at all, so what the shader calls Diffuse_Map for
+hair is the FLOW map. The strands are in the Dob_Map's RED channel (R 16..222, G flat at 247,
+B identical to R - one greyscale channel duplicated). Hair albedo is now
+
+    chosen colour * (dob.R / 255) * clothTintScale
+
+on the SHARED path (HairAlbedo), after first being written on the API path where it could never
+have taken effect.
+
+------------------------------------------------------------------------------------------------
+9. METHOD - THE FAILURES WERE ALL ONE SHAPE
+------------------------------------------------------------------------------------------------
+  - ABSENCE FROM A CAPPED LOG IS NOT EVIDENCE. A 64x64 pattern missing from a probe that prints
+    only a few entries was read as "the draw is not converted". It was converted all along.
+  - A DIAGNOSTIC MUST NOT ASSERT A CONCLUSION IT DID NOT REACH. Three did: the slot dump's
+    "coplanar duplicates", the UV1 probe's "INDEPENDENT unwraps" when it had given up on a
+    degenerate span, and the pad's "0 texels left unreached".
+  - AN ALL-OR-NOTHING CHECK TURNS A PARTIAL TRUTH INTO A TOTAL ABSENCE (the clamp constants).
+  - MEASURE THE RESULT, NOT THE PROCESS. A loop counter says what the loop did; only the artifact
+    says what came out.
+  - CHECK REACHABILITY BEFORE WRITING THE FIX. Twice - the one-point sampling, and a diagnostic
+    placed inside the API character collection after that path had been switched off.
+
+  And what worked every time: LOOKING AT THE THING. The contact sheet that showed a bake was empty
+  rather than scrambled; pat_llheart01 rendered beside the runtime capture; the Dob_Map channel
+  statistics; the disassembly; and finally the dumped texture whose black wedges named the seeding
+  bug in one glance.
+
+------------------------------------------------------------------------------------------------
+10. TEST METHODOLOGY WORTH REUSING
+------------------------------------------------------------------------------------------------
+The user reconfigured the character to occupy nearly all 13 wardrobe slots, deliberately including
+BOTH a bra and underwear, and supplied matched unmodded/modded screenshots. That single run
+produced three garments of the hard class side by side with their real inputs and separated them
+cleanly - the backpack (AFFINE, fixed), the underwear and the bra (INDEPENDENT). Asking for a
+deliberately constructed outfit was worth more than any number of incidental runs.
+
+================================================================================================
+
+
+---
+
+# SESSION 2026-09-09 (evening) .. 2026-09-10 - THE BRA AND THE UNDERWEAR, SOLVED
+
+Where it started: both garments rendered with "black square patches", a padding pass had been
+built to hide them, and the decals (a cat on the underwear, a star on the bra) were written off
+as a structural limit of the INDEPENDENT class. Where it ended, confirmed by the user on screen:
+both silhouettes correct, the cat and the star in place in the right colours, the star on the
+left cup only (as in the game), the backpack's stomach yellow, the underwear's panel cyan.
+
+Every step below was a measurement that killed a hypothesis, until the one that did not.
+
+## 2026-09-09 - five hypotheses, each closed by one measurement
+
+The premise on entry was that a CONVERTED draw loses the game's pixel-shader clamp, so the raw
+uv "wanders into the diffuse's empty atlas space". Read the shader instead of the register names:
+
+    ir_sr3pccloth_c ps[6]:
+      mov_pp r1.xz, c6               ; c6.x = 1.0
+      add_pp r0.w, r1.x, -c13.x      ; 1 - ClampV1
+      mul_pp r2.w, r0.w, c9.y        ; * 512
+      mad_pp r0.w, r0.w, c9.y, c9.z  ; * 512 + 1   -> window [-(1-V1)*512, (1-V1)*512+1]
+      abs_pp r0.w, c13.x
+      cmp_pp r3.y, -r0.w, v5.y, r2.w ; ClampV1 == 0 -> take v5.y UNCLAMPED
+
+Runtime: `ClampU1 0.00000  ClampV1 0.00000`. V is bypassed outright, U is pinned to [-512, 513].
+**The clamp is declared and inactive.** The sampler is WRAP (measured). The game wraps exactly
+as the conversion does. First hypothesis dead; the log line that had asserted "the game PINS the
+coordinate" was rewritten to print the windows instead of a verdict.
+
+Then the coordinate. `vs[2]` (2340 bytes - the permutation actually bound, identified by
+`GetFunction` size) does `mul o6.xy, c1.x, v1`: the diffuse is fetched at `TEXCOORD0 * 1/1024`,
+no offset, no tiling - the very matrix the fixed-function path applies. Same on all three probed
+garments, same pixel shader (2976 bytes). Second hypothesis (a different permutation) dead.
+
+Then WHERE the mesh lands. A COVERAGE probe wrapped every vertex's uv0 the way the sampler does
+and looked up the texel:
+
+    256x256 garment    0.3% of vertices on a black texel     <- control: TEXCOORD0 is its unwrap
+    underwear 256x128 65.7%
+    bra       128x256 63.6%
+
+The overlays showed the two broken garments' vertices sprinkled evenly across the map. A SCAN of
+every short2 the stride can hold found nothing better than TEXCOORD0 (the bra's best candidate
+was the position field). Third hypothesis (another uv set) dead. A walk of the INDEX BUFFER -
+`base=0 minIndex=0 numVertices=271`, all 271 referenced, none outside - killed the fourth (a
+loose NumVertices range sweeping in other garments' vertices). And `uv1 != uv0` on every one of
+those 271 vertices, so INDEPENDENT was real, not an artefact of the range.
+
+So: the game fetches, through exactly our coordinate, a texture that is 88.7% black, lands two
+thirds of the mesh on the black, and shows no black. Every term of the shader's output is
+proportional to that fetch. The only thing left was the texture's MEANING.
+
+## 2026-09-09 - it was the alpha. The dump had been lying about it.
+
+    texld_pp r3, r3, s3      ; the Diffuse_Map fetch - r3.w is its ALPHA
+    ...
+    lrp_pp r3.xyz, v4.w, c38, r0    ; only .xyz is touched after that
+    mul_pp oC0, r3, c37             ; oC0.w = diffuse.a * Tint_color.w
+
+The garment is a TEMPLATE MESH cut to shape by its texture's alpha, and the game blends it
+(`alphaBlend=1 src=5 dst=6`, measured; the control garment draws `src=2 dst=1`). Two thirds of
+the mesh on "black" was correct and expected: that is the invisible part of the template. The
+game files agree - every `cm_unwr_f_*` is 256x128 with 81-90% transparent alpha, every
+`cm_bra_f_*` 128x256 with 63-85%.
+
+Why it had never been seen: `WriteBgraDds` wrote `cur[i*4+3] = 255`. Every dump of these maps
+reported "alpha==255: 100%" while the same bytes measured 90% transparent in the probe. A day of
+looking at pictures of the cutout, with the one channel that explained it fabricated by the tool
+that made the pictures. Fixed; the dump now carries the buffer's own alpha.
+
+The fix, `clothCutout=1`: the generated texture already carried the alpha (the diffuse arrives
+as DXT5 at draw time and its alpha decoded correctly); the DILATION had been writing `0xFF000000`
+over every filled texel, and the converted draw took TFACTOR alpha. Now the dilation keeps each
+texel's alpha (colour only, for bilinear edges) and BeginFFP alpha-tests the draw at 128 when it
+binds a generated texture that carries a cutout - the same save/restore path a shader texkill
+uses, and the signal Remix reads as "cutout" rather than "glass". The DXT1 decoder's
+punch-through texel (index 3 of a 3-colour block) is fixed to alpha 0 on the same switch; it was
+wrong, it just was not what these two garments hit. User: both silhouettes correct.
+
+## 2026-09-10 - the decal, through the mesh
+
+`vs[2]`: `mul o2.xy, r2, c1.x` with `r2 = c6/c7 * v4` - the pattern is sampled at
+`TEXCOORD1 * Pattern_Map_Tiling / 1024`, wrapped. A DECAL SPACE probe measured whether a texture
+baked in THAT space could also carry the cutout, which lives in uv0: 46 of the underwear's 63
+visible vertices and 214 of the bra's 248 share a wrapped uv1 cell with cut template geometry.
+It cannot. TEXCOORD1 as the sampled set is closed.
+
+But the same numbers showed that the "3.7 tiles of uv0 overlap" behind the structural-limit
+story was mostly the CUT template (208 of 271 vertices). The visible panels sit on distinct
+islands. So `clothMeshDecal=1` (`BakeDecal`): for every triangle with a visible vertex,
+rasterise it into the diffuse's space, interpolate its uv1 barycentrically, and record which
+pattern texel each visible albedo texel shows. Cut triangles never write. Everything else stays
+as it was - uv0 space, alpha intact, TEXCOORDINDEX 0, one stage, nothing new for Remix.
+
+    underwear  142 tris rasterised, 221 skipped | 78.9% of visible texels resolved | 0 conflicts
+    bra        662 rasterised, 670 skipped      | 91.4%                            | 433 conflicts
+
+The generated textures had the cat on the front panel and the star on the cup. In the wrong
+colours: cyan and white - the pattern's own texels.
+
+## 2026-09-10 - the colour chain. The desaturation branch was never in this shader.
+
+`colourFromPatternTexel` classifies a mixed texel - cyan (0,1,1), white (1,1,1) - as
+"near-grey, no customisation" and returns it raw; its weighted sum was only ever verified on
+pure single-channel patterns. ps[6] has no such branch:
+
+    add_pp r5.xyz, -r1.x, c3        ; C - 1
+    mad_pp r5.xyz, r6.z, r5, c6.x   ; lerp(1, C, blue)
+    lrp_pp r7.xyz, r6.y, c2, r5     ; lerp(that, B, green)
+    lrp_pp r5.xyz, r6.x, c1, r7     ; lerp(that, A, red)
+
+White -> C by blue, -> B by green, -> A by red. On a pure-channel texel the chain and the sum
+agree, which is why every flat-pattern garment had been right and nobody noticed. On the decals
+they diverge: cyan -> B (magenta cat, yellow star), white -> A (yellow eyes) - the user's
+screenshot exactly. `colourFromPatternTexelChain` is used on the per-texel paths (mesh decal and
+AFFINE); the backpack's cyan stomach, the same bug on the AFFINE path, became yellow with it.
+The one-point/dominant `pick` stays on the old function: the two agree on every texel it is
+ever given. User: colours correct.
+
+## 2026-09-10 - the star on both cups: two surfaces, one island, four attempts
+
+The bra's diffuse has ONE cup island; both cups map onto it with mirrored uv0, and the game
+shows the star on the LEFT cup only. So the left cup wants the star at island region P and the
+right cup wants background there. One texture, one answer per texel: the left cup's triangles
+wrote first and both cups showed its star. The 433 "conflict" texels were exactly the star -
+the conflict map (`sr3-remix-decal-2-conflicts.dds`) painted nothing else on the whole bra.
+
+The second cup has to get its own texels. The mechanism, `clothDecalTiles=1`:
+
+  - the generated texture is laid out as TILES side by side, each with its own decal map;
+  - the skinned copy - `SkinAndBind` already writes a private `{pos, nrm, uv}` vertex per draw
+    every frame, uv in raw short units - shifts each tile's vertices' u0 by whole tiles;
+  - the draw's texture matrix is scaled by 1/width-in-tiles at bind time;
+  - cut geometry keeps its within-tile position and every tile carries the same alpha, so it
+    stays invisible wherever it lands.
+
+Three ways of choosing WHICH triangles go to tile 1 were refused by their own guards, each
+refusal stated in the log:
+
+  1. Connected components: `1 connected components ... 433 conflict texels across 0 component
+     pairs`. The cups join through the band. Dead.
+  2. uv0 winding sign (mirrored halves wind oppositely): `176 between OPPOSITE windings, 257
+     within the SAME winding`. Most of the disagreement was same-winding - triangles of the
+     other cup that happen to wind the same way at the star's points. Dead.
+  3. A colouring of the TRIANGLE CONFLICT GRAPH (each disagreeing texel is an edge between the
+     two triangles; each triangle takes the lowest tile holding nothing it disagrees with;
+     non-conflicting triangles stay in tile 0 because any tile is correct for them): `35
+     disagreeing triangle pairs over 68 triangles -> 2 tiles` - and then `visible triangles
+     crossing a tile seam: 47`, refused, because the cup island touches the texture's edge and
+     the panel wraps across it.
+  4. The same colouring, with each tile laid out as ENOUGH SIDE-BY-SIDE COPIES of its image that
+     its panel, shifted to the start of its region, never leaves it:
+
+        433 conflict texels = 35 pairs over 68 triangles -> 2 tiles laid out as 4+2 copies =
+        6 texture widths. Tris per tile: 882 / 34; 18 seam vertices duplicated; 916 list
+        triangles; refused: 0.
+
+     The seam vertices are duplicated into the skinned copy behind the draw's own vertices with
+     the other tile's shift, a private INDEX32 triangle list references them (the strip is
+     dissolved), and the draw hook swaps that buffer in for the one call. User: fixed.
+
+## 2026-09-10 - the colour curve: why a linear scale could never make cyan
+
+The underwear's panel colour reaches the shader as C = (0.059, 0.220, 0.298). G/B = 0.74 is
+blue, and a linear scale (clothTintScale x2) preserves hue by construction. The game shows cyan
+because ps[6] ends `mul oC0, r3, c37` with Tint_color = (5,5,5) - measured - into an HDR target
+it then tonemaps: G and B saturate together. `clothColourCurve=1` applies Reinhard, x/(1+x), to
+Tint*C per channel, with the Tint read from the shader constant. Against every colour the user
+had judged: underwear light cyan, bra fuchsia, armband and backpack yellow, bracelets blue, and
+mid-range colours within a few percent of the x2 brightness the corset was calibrated at.
+Player-family generator only; hair and the NPC path unchanged. User: fixed.
+
+Also measured this run: `Diffuse_Color c14 = (1,1,1,1)` on every garment. The generator has
+never applied it, and it did not need to.
+
+## What is now true
+
+    every garment on the 2026-09-09 outfit renders correctly: silhouettes, colours, decals.
+    INDEPENDENT is NOT a structural limit. The mesh relates the two unwraps per texel.
+    the colour formula for the player family is the shader's own lerp chain; the weighted-sum
+      with a desaturation branch belongs to the NPC family and coincides only on pure texels.
+    the customisation colour goes through Reinhard on the measured Tint, not a linear x2.
+    a template garment is cut by its texture's ALPHA; the converted draw must alpha-test it.
+    a texel can be claimed by two surfaces; tiles + seam duplicates + a private list resolve it.
+
+## Method, this stretch
+
+  - Five hypotheses died to five measurements, in order, each one line in the log. The cause was
+    the thing every measurement had been treating as background: a channel.
+  - The tool that made the pictures had fabricated the channel. "Look at the thing" includes
+    checking that the thing you are looking at is the thing.
+  - Three of my own guards refused my own fix, and each refusal said exactly why. Reading the
+    refusal reason beat re-theorising every time.
+  - A diagnostic that asserts a verdict ("the game PINS the coordinate") sent a day's work after
+    a clamp that was never active. Print the numbers.
+  - The 3-colour slots: Diffuse_Color_a/b/c, selected by the pattern's R/G/B through the chain.
+    Wardrobe slot order is not constant order - the underwear's first wardrobe slot is `c`.
+
+## Deployed at the end of the session
+
+    sr3-rtx.asi  9c0cfaf958174e3bcc0b91c81bf5be1e   CONFIRMED on screen by the user
+    sr3-rtx.ini  08450a3d1f807cfb31dec4f7dd2f73a7
+    clothCutout=1  clothMeshDecal=1  clothDecalTiles=1  clothColourCurve=1
+    (clothAlbedoPercent=200 remains the x2 fallback when clothColourCurve=0)
