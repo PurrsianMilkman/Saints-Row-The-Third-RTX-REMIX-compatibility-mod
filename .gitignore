@@ -35,6 +35,8 @@ docs/evidence/*.png
 src/sr3-rtx/sr3rtx.cpp.before-*
 src/sr3-rtx/sr3rtx.cpp.EXPERIMENT-*
 configs/*.bak
+configs/*.ini.before-*
+configs/*.conf.before-*
 # Build intermediates and scratch
 build/*.map
 mc_dis.txt
@@ -58,3 +60,8 @@ engine-control/src/*.cpp.before-*
 
 # Doc backups
 docs/*.md.before-*
+
+# --- runtime diagnostic dumps, moved out of the game directory 2026-09-09 ---
+# Regenerable by running with the dump switches on, and 700 MB of it. The findings that
+# matter are written up in docs/, and the curated subset lives in player-textures/.
+dumps/

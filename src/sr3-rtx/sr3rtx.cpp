@@ -50,6 +50,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <algorithm>
 
 namespace {
 
@@ -226,6 +227,51 @@ struct Settings {
     // Give hair its STRAND detail by modulating the hair colour with the Dob_Map's strand
     // channel, instead of shipping one flat colour. 0 restores the flat constant.
     bool hairStrandsFromDob = true;
+    // Last resort for a garment whose pattern is a DECAL on an independent uv set: take the
+    // pattern's dominant colour for the whole surface. An approximation, and labelled as one -
+    // it gets the garment's colour right and loses the decal. 0 leaves such garments untinted,
+    // which is what they were.
+    bool clothDominantPattern = true;
+    // Fill the UNUSED atlas space in a generated albedo with the garment own colour instead of
+    // leaving it black. A converted draw has no pixel shader, so the game clamp that keeps a
+    // sample inside its island is gone - see the note above the fill.
+    bool clothPadUnused = true;
+    // THE CUTOUT. The bra's and the underwear's diffuse maps carry a transparent cutout in their
+    // alpha - 63-90% of each (verified against every cm_bra_f_* and cm_unwr_f_* in the game
+    // files; DXT5 at draw time) - and ir_sr3pccloth_c ps[6] emits that alpha as the pixel's
+    // (`mul oC0, r3, c37` with r3.w straight from the Diffuse_Map fetch), which the game then
+    // BLENDS (src=5 dst=6, measured). The garment is a template mesh cut to shape by its texture.
+    // The generated copy carried that alpha correctly, and then two things threw it away: the
+    // dilation wrote 0xFF000000 over every filled texel, and the converted draw took TFACTOR
+    // alpha, so the template's spare quads rendered as opaque black squares. This keeps the
+    // alpha through the dilation and alpha-tests the converted draw so Remix sees a cutout. The
+    // DXT1 decoder's punch-through texel (index 3 of a 3-colour block) is fixed to alpha 0 on the
+    // same switch; it was wrong, it just was not what these two garments hit.
+    bool clothCutout = true;
+    // THE DECAL, through the mesh. The pattern rides TEXCOORD1 and the albedo TEXCOORD0, two
+    // unrelated unwraps - but a triangle relates them: rasterise each triangle in the albedo's
+    // space and interpolate its uv1 to find the pattern texel for every albedo texel it covers.
+    // Only triangles with a visible vertex are rasterised; the cut template geometry, which is
+    // what made uv0 look like "3.7 tiles of overlap", never writes. Conflicts between visible
+    // triangles are counted and logged, not assumed away. Falls back to the dominant colour
+    // wherever the mesh does not reach.
+    bool clothMeshDecal = true;
+    // TILES. The bra's two cups share ONE island of the diffuse (mirrored uv0) but carry the star
+    // at mirrored positions in uv1, so they disagree about 433 island texels and only one cup can
+    // win in a single texture. When the mesh bake finds components that conflict, each conflicting
+    // component gets its own TILE: the generated texture is tiles*dw wide, the skinned copy's u0
+    // is shifted by whole tiles per component, and the draw's texture matrix is scaled by 1/tiles.
+    // Cut geometry keeps its within-tile position, so it lands on transparent texels in every tile.
+    bool clothDecalTiles = true;
+    // THE COLOUR CURVE. ir_sr3pccloth_c ps[6] ends `mul oC0, r3, c37` with Tint_color = (5,5,5)
+    // measured, into an HDR target the game tonemaps. clothTintScale (x2) stood in for that
+    // linearly, and a linear scale keeps a colour's hue: the underwear's C = (0.059, 0.220, 0.298)
+    // has G/B = 0.74 and stays BLUE, while the game shows cyan because at x5 the G and B channels
+    // saturate together. Reinhard on Tint*C - x/(1+x) per channel - reproduces that: underwear
+    // light cyan, bra fuchsia, armband and backpack yellow, and mid-range colours within a few
+    // percent of the x2 brightness the corset was judged right at. The Tint is read from the
+    // shader constant, not assumed. Player-family generator only; hair and NPC paths unchanged.
+    bool clothColourCurve = true;
     // Take the UV divide from the vertex shader's own def constant instead of assuming 1/1024.
     // 0 restores the hardcoded value, which is the A/B for anything this changes.
     bool uvScaleFromShader = true;
@@ -348,6 +394,12 @@ void LoadSettings() {
     g_settings.compositeFfp = flag("compositeFfp", true);
     g_settings.clothUniformFromDiffuse = flag("clothUniformFromDiffuse", true);
     g_settings.hairStrandsFromDob = flag("hairStrandsFromDob", true);
+    g_settings.clothDominantPattern = flag("clothDominantPattern", true);
+    g_settings.clothPadUnused = flag("clothPadUnused", true);
+    g_settings.clothCutout = flag("clothCutout", true);
+    g_settings.clothMeshDecal = flag("clothMeshDecal", true);
+    g_settings.clothDecalTiles = flag("clothDecalTiles", true);
+    g_settings.clothColourCurve = flag("clothColourCurve", true);
     g_settings.uvScaleFromShader = flag("uvScaleFromShader", true);
     g_settings.passCensus = flag("passCensus", true);
     g_settings.atlasCompositeProbe = flag("atlasCompositeProbe", true);
@@ -790,12 +842,48 @@ struct ShaderInfo {
     // input register, and that is worth knowing too: a computed coordinate cannot be reproduced
     // by resampling and says so instead of being guessed at.
     int samplerUv[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    // true where the coordinate was a plain input register, false where it was COMPUTED and the
+    // index below was traced back through the temporaries. The distinction is worth keeping: a
+    // traced answer is an inference from a dataflow walk, not a direct reading, and a caller may
+    // reasonably want to treat the two differently.
+    bool samplerUvDirect[8] = {false, false, false, false, false, false, false, false};
     bool sawTexld = false;
     int patternStage = -1;                // the Pattern_Map sampler
     int diffuseColorReg[3] = {-1, -1, -1};   // Diffuse_Color_a, _b, _c
     // Diffuse_Color, a SEPARATE uniform (c11 in the player cloth shaders) that scales the diffuse
     // map before the customisation colours are applied. Not one of the three above.
     int diffuseColorMulReg = -1;
+    // THE CLAMP REGISTERS the albedo's coordinate passes through - and what they actually do.
+    //
+    // ir_sr3pccloth_c vs[0]:   def c1, 0.0009765625, ...      (exactly 1/1024)
+    //                          mul o6.xy, c1.x, v1            (v1 = the TEXCOORD0 attr, no tiling)
+    //                          dcl_texcoord5 o6               (so o6 IS ps TEXCOORD5)
+    // ir_sr3pccloth_c ps[6]:   mov r1.xz, c6                  (c6.x = 1.0)
+    //                          add r0.w, r1.x, -c13.x         ; 1 - ClampV1
+    //                          mul r2.w, r0.w, c9.y           ; c9.y = 512
+    //                          mad r0.w, r0.w, c9.y, c9.z     ; c9.z = 1
+    //                          max/min                        ; window [-(1-V1)*512, (1-V1)*512+1]
+    //                          abs r0.w, c13.x
+    //                          cmp r3.y, -r0.w, v5.y, r2.w    ; ClampV1 == 0 -> v5.y UNCLAMPED
+    //                          (U has the same window and NO cmp escape)
+    //                          texld r3, r3, s3               (the Diffuse_Map)
+    //
+    // Measured at runtime on the player's clothing (2026-09-09): ClampU1 = ClampV1 = 0.00000,
+    // U2/V2 not declared. So V is passed through untouched and U is pinned to [-512, 513], which
+    // nothing leaves. THE CLAMP IS NOT ACTIVE. The coordinate goes to the sampler as-is, and the
+    // sampler is WRAP (INHERITED probe: addressU=1). The game wraps exactly as the conversion does.
+    //
+    // An earlier version of this comment said the opposite - "the game CLAMPS, the baker WRAPS,
+    // these four registers are what it should have used" - and a whole padding pass was built on
+    // it. It read the register NAMES and never decoded the arithmetic or the runtime values.
+    //
+    // What IS confirmed: kShortUVScale = 1/1024, and TEXCOORD0 * 1/1024 is the albedo coordinate
+    // for the permutation above - the 256x256 garment lands 0.3% of its vertices on black
+    // (COVERAGE probe). What is ALSO measured: the underwear lands 65.7% and the bra 63.6% of
+    // theirs on black through the same coordinate, with the vertices sprinkled evenly over the
+    // whole map. On those two draws TEXCOORD0 is not the albedo unwrap; the SCAN probe reports
+    // which short2 in the vertex is, and BOUND SHADERS names the permutation to disassemble.
+    int clampReg[4] = {-1, -1, -1, -1};   // ClampU1, ClampV1, ClampU2, ClampV2
     int tintColorReg = -1;
     // Hair renders white and neither of its textures holds the colour: the Dob_Map is white
     // strands on a green field and the Diffuse_Map is smooth directional data. ir_sr3pchair_c
@@ -867,6 +955,24 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
         const DWORD* t = tokens + 1;                       // skip the version token
         const DWORD* end = tokens + length / sizeof(DWORD);
         unsigned rtMask = 0;
+        // WHICH INPUT REGISTER FEEDS EACH TEMPORARY.
+        //
+        // The underwear's shader does not sample its albedo from a texcoord directly:
+        //
+        //     ir_sr3pccloth_bs[6]:  ... clamp v5.xy against ClampU1/ClampV1 into r3 ...
+        //                           texld_pp r3, r3, s3      ; Diffuse_Map
+        //                           texld_pp r6, v1, s0      ; Pattern_Map on TEXCOORD1
+        //
+        // so reading only `texld` sources reports "computed" and says nothing. One backward step
+        // is enough to recover it: carry, for every temporary, the input register that last fed
+        // it. A clamp chain is a handful of moves and the taint survives all of them.
+        //
+        // This is deliberately simple - first input wins, and a temporary written from another
+        // temporary inherits its origin. It cannot express a coordinate genuinely built from TWO
+        // texcoords, and it does not pretend to: such a case would report whichever it met first,
+        // which is why samplerUvDirect records that the answer was traced rather than read.
+        int tempFrom[32];
+        for (int i = 0; i < 32; ++i) tempFrom[i] = -1;
         while (t < end && *t != 0x0000FFFF) {               // 0xFFFF is END
             const DWORD op = *t & 0xFFFF;
             const DWORD len = (*t & 0x0F000000) >> 24;
@@ -895,11 +1001,37 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
                 const DWORD srcType = ((srcTok & 0x70000000) >> 28) | ((srcTok & 0x00001800) >> 8);
                 const DWORD smpType = ((smpTok & 0x70000000) >> 28) | ((smpTok & 0x00001800) >> 8);
                 const unsigned smp = smpTok & 0x7FF;
+                const unsigned srcIdx = srcTok & 0x7FF;
                 if (smpType == 10 /* D3DSPR_SAMPLER */ && smp < 8) {
                     result.sawTexld = true;
-                    result.samplerUv[smp] =
-                        (srcType == 1 /* D3DSPR_INPUT */) ? static_cast<int>(srcTok & 0x7FF) : -1;
+                    if (srcType == 1 /* D3DSPR_INPUT */) {
+                        result.samplerUv[smp] = static_cast<int>(srcIdx);
+                        result.samplerUvDirect[smp] = true;
+                    } else if (srcType == 0 /* D3DSPR_TEMP */ && srcIdx < 32) {
+                        result.samplerUv[smp] = tempFrom[srcIdx];   // -1 if nothing traced
+                        result.samplerUvDirect[smp] = false;
+                    } else {
+                        result.samplerUv[smp] = -1;
+                        result.samplerUvDirect[smp] = false;
+                    }
                 }
+            }
+            // Propagate the taint. AFTER the texld above has read its source, because a texld
+            // writes a temporary too and would otherwise overwrite the origin it was about to be
+            // asked for.
+            if (op != 0x1F && op != 0x51 && len >= 1 && t + len < end) {
+                const DWORD dTok = t[1];
+                const DWORD dType = ((dTok & 0x70000000) >> 28) | ((dTok & 0x00001800) >> 8);
+                int origin = -1;
+                for (DWORD k = 2; k <= len && origin < 0; ++k) {
+                    const DWORD sTok = t[k];
+                    const DWORD sType = ((sTok & 0x70000000) >> 28) | ((sTok & 0x00001800) >> 8);
+                    const unsigned sIdx = sTok & 0x7FF;
+                    if (sType == 1 /* input */) origin = static_cast<int>(sIdx);
+                    else if (sType == 0 /* temp */ && sIdx < 32) origin = tempFrom[sIdx];
+                }
+                if (dType == 0 /* temp */ && (dTok & 0x7FF) < 32)
+                    tempFrom[dTok & 0x7FF] = origin;
             }
             // D3DSIO_DEF (0x51): `def cN, x, y, z, w`. One destination token, then four floats.
             //
@@ -1039,7 +1171,11 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
             else if (!_stricmp(name, "Base_Color")) crank = 70;
             else if (!_stricmp(name, "Draw_Color")) crank = 60;
             else if (!_stricmp(name, "Tint_color")) crank = 50;
-            if (!_stricmp(name, "Diffuse_Color")) result.diffuseColorMulReg = reg;
+            if (!_stricmp(name, "ClampU1")) result.clampReg[0] = reg;
+            else if (!_stricmp(name, "ClampV1")) result.clampReg[1] = reg;
+            else if (!_stricmp(name, "ClampU2")) result.clampReg[2] = reg;
+            else if (!_stricmp(name, "ClampV2")) result.clampReg[3] = reg;
+            else if (!_stricmp(name, "Diffuse_Color")) result.diffuseColorMulReg = reg;
             else if (!_stricmp(name, "Diffuse_Color_a")) result.diffuseColorReg[0] = reg;
             else if (!_stricmp(name, "Diffuse_Color_b")) result.diffuseColorReg[1] = reg;
             else if (!_stricmp(name, "Diffuse_Color_c")) result.diffuseColorReg[2] = reg;
@@ -1296,6 +1432,14 @@ unsigned g_meshKeyBaseVertex = 0;   // set per draw, disambiguates meshes in a s
 // way to reach it, and sampling the whole shared buffer instead would mix meshes together.
 UINT g_curDrawFirstVertex = 0;
 UINT g_curDrawVertexCount = 0;
+// The rest of the indexed draw's parameters. [firstVertex, +vertexCount) is a RANGE HINT -
+// D3D only requires that every referenced vertex fall inside it, not that every vertex inside
+// it be referenced. A probe that walks the range walks whatever else shares the buffer. These
+// let a probe walk the INDEX BUFFER instead and see only what the draw actually uses.
+bool g_curDrawIndexed = false;
+INT g_curDrawBaseVertex = 0;
+UINT g_curDrawMinIndex = 0, g_curDrawStartIndex = 0, g_curDrawPrimCount = 0;
+D3DPRIMITIVETYPE g_curDrawPrimType = D3DPT_TRIANGLELIST;
 float g_appliedU = 0.0f, g_appliedV = 0.0f;   // cached texture-matrix scale
 unsigned g_uvMatrixWrites = 0;
 unsigned g_samplerProbeReports = 0;
@@ -2293,7 +2437,10 @@ bool WriteBgraDds(const char* path, UINT w, UINT h, const unsigned char* bgra) {
         cur[i * 4 + 0] = bgra[i * 4 + 0];
         cur[i * 4 + 1] = bgra[i * 4 + 1];
         cur[i * 4 + 2] = bgra[i * 4 + 2];
-        cur[i * 4 + 3] = 255;
+        // The buffer's own alpha. This wrote 255, so every dump of the bra's and underwear's
+        // diffuse reported "alpha==255: 100%" while the same bytes measured 90% transparent in
+        // the probe - and the cutout went unseen for a whole day of looking at pictures of it.
+        cur[i * 4 + 3] = bgra[i * 4 + 3];
     }
     UINT mw = w, mh = h;
     for (unsigned m = 0; m < mips; ++m) {
@@ -2346,6 +2493,31 @@ void WriteAtlasDdsOnce(UINT w, UINT h, const unsigned char* bgra) {
 
 struct ClothTex { IDirect3DBaseTexture9* pattern; IDirect3DTexture9* generated; };
 std::unordered_map<unsigned long long, ClothTex> g_clothCache;
+// Generated textures whose source diffuse had transparent texels. SetupTextureStages decides the
+// alpha path BEFORE ClothAlbedo picks the texture, so the flag cannot ride the normal return;
+// BeginFFP looks the bound texture up here instead and applies the alpha test after the bind.
+// Cleared wherever the cache is, since these are the cache's own pointers.
+std::unordered_set<IDirect3DBaseTexture9*> g_clothCutoutTex;
+unsigned g_clothCutoutGen = 0;
+// Per generated texture that is wider than the diffuse: how many tiles, and the raw-u shift each
+// vertex of the draw needs to land in its tile. Looked up at bind time; applied in SkinAndBind.
+struct ClothTileLayout {
+    unsigned tiles = 1;
+    UINT firstVertex = 0, vertexCount = 0, minIndex = 0;   // the draw this was baked from
+    std::vector<float> shiftRaw;        // per original vertex: add to raw u0 (home tile)
+    std::vector<unsigned> dupSrc;       // per duplicate: the ring-relative vertex it copies
+    std::vector<float> dupShiftRaw;     // per duplicate: its own tile shift
+    std::vector<unsigned> listIdx;      // triangle list; values are minIndex + ring-relative
+    IDirect3DIndexBuffer9* ib = nullptr;   // listIdx uploaded, created on first bind
+    UINT tris = 0;
+};
+std::unordered_map<IDirect3DBaseTexture9*, ClothTileLayout> g_clothTileLayout;
+ClothTileLayout* g_clothRemap = nullptr;   // the current draw's, or null
+void ReleaseClothTileLayouts() {
+    for (auto& kv : g_clothTileLayout)
+        if (kv.second.ib) kv.second.ib->Release();
+    g_clothTileLayout.clear();
+}
 constexpr size_t kMaxClothTextures = 512;   // 32x32 RGBA is 4 KB, so this is ~2 MB
 unsigned g_clothGenerated = 0, g_clothBound = 0, g_clothGenFailed = 0, g_clothCacheFlushes = 0;
 
@@ -2442,6 +2614,345 @@ bool DecodeTextureRGB(IDirect3DTexture9* tex, std::vector<unsigned char>& rgb, U
 bool TextureToBgra(IDirect3DBaseTexture9* base, std::vector<unsigned char>& out,
                    UINT& width, UINT& height);
 
+// ------------------------------------------------------------------ the decal, resolved by the mesh
+//
+// For every texel of the albedo (TEXCOORD0 space), which pattern texel (TEXCOORD1 space) does
+// the surface show there? No formula relates the two sets on these garments - measured, the fit
+// is nowhere near affine - but every triangle carries both, so rasterising the triangles in
+// TEXCOORD0 space with TEXCOORD1 interpolated across them answers it per texel.
+//
+// Only triangles with at least one VISIBLE vertex (diffuse alpha >= 128 at its uv0) are drawn.
+// The template's cut geometry is most of the mesh (208 of the underwear's 271 vertices) and it
+// is what scattered uv0 across 3.7 tiles; alpha already removes it from the screen, so it must
+// not be allowed to overwrite the panels' colour either. A texel is written only where the
+// diffuse is visible, and a triangle with more visible vertices outranks one with fewer. Two
+// visible triangles of equal rank disagreeing on a texel is a CONFLICT and is counted.
+unsigned g_clothDecalGen = 0;
+struct DecalBake {
+    unsigned tiles = 1;
+    std::vector<std::vector<int>> idx;   // per tile: albedo texel -> pattern texel index, or -1
+    std::vector<float> shiftRaw;         // per vertex of the draw: add to raw u0 (1024 = one tile)
+    std::vector<unsigned> dupSrc;        // seam vertices duplicated for the other tile
+    std::vector<float> dupShiftRaw;
+    std::vector<unsigned> listIdx;       // the draw as a triangle list over originals + duplicates
+    unsigned written = 0, visibleTexels = 0, conflicts = 0, tris = 0, skipped = 0;
+    unsigned oppositeWindingConflicts = 0, sameWindingConflicts = 0;
+    unsigned tileTris[4] = {0, 0, 0, 0};
+    // Each tile is laid out as `copies` side-by-side repeats of its image, so a panel whose uv0
+    // crosses the texture's wrap seam - 47 of the bra's visible triangles do - keeps wrapping
+    // seamlessly inside its own region instead of running into the neighbour's image.
+    unsigned copies[4] = {1, 1, 1, 1}, offsets[4] = {0, 0, 0, 0}, totalCopies = 1;
+    unsigned seamCrossers = 0, dups = 0, conflictPairs = 0, conflictTris = 0;
+    std::vector<unsigned char> conflictMap;   // per albedo texel: 0 none, 1 opposite winding, 2 same
+};
+bool BakeDecal(IDirect3DDevice9* dev, UINT dw, UINT dh, const std::vector<unsigned char>& dif,
+               const std::vector<unsigned char>& pat, UINT pw, UINT ph,
+               const unsigned char* dominant, DecalBake& out) {
+    (void)dominant;
+    out = DecalBake{};
+    if (!g_curDrawIndexed || !g_curDrawPrimCount) return false;
+    if (g_curDrawPrimType != D3DPT_TRIANGLELIST && g_curDrawPrimType != D3DPT_TRIANGLESTRIP)
+        return false;
+    if (!dw || !dh || !pw || !ph || dif.size() < static_cast<size_t>(dw) * dh * 4 ||
+        pat.size() < static_cast<size_t>(pw) * ph * 4)
+        return false;
+    if (g_curLayout.texcoordOffset < 0 || g_curLayout.texcoordType != D3DDECLTYPE_SHORT2 ||
+        g_curLayout.texcoord1Offset < 0 || g_curLayout.texcoord1Type != D3DDECLTYPE_SHORT2 ||
+        g_curLayout.texcoord1Stream != 0)
+        return false;
+    if (!g_stream0 || !g_stream0Stride || g_curDrawVertexCount < 3 ||
+        !VertexRangeFits(g_stream0, g_stream0Offset, g_curDrawFirstVertex, g_curDrawVertexCount,
+                         g_stream0Stride))
+        return false;
+
+    // Pattern_Map_TilingU/V, the way vs[2] applies them: mul o2.xy, r2, c1.x with r2 = c6/c7 * v4.
+    float tileU = 1.0f, tileV = 1.0f;
+    for (int t = 0; t < g_curVS.tilingCount; ++t)
+        if (!_stricmp(g_curVS.tiling[t].base, "Pattern_Map")) {
+            const int ur = g_curVS.tiling[t].uReg, vr = g_curVS.tiling[t].vReg;
+            if (ur >= 0 && ur < static_cast<int>(kMaxVsConst)) tileU = g_vsConst[ur][0];
+            if (vr >= 0 && vr < static_cast<int>(kMaxVsConst)) tileV = g_vsConst[vr][0];
+            break;
+        }
+
+    // The draw's indices.
+    const UINT nIdx = (g_curDrawPrimType == D3DPT_TRIANGLESTRIP) ? g_curDrawPrimCount + 2
+                                                                  : g_curDrawPrimCount * 3;
+    std::vector<unsigned> idx;
+    {
+        IDirect3DIndexBuffer9* ib = nullptr;
+        const bool wasInt = g_internal;
+        g_internal = true;
+        if (SUCCEEDED(dev->GetIndices(&ib)) && ib) {
+            D3DINDEXBUFFER_DESC ibd{};
+            void* im = nullptr;
+            if (SUCCEEDED(ib->GetDesc(&ibd)) && ibd.Size) {
+                const UINT isz = (ibd.Format == D3DFMT_INDEX32) ? 4 : 2;
+                const UINT byteStart = g_curDrawStartIndex * isz, byteLen = nIdx * isz;
+                if (byteStart + byteLen <= ibd.Size &&
+                    SUCCEEDED(ib->Lock(byteStart, byteLen, &im, D3DLOCK_READONLY)) && im) {
+                    try {
+                        idx.resize(nIdx);
+                        for (UINT i = 0; i < nIdx; ++i)
+                            idx[i] = (isz == 4) ? static_cast<const unsigned*>(im)[i]
+                                                : static_cast<const unsigned short*>(im)[i];
+                    } catch (...) { idx.clear(); }
+                    ib->Unlock();
+                }
+            }
+            ib->Release();
+        }
+        g_internal = wasInt;
+    }
+    if (idx.empty()) return false;
+
+    // Per vertex: uv0 in UNWRAPPED texel units, uv1 in tiles, and whether it is visible.
+    struct V { float x, y, u1, v1; bool vis; };
+    std::vector<V> vv;
+    {
+        void* m = nullptr;
+        if (FAILED(g_stream0->Lock(g_stream0Offset + g_curDrawFirstVertex * g_stream0Stride,
+                                   g_curDrawVertexCount * g_stream0Stride, &m,
+                                   D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) || !m)
+            return false;
+        try { vv.resize(g_curDrawVertexCount); } catch (...) { g_stream0->Unlock(); return false; }
+        const unsigned char* b = static_cast<const unsigned char*>(m);
+        const UINT o0 = static_cast<UINT>(g_curLayout.texcoordOffset);
+        const UINT o1 = static_cast<UINT>(g_curLayout.texcoord1Offset);
+        for (UINT i = 0; i < g_curDrawVertexCount; ++i) {
+            const short* p0 = reinterpret_cast<const short*>(b + i * g_stream0Stride + o0);
+            const short* p1 = reinterpret_cast<const short*>(b + i * g_stream0Stride + o1);
+            V& v = vv[i];
+            const float u = p0[0] * kShortUVScale, w = p0[1] * kShortUVScale;
+            v.x = u * dw;
+            v.y = w * dh;
+            v.u1 = p1[0] * kShortUVScale * tileU;
+            v.v1 = p1[1] * kShortUVScale * tileV;
+            float uw = u - std::floor(u), ww = w - std::floor(w);
+            UINT tx = static_cast<UINT>(uw * dw), ty = static_cast<UINT>(ww * dh);
+            if (tx >= dw) tx = dw - 1;
+            if (ty >= dh) ty = dh - 1;
+            v.vis = dif[(static_cast<size_t>(ty) * dw + tx) * 4 + 3] >= 128;
+        }
+        g_stream0->Unlock();
+    }
+
+    // Triangles as ring-relative vertex indices, with their uv0 winding. A strip's stitching
+    // triangles have zero area and are dropped; the list built below does not need them.
+    const bool strip = (g_curDrawPrimType == D3DPT_TRIANGLESTRIP);
+    const UINT triCount = strip ? (nIdx >= 2 ? nIdx - 2 : 0) : nIdx / 3;
+    struct T { unsigned a, b, c; float area; unsigned char vis; unsigned char tile; };
+    std::vector<T> tt;
+    try { tt.reserve(triCount); } catch (...) { return false; }
+    for (UINT tri = 0; tri < triCount; ++tri) {
+        unsigned ia, ib2, ic;
+        if (strip) { ia = idx[tri]; ib2 = idx[tri + 1]; ic = idx[tri + 2]; }
+        else       { ia = idx[tri * 3]; ib2 = idx[tri * 3 + 1]; ic = idx[tri * 3 + 2]; }
+        const long long ra = static_cast<long long>(g_curDrawBaseVertex) + ia - g_curDrawFirstVertex;
+        const long long rb = static_cast<long long>(g_curDrawBaseVertex) + ib2 - g_curDrawFirstVertex;
+        const long long rc = static_cast<long long>(g_curDrawBaseVertex) + ic - g_curDrawFirstVertex;
+        if (ra < 0 || rb < 0 || rc < 0 || ra >= g_curDrawVertexCount || rb >= g_curDrawVertexCount ||
+            rc >= g_curDrawVertexCount)
+            continue;
+        T t{static_cast<unsigned>(ra), static_cast<unsigned>(rb), static_cast<unsigned>(rc), 0.0f, 0, 0};
+        const V& A = vv[t.a];
+        const V& B = vv[t.b];
+        const V& C = vv[t.c];
+        t.area = (B.x - A.x) * (C.y - A.y) - (B.y - A.y) * (C.x - A.x);
+        if (std::fabs(t.area) < 1e-6f) continue;
+        t.vis = static_cast<unsigned char>((A.vis ? 1 : 0) + (B.vis ? 1 : 0) + (C.vis ? 1 : 0));
+        tt.push_back(t);
+    }
+    if (tt.empty()) return false;
+    for (size_t i = 0; i < static_cast<size_t>(dw) * dh; ++i)
+        if (dif[i * 4 + 3] >= 128) ++out.visibleTexels;
+
+    // THE RASTERISER. Pass 0 records which triangle wrote each texel and every disagreement,
+    // split by whether the two triangles wind the same way in uv0; later passes build one map
+    // per tile from the triangles assigned to it.
+    std::vector<int> writer;
+    std::vector<unsigned char> prio;
+    std::vector<std::pair<unsigned, unsigned>> pairs;   // conflicting triangle pairs, with repeats
+    try { out.conflictMap.assign(static_cast<size_t>(dw) * dh, 0); } catch (...) { out.conflictMap.clear(); }
+    auto raster = [&](int filterTile, std::vector<int>& map, bool record) -> bool {
+        try {
+            map.assign(static_cast<size_t>(dw) * dh, -1);
+            prio.assign(static_cast<size_t>(dw) * dh, 0);
+            if (record) writer.assign(static_cast<size_t>(dw) * dh, -1);
+        } catch (...) { return false; }
+        for (size_t ti = 0; ti < tt.size(); ++ti) {
+            const T& t = tt[ti];
+            if (filterTile >= 0 && t.tile != filterTile) continue;
+            if (t.vis == 0) { if (record) ++out.skipped; continue; }
+            const V& A = vv[t.a];
+            const V& B = vv[t.b];
+            const V& C = vv[t.c];
+            const float minx = std::floor(min(A.x, min(B.x, C.x))), maxx = std::ceil(max(A.x, max(B.x, C.x)));
+            const float miny = std::floor(min(A.y, min(B.y, C.y))), maxy = std::ceil(max(A.y, max(B.y, C.y)));
+            if (maxx - minx > 4.0f * dw || maxy - miny > 4.0f * dh) { if (record) ++out.skipped; continue; }
+            if (record) ++out.tris;
+            const float inv = 1.0f / t.area;
+            for (int y = static_cast<int>(miny); y <= static_cast<int>(maxy); ++y)
+                for (int x = static_cast<int>(minx); x <= static_cast<int>(maxx); ++x) {
+                    const float px = x + 0.5f, py = y + 0.5f;
+                    float w0 = ((B.x - px) * (C.y - py) - (B.y - py) * (C.x - px)) * inv;
+                    float w1 = ((C.x - px) * (A.y - py) - (C.y - py) * (A.x - px)) * inv;
+                    float w2 = 1.0f - w0 - w1;
+                    const float eps = -1e-4f;
+                    if (w0 < eps || w1 < eps || w2 < eps) continue;
+                    const int tx = ((x % static_cast<int>(dw)) + static_cast<int>(dw)) % static_cast<int>(dw);
+                    const int ty = ((y % static_cast<int>(dh)) + static_cast<int>(dh)) % static_cast<int>(dh);
+                    const size_t tex = static_cast<size_t>(ty) * dw + tx;
+                    if (dif[tex * 4 + 3] < 128) continue;
+                    float u1 = w0 * A.u1 + w1 * B.u1 + w2 * C.u1;
+                    float v1 = w0 * A.v1 + w1 * B.v1 + w2 * C.v1;
+                    u1 -= std::floor(u1);
+                    v1 -= std::floor(v1);
+                    UINT ppx = static_cast<UINT>(u1 * pw), ppy = static_cast<UINT>(v1 * ph);
+                    if (ppx >= pw) ppx = pw - 1;
+                    if (ppy >= ph) ppy = ph - 1;
+                    const int pidx = static_cast<int>(ppy * pw + ppx);
+                    // Any disagreement about this texel's pattern colour is a conflict between the
+                    // two triangles, whichever of them the rank rule lets win. Recorded as a pair,
+                    // because the tile assignment is a colouring of exactly that graph.
+                    if (record && map[tex] >= 0 && map[tex] != pidx && writer[tex] >= 0 &&
+                        writer[tex] != static_cast<int>(ti)) {
+                        const unsigned char* q0 = &pat[static_cast<size_t>(map[tex]) * 4];
+                        const unsigned char* q1 = &pat[static_cast<size_t>(pidx) * 4];
+                        if (q0[0] != q1[0] || q0[1] != q1[1] || q0[2] != q1[2]) {
+                            ++out.conflicts;
+                            const bool sameSign = (tt[static_cast<size_t>(writer[tex])].area < 0) == (t.area < 0);
+                            if (sameSign) ++out.sameWindingConflicts; else ++out.oppositeWindingConflicts;
+                            if (!out.conflictMap.empty()) out.conflictMap[tex] = sameSign ? 2 : 1;
+                            pairs.push_back(std::make_pair(static_cast<unsigned>(writer[tex]), static_cast<unsigned>(ti)));
+                        }
+                    }
+                    if (map[tex] < 0 || prio[tex] < t.vis) {
+                        map[tex] = pidx;
+                        prio[tex] = t.vis;
+                        if (record) writer[tex] = static_cast<int>(ti);
+                    }
+                }
+        }
+        return true;
+    };
+
+    std::vector<int> pass0;
+    if (!raster(-1, pass0, true)) return false;
+
+    // TILE ASSIGNMENT = A COLOURING OF THE CONFLICT GRAPH. Triangles are the nodes, a recorded
+    // disagreement is an edge, and each triangle in mesh order takes the lowest tile holding no
+    // triangle it disagrees with. Nothing about winding or connectivity is assumed: the bra's
+    // 433 conflicts were 176 between opposite windings and 257 within the same one, so a rule
+    // built on either would have missed most of them. Triangles that disagree with nothing stay
+    // in tile 0 - they agree with everyone about every texel they touch, so any tile is correct
+    // for them - and the seam that leaves between tiles is paid for in duplicated vertices.
+    unsigned tiles = 1;
+    if (g_settings.clothDecalTiles && !pairs.empty()) {
+        std::sort(pairs.begin(), pairs.end());
+        pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+        out.conflictPairs = static_cast<unsigned>(pairs.size());
+        // adjacency, both directions
+        std::vector<std::vector<unsigned>> adj(tt.size());
+        try {
+            for (const auto& p : pairs) { adj[p.first].push_back(p.second); adj[p.second].push_back(p.first); }
+        } catch (...) { return false; }
+        for (size_t ti = 0; ti < tt.size(); ++ti) if (!adj[ti].empty()) ++out.conflictTris;
+        constexpr unsigned kMaxTiles = 4;
+        std::vector<int> assigned(tt.size(), -1);
+        for (size_t ti = 0; ti < tt.size(); ++ti) {
+            bool taken[kMaxTiles] = {false, false, false, false};
+            for (unsigned o : adj[ti]) if (assigned[o] >= 0) taken[assigned[o]] = true;
+            unsigned k = 0;
+            while (k < kMaxTiles - 1 && taken[k]) ++k;
+            assigned[ti] = static_cast<int>(k);
+            tt[ti].tile = static_cast<unsigned char>(k);
+            if (k + 1 > tiles) tiles = k + 1;
+        }
+        // Each tile's visible extent decides how many side-by-side copies of its image it gets:
+        // enough that the panel, shifted to start inside the region, never leaves it. A span of
+        // 0.8 tiles that crosses the wrap seam needs 2 copies; the band and straps in tile 0 may
+        // need more. Cut geometry may wander into any region: every region carries the same
+        // alpha in texture space, so it stays invisible wherever it lands.
+        float minU[kMaxTiles], maxU[kMaxTiles];
+        for (unsigned k = 0; k < kMaxTiles; ++k) { minU[k] = 1e30f; maxU[k] = -1e30f; }
+        for (const T& t : tt) {
+            if (!t.vis) continue;
+            const float u0 = min(vv[t.a].x, min(vv[t.b].x, vv[t.c].x)) / dw;
+            const float u1 = max(vv[t.a].x, max(vv[t.b].x, vv[t.c].x)) / dw;
+            if (u0 < minU[t.tile]) minU[t.tile] = u0;
+            if (u1 > maxU[t.tile]) maxU[t.tile] = u1;
+        }
+        constexpr unsigned kMaxTotalCopies = 12;
+        unsigned total = 0;
+        for (unsigned k = 0; k < tiles; ++k) {
+            const float span = (minU[k] < 1e29f) ? (maxU[k] - minU[k]) : 0.0f;
+            out.copies[k] = static_cast<unsigned>(std::ceil(span)) + 1u;
+            if (out.copies[k] < 1) out.copies[k] = 1;
+            out.offsets[k] = total;
+            total += out.copies[k];
+        }
+        out.totalCopies = total;
+        if (total > kMaxTotalCopies) ++out.seamCrossers;   // a panel too wide to house; refuse
+        if (out.seamCrossers || tiles < 2) tiles = 1;
+        if (tiles > 1) {
+            for (const T& t : tt) ++out.tileTris[t.tile];
+            // Per tile: the shift that puts its visible panel at the start of its region.
+            float shift[kMaxTiles];
+            for (unsigned k = 0; k < kMaxTiles; ++k) {
+                const float m = (minU[k] < 1e29f) ? std::floor(minU[k]) : 0.0f;
+                shift[k] = (static_cast<float>(out.offsets[k]) - m) * 1024.0f;
+            }
+            // Per vertex: the home tile is the lowest tile among its triangles. Any triangle in
+            // another tile references a duplicate carrying that tile's shift instead.
+            std::vector<unsigned char> home;
+            try { home.assign(g_curDrawVertexCount, static_cast<unsigned char>(kMaxTiles)); out.shiftRaw.assign(g_curDrawVertexCount, 0.0f); }
+            catch (...) { return false; }
+            for (const T& t : tt)
+                for (unsigned vi : {t.a, t.b, t.c}) if (t.tile < home[vi]) home[vi] = t.tile;
+            for (unsigned i = 0; i < g_curDrawVertexCount; ++i) {
+                if (home[i] >= kMaxTiles) home[i] = 0;   // referenced by no triangle
+                out.shiftRaw[i] = shift[home[i]];
+            }
+            std::vector<int> dupOf;
+            try { dupOf.assign(static_cast<size_t>(g_curDrawVertexCount) * kMaxTiles, -1); out.listIdx.reserve(tt.size() * 3); }
+            catch (...) { return false; }
+            try {
+                for (const T& t : tt) {
+                    for (unsigned vi : {t.a, t.b, t.c}) {
+                        unsigned ref;
+                        if (t.tile == home[vi]) {
+                            ref = g_curDrawMinIndex + vi;
+                        } else {
+                            int& d = dupOf[static_cast<size_t>(vi) * kMaxTiles + t.tile];
+                            if (d < 0) {
+                                d = static_cast<int>(out.dupSrc.size());
+                                out.dupSrc.push_back(vi);
+                                out.dupShiftRaw.push_back(shift[t.tile]);
+                            }
+                            ref = g_curDrawMinIndex + g_curDrawVertexCount + static_cast<unsigned>(d);
+                        }
+                        out.listIdx.push_back(ref);
+                    }
+                }
+            } catch (...) { return false; }
+            out.dups = static_cast<unsigned>(out.dupSrc.size());
+        }
+    }
+    if (tiles == 1) for (T& t : tt) t.tile = 0;
+    out.tiles = tiles;
+
+    try { out.idx.resize(tiles); } catch (...) { return false; }
+    if (tiles == 1) {
+        out.idx[0].swap(pass0);
+    } else {
+        for (unsigned k = 0; k < tiles; ++k)
+            if (!raster(static_cast<int>(k), out.idx[k], false)) return false;
+    }
+    for (int v : out.idx[0]) if (v >= 0) ++out.written;
+    return out.written > 0;
+}
+
 unsigned g_clothUniformGen = 0, g_clothUniformNotUniform = 0, g_clothUniformNoDiffuse = 0;
 
 // ------------------------------------------------------------------ the player's clothing family
@@ -2490,7 +3001,7 @@ void ReleaseClothCache() {
         if (kv.second.pattern) kv.second.pattern->Release();
         if (kv.second.generated) kv.second.generated->Release();
     }
-    g_clothCache.clear();
+    g_clothCache.clear(); g_clothCutoutTex.clear(); ReleaseClothTileLayouts(); g_clothRemap = nullptr;
 }
 
 // Does this draw sample the PATTERN at a single point?
@@ -2517,6 +3028,16 @@ unsigned g_onePointWhy = 0;
 // nothing, which is the same silence that made "the draw is not converted" look like a finding
 // when the draw was converted all along. A predicate used as a gate has to be able to explain a
 // refusal, or the next step is guesswork again.
+// How this garment's pattern coordinates relate to its albedo coordinates. Measured per draw
+// from the vertex stream; the three answers need three different treatments and conflating them
+// is what stalled the underwear for four builds.
+enum class PatternUv { OnePoint, Affine, Independent };
+
+// Filled when the answer is Affine: uv1_raw = scale*uv0_raw + offset, in RAW SHORT units.
+float g_patScale[2] = {1.0f, 1.0f};
+float g_patOffset[2] = {0.0f, 0.0f};
+PatternUv g_patMode = PatternUv::Independent;
+
 bool ClothPatternIsSampledAtOnePoint(float* outU, float* outV) {
     const bool tell = (g_onePointWhy < 6);
     auto no = [&](const char* why) -> bool {
@@ -2620,6 +3141,24 @@ bool ClothPatternIsSampledAtOnePoint(float* outU, float* outV) {
         }
     }
     g_stream0->Unlock();
+    // Record the fit so the caller can use it. AFFINE with a tiny residual means the pattern
+    // rides the garment's own unwrap and can be resolved in the albedo's texture space with no
+    // mesh at all - garment #1 of the 2026-09-09 run fits u = 1.0000*u0 + 0.0 with a worst
+    // residual of EXACTLY 0.0, i.e. the two uv sets are the same numbers.
+    //
+    // 8 raw short units is the tolerance, which at 1/1024 is under a hundredth of a uv - far
+    // tighter than a pattern texel on any of these maps, so a fit this good cannot be a
+    // coincidence of sampling.
+    g_patMode = PatternUv::Independent;
+    if (constant) {
+        g_patMode = PatternUv::OnePoint;
+    } else if (fitted && worst[0] < 8.0 && worst[1] < 8.0) {
+        g_patMode = PatternUv::Affine;
+        g_patScale[0] = static_cast<float>(fitS[0]);
+        g_patScale[1] = static_cast<float>(fitS[1]);
+        g_patOffset[0] = static_cast<float>(fitO[0]);
+        g_patOffset[1] = static_cast<float>(fitO[1]);
+    }
     if (!constant) {
         if (tell) {
             ++g_onePointWhy;
@@ -2647,6 +3186,9 @@ bool ClothPatternIsSampledAtOnePoint(float* outU, float* outV) {
 }
 
 unsigned g_clothOnePointGen = 0;
+unsigned g_clampReports = 0, g_clampDumps = 0, g_clothAffineGen = 0, g_clothDominantGen = 0;
+unsigned g_clothPadReports = 0;
+unsigned g_genDumps = 0;
 unsigned g_clothNoPattern = 0;
 
 // ------------------------------------------------------------------ hair, for the REAL character
@@ -2782,20 +3324,756 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     // UNIFORM? Every texel the same colour means the lerp chain has one answer for the whole
     // garment. Checked rather than assumed, and a varying pattern is declined here so the CPU
     // baker still owns that case.
+    // THE DIFFUSE IS DECODED HERE, not after the uniformity check.
+    //
+    // It used to be decoded further down, and the report above printed dw/dh before anything had
+    // written them - so every garment was logged as "diffuse 0x0" and the input dump silently
+    // wrote nothing. That is a measurement taken before the thing it measures exists, which is a
+    // failure this file has recorded three times and still committed.
+    if (!TextureToBgra(diffuse, dif, dw, dh) || dif.empty() || !dw || !dh ||
+        dw > 2048 || dh > 2048) {
+        ++g_clothUniformNoDiffuse;
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+
     unsigned char pick[4] = {pat[0], pat[1], pat[2], pat[3]};
+    bool perTexelPattern = false;     // true = evaluate the pattern for EVERY diffuse texel
+    std::vector<int> decalIdx;        // per albedo texel: the pattern texel the mesh puts there, or -1
+    DecalBake decal;                  // the whole bake, including any further tiles
+    // The two garments actually under investigation. A dump budget spent on whichever material
+    // happened to be generated first told me nothing about the bra and the underwear, which is
+    // what the last dump did - six slots, none of them these.
+    bool hardClass = false;
     bool texelUniform = true;
     for (size_t q = 4; q < pat.size(); q += 4)
         if (pat[q] != pat[0] || pat[q + 1] != pat[1] || pat[q + 2] != pat[2]) {
             texelUniform = false; break;
         }
     if (!texelUniform) {
+        // WHAT THE SHADER ACTUALLY DOES WITH THIS ALBEDO, reported here rather than in the API
+        // character collection - the previous copy of this report sat behind remixApiCharacter,
+        // which is now 0, so it could never fire. A diagnostic behind a closed gate is the same
+        // mistake twice.
+        // 16, and it now dumps what it was GIVEN. The user is deliberately reconfiguring the
+        // character to wear a bra as well as the underwear, so this run is the one chance to see
+        // BOTH members of the hard class side by side with their real inputs. Six reports and no
+        // images would waste it.
+        if (g_clampReports < 16) {
+            ++g_clampReports;
+            // WHICHEVER OF THE FOUR EXIST. The first version demanded all four before it
+            // would print anything, so on a shader that declares only ClampU1 and ClampV1 - which
+            // is what ir_sr3pccloth[6], the underwear's own shader, does - it reported "declares
+            // no clamp constants" when two of them were sitting right there. An all-or-nothing
+            // test turning a partial truth into a total absence is the same failure this file
+            // keeps recording.
+            float cl[4] = {0, 0, 0, 0};
+            bool got[4] = {false, false, false, false};
+            int haveCount = 0;
+            for (int i = 0; i < 4; ++i) {
+                const int r = g_curPS.clampReg[i];
+                if (r >= 0 && r < static_cast<int>(kMaxPsConst)) {
+                    cl[i] = g_psConst[r][0];
+                    got[i] = true;
+                    ++haveCount;
+                }
+            }
+            const bool have = (haveCount > 0);
+            char uvmap[200] = {0};
+            int q = 0;
+            for (int st = 0; st < 8 && q < 160; ++st)
+                if (g_curPS.samplerName[st][0])
+                    q += _snprintf_s(uvmap + q, sizeof(uvmap) - q, _TRUNCATE, "s%d=%s<-%s%d%s ",
+                                     st, g_curPS.samplerName[st],
+                                     g_curPS.samplerUv[st] < 0 ? "unknown" : "TEXCOORD",
+                                     g_curPS.samplerUv[st] < 0 ? 0 : g_curPS.samplerUv[st],
+                                     g_curPS.samplerUv[st] < 0 ? ""
+                                         : (g_curPS.samplerUvDirect[st] ? "" : "*traced"));
+            Log("CLOTH SHADER #%u: pattern %ux%u, diffuse %ux%u | %s",
+                g_clampReports, pw, ph, dw, dh, uvmap);
+            // The albedo's own uv range, which is what decides whether the clamp matters at all.
+            // A garment living inside 0..1 is unaffected by pinning; one that leaves it - the
+            // underwear spans -1.07..2.79 - is entirely shaped by it.
+            // Declared out here, not inside the block below, because the DUMP further down
+            // needs the overlay and the block below is where it gets filled in.
+            unsigned long long coverTotal = 0, coverBlack = 0, coverLum = 0;
+            std::vector<unsigned char> cover;
+            // THE REFERENCED SET. Everything above walks [firstVertex, +numVertices), which is
+            // the range the draw PROMISES to stay inside, not the vertices it uses. On a shared
+            // character buffer that range can hold other garments' vertices, whose uv0 belongs
+            // to other textures and lands on this one like noise - which is exactly what the
+            // overlays showed. So walk the index buffer, mark only the vertices it names, and
+            // measure those. The uv1-vs-uv0 relation is re-measured on the same set, because the
+            // INDEPENDENT verdict came from the loose range too and may be an artefact of it.
+            std::vector<unsigned char> coverRef;
+            // THE DECAL'S SPACE. The pattern is sampled at TEXCOORD1 * Pattern_Map_Tiling / 1024
+            // (vs[2]: mul o2.xy, r2, c1.x with r2 = c6/c7 * v4), wrapped. A texture baked in THAT
+            // space would carry the decal exactly - if it can also carry the cutout, which lives
+            // in uv0. It can only if no wrapped uv1 cell is shared by a VISIBLE surface point and a
+            // CUT one. Count that, on the vertices the draw uses, before designing a bake on it.
+            std::vector<unsigned char> uv1Over;     // pattern x4, visible=green, cut=red
+            unsigned uv1Vis = 0, uv1Cut = 0, uv1CellsVis = 0, uv1CellsCut = 0, uv1CellsBoth = 0,
+                     uv1VisInSharedCell = 0;
+            float uv1Lo0 = 1e30f, uv1Hi0 = -1e30f, uv1Lo1 = 1e30f, uv1Hi1 = -1e30f;
+            float patTileU = 1.0f, patTileV = 1.0f;
+            bool patTileFound = false;
+            for (int t = 0; t < g_curVS.tilingCount; ++t)
+                if (!_stricmp(g_curVS.tiling[t].base, "Pattern_Map")) {
+                    const int ur = g_curVS.tiling[t].uReg, vr = g_curVS.tiling[t].vReg;
+                    if (ur >= 0 && ur < static_cast<int>(kMaxVsConst)) patTileU = g_vsConst[ur][0];
+                    if (vr >= 0 && vr < static_cast<int>(kMaxVsConst)) patTileV = g_vsConst[vr][0];
+                    patTileFound = true;
+                    break;
+                }
+            std::vector<unsigned char> uv1CellVis, uv1CellCut;   // 64x64 occupancy, per class
+            unsigned refIndices = 0, refDistinct = 0, refOutside = 0, refBlack = 0;
+            unsigned refIdxMin = 0xFFFFFFFFu, refIdxMax = 0;
+            unsigned long long refLum = 0;
+            unsigned uvSame = 0, uvMaxDiff = 0;
+            float fitS[2] = {0, 0}, fitO[2] = {0, 0}, fitWorst[2] = {0, 0};
+            bool fitOk[2] = {false, false};
+            bool refDone = false;
+            // THE SCAN. TEXCOORD0 lands two thirds of the underwear's vertices in the black, so
+            // the diffuse is fetched through some OTHER element of the vertex on this garment.
+            // Rather than guess which - "it must be TEXCOORD1" is exactly the kind of guess that
+            // has cost runs here - try every short2 the stride can hold and report the ones that
+            // land on the islands. The element that IS the albedo unwrap has near-zero black.
+            struct UvCandidate { UINT offset; float blackPct, meanLum, lo0, hi0, lo1, hi1; };
+            UvCandidate best[3] = {{0, 101.0f, 0, 0, 0, 0, 0}, {0, 101.0f, 0, 0, 0, 0, 0},
+                                   {0, 101.0f, 0, 0, 0, 0, 0}};
+            {
+                float lo0 = 1e30f, hi0 = -1e30f, lo1 = 1e30f, hi1 = -1e30f;
+                bool measured = false;
+                // WHERE THE MESH ACTUALLY LANDS, not merely how far its uv ranges.
+                //
+                // The range alone said "u -0.988..2.744, so it leaves 0..1" and every conclusion
+                // drawn from that was wrong, because the sampler WRAPS: a uv of 2.744 is a uv of
+                // 0.744 and lands on the map like any other. A bounding box cannot distinguish a
+                // mesh whose islands sit neatly on the diffuse's islands from one that samples
+                // the empty space between them, and that distinction is the whole question for
+                // the bra and the underwear - whose diffuse maps are 88.7% and 73.7% black.
+                //
+                // So: wrap every vertex's uv the way the sampler does, look up the texel it
+                // reaches, and count how many of them are black. That is a statement about the
+                // RESULT. If it comes back near zero the mesh never touches the empty space and
+                // the black squares have some other cause entirely; if it is large the padding
+                // work was aimed at the right place after all.
+                if (g_curLayout.texcoordOffset >= 0 &&
+                    g_curLayout.texcoordType == D3DDECLTYPE_SHORT2 && g_stream0 &&
+                    g_stream0Stride && g_curDrawVertexCount >= 4 &&
+                    VertexRangeFits(g_stream0, g_stream0Offset, g_curDrawFirstVertex,
+                                    g_curDrawVertexCount, g_stream0Stride)) {
+                    void* m = nullptr;
+                    if (SUCCEEDED(g_stream0->Lock(
+                            g_stream0Offset + g_curDrawFirstVertex * g_stream0Stride,
+                            g_curDrawVertexCount * g_stream0Stride, &m,
+                            D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) && m) {
+                        const unsigned char* b = static_cast<const unsigned char*>(m);
+                        const UINT o0 = static_cast<UINT>(g_curLayout.texcoordOffset);
+                        // The RANGE is still stepped - 32 samples bound a box perfectly well.
+                        // The COVERAGE below is not: it walks every vertex, because a mesh can
+                        // put a handful of stray islands in the empty space and a 1-in-32 sample
+                        // would miss exactly that.
+                        const UINT stp = g_curDrawVertexCount / 32 ? g_curDrawVertexCount / 32 : 1;
+                        for (UINT i = 0; i < g_curDrawVertexCount; i += stp) {
+                            const short* p2 =
+                                reinterpret_cast<const short*>(b + i * g_stream0Stride + o0);
+                            const float u = p2[0] * kShortUVScale, v = p2[1] * kShortUVScale;
+                            if (u < lo0) lo0 = u;
+                            if (u > hi0) hi0 = u;
+                            if (v < lo1) lo1 = v;
+                            if (v > hi1) hi1 = v;
+                        }
+                        if (!dif.empty() && dw && dh &&
+                            dif.size() >= static_cast<size_t>(dw) * dh * 4) {
+                            try { cover = dif; } catch (...) { cover.clear(); }
+                            for (UINT i = 0; i < g_curDrawVertexCount; ++i) {
+                                const short* p2 =
+                                    reinterpret_cast<const short*>(b + i * g_stream0Stride + o0);
+                                float u = p2[0] * kShortUVScale, v = p2[1] * kShortUVScale;
+                                u -= std::floor(u);          // exactly what ADDRESS_WRAP does
+                                v -= std::floor(v);
+                                UINT tx = static_cast<UINT>(u * dw);
+                                UINT ty = static_cast<UINT>(v * dh);
+                                if (tx >= dw) tx = dw - 1;
+                                if (ty >= dh) ty = dh - 1;
+                                const size_t t = (static_cast<size_t>(ty) * dw + tx) * 4;
+                                const unsigned bb = dif[t], gg = dif[t + 1], rr = dif[t + 2];
+                                ++coverTotal;
+                                if (rr <= 8 && gg <= 8 && bb <= 8) ++coverBlack;
+                                coverLum += (rr * 77 + gg * 151 + bb * 28) >> 8;
+                                // Mark it RED in the overlay. Red on black is a vertex that
+                                // reached the empty space; pink on white is one that landed on
+                                // an island. One picture, no interpretation needed.
+                                if (!cover.empty()) {
+                                    cover[t] = 0;
+                                    cover[t + 1] = 0;
+                                    cover[t + 2] = 255;
+                                }
+                            }
+                            // ---- the index buffer: which of these vertices does the draw use?
+                            if (g_curDrawIndexed && g_curDrawPrimCount &&
+                                (g_curDrawPrimType == D3DPT_TRIANGLELIST ||
+                                 g_curDrawPrimType == D3DPT_TRIANGLESTRIP)) {
+                                const UINT nIdx = (g_curDrawPrimType == D3DPT_TRIANGLESTRIP)
+                                                      ? g_curDrawPrimCount + 2
+                                                      : g_curDrawPrimCount * 3;
+                                std::vector<unsigned> idx;
+                                IDirect3DIndexBuffer9* ib = nullptr;
+                                const bool wasInt = g_internal;
+                                g_internal = true;
+                                if (SUCCEEDED(dev->GetIndices(&ib)) && ib) {
+                                    D3DINDEXBUFFER_DESC ibd{};
+                                    void* im = nullptr;
+                                    if (SUCCEEDED(ib->GetDesc(&ibd)) && ibd.Size) {
+                                        const UINT isz = (ibd.Format == D3DFMT_INDEX32) ? 4 : 2;
+                                        const UINT byteStart = g_curDrawStartIndex * isz;
+                                        const UINT byteLen = nIdx * isz;
+                                        if (byteStart + byteLen <= ibd.Size &&
+                                            SUCCEEDED(ib->Lock(byteStart, byteLen, &im,
+                                                               D3DLOCK_READONLY)) && im) {
+                                            try {
+                                                idx.resize(nIdx);
+                                                for (UINT i = 0; i < nIdx; ++i)
+                                                    idx[i] = (isz == 4)
+                                                        ? static_cast<const unsigned*>(im)[i]
+                                                        : static_cast<const unsigned short*>(im)[i];
+                                            } catch (...) { idx.clear(); }
+                                            ib->Unlock();
+                                        }
+                                    }
+                                    ib->Release();
+                                }
+                                g_internal = wasInt;
+                                if (!idx.empty()) {
+                                    std::vector<unsigned char> used;
+                                    try {
+                                        used.assign(g_curDrawVertexCount, 0);
+                                        coverRef = dif;
+                                    } catch (...) { used.clear(); coverRef.clear(); }
+                                    if (!used.empty()) {
+                                        refIndices = static_cast<unsigned>(idx.size());
+                                        for (unsigned v : idx) {
+                                            if (v < refIdxMin) refIdxMin = v;
+                                            if (v > refIdxMax) refIdxMax = v;
+                                            // absolute vertex = baseVertex + index; our window
+                                            // starts at baseVertex + minIndex
+                                            const long long abs =
+                                                static_cast<long long>(g_curDrawBaseVertex) + v;
+                                            const long long rel =
+                                                abs - static_cast<long long>(g_curDrawFirstVertex);
+                                            if (rel < 0 || rel >= g_curDrawVertexCount) { ++refOutside; continue; }
+                                            used[static_cast<size_t>(rel)] = 1;
+                                        }
+                                        // Coverage, on the referenced vertices only.
+                                        double sx[2] = {0, 0}, sy[2] = {0, 0}, sxx[2] = {0, 0}, sxy[2] = {0, 0};
+                                        const UINT o1 = (g_curLayout.texcoord1Offset >= 0)
+                                                            ? static_cast<UINT>(g_curLayout.texcoord1Offset)
+                                                            : 0xFFFFFFFFu;
+                                        const bool haveUv1 = (o1 != 0xFFFFFFFFu) &&
+                                                             (o1 + 4 <= g_stream0Stride);
+                                        try {
+                                            uv1CellVis.assign(64 * 64, 0);
+                                            uv1CellCut.assign(64 * 64, 0);
+                                            if (!pat.empty() && pw && ph) {
+                                                uv1Over.assign(static_cast<size_t>(pw) * 4 * ph * 4 * 4, 0);
+                                                for (UINT y = 0; y < ph * 4; ++y)
+                                                    for (UINT x = 0; x < pw * 4; ++x)
+                                                        memcpy(&uv1Over[(static_cast<size_t>(y) * pw * 4 + x) * 4],
+                                                               &pat[(static_cast<size_t>(y / 4) * pw + x / 4) * 4], 4);
+                                            }
+                                        } catch (...) { uv1CellVis.clear(); uv1CellCut.clear(); uv1Over.clear(); }
+                                        for (UINT i = 0; i < g_curDrawVertexCount; ++i) {
+                                            if (!used[i]) continue;
+                                            ++refDistinct;
+                                            const short* p2 = reinterpret_cast<const short*>(
+                                                b + i * g_stream0Stride + o0);
+                                            float u = p2[0] * kShortUVScale, v = p2[1] * kShortUVScale;
+                                            u -= std::floor(u);
+                                            v -= std::floor(v);
+                                            UINT tx = static_cast<UINT>(u * dw);
+                                            UINT ty = static_cast<UINT>(v * dh);
+                                            if (tx >= dw) tx = dw - 1;
+                                            if (ty >= dh) ty = dh - 1;
+                                            const size_t t = (static_cast<size_t>(ty) * dw + tx) * 4;
+                                            const unsigned bb = dif[t], gg = dif[t + 1], rr = dif[t + 2];
+                                            if (rr <= 8 && gg <= 8 && bb <= 8) ++refBlack;
+                                            refLum += (rr * 77 + gg * 151 + bb * 28) >> 8;
+                                            if (!coverRef.empty()) {
+                                                coverRef[t] = 0; coverRef[t + 1] = 0; coverRef[t + 2] = 255;
+                                            }
+                                            if (haveUv1) {
+                                                const short* q2 = reinterpret_cast<const short*>(
+                                                    b + i * g_stream0Stride + o1);
+                                                // uv1 the way the shader computes it, wrapped
+                                                if (!uv1CellVis.empty()) {
+                                                    const bool visible = dif[t + 3] >= 128;
+                                                    float pu = q2[0] * kShortUVScale * patTileU;
+                                                    float pv = q2[1] * kShortUVScale * patTileV;
+                                                    if (pu < uv1Lo0) uv1Lo0 = pu;
+                                                    if (pu > uv1Hi0) uv1Hi0 = pu;
+                                                    if (pv < uv1Lo1) uv1Lo1 = pv;
+                                                    if (pv > uv1Hi1) uv1Hi1 = pv;
+                                                    pu -= std::floor(pu);
+                                                    pv -= std::floor(pv);
+                                                    UINT cx = static_cast<UINT>(pu * 64), cy = static_cast<UINT>(pv * 64);
+                                                    if (cx >= 64) cx = 63;
+                                                    if (cy >= 64) cy = 63;
+                                                    (visible ? uv1CellVis : uv1CellCut)[cy * 64 + cx] = 1;
+                                                    if (visible) ++uv1Vis; else ++uv1Cut;
+                                                    if (!uv1Over.empty()) {
+                                                        UINT ox = static_cast<UINT>(pu * pw * 4), oy = static_cast<UINT>(pv * ph * 4);
+                                                        if (ox >= pw * 4) ox = pw * 4 - 1;
+                                                        if (oy >= ph * 4) oy = ph * 4 - 1;
+                                                        unsigned char* d4 = &uv1Over[(static_cast<size_t>(oy) * pw * 4 + ox) * 4];
+                                                        d4[0] = 0; d4[1] = visible ? 255 : 0; d4[2] = visible ? 0 : 255; d4[3] = 255;
+                                                    }
+                                                }
+                                                for (int a = 0; a < 2; ++a) {
+                                                    const int d0 = p2[a], d1 = q2[a];
+                                                    const unsigned dd = static_cast<unsigned>(
+                                                        d1 > d0 ? d1 - d0 : d0 - d1);
+                                                    if (dd > uvMaxDiff) uvMaxDiff = dd;
+                                                    sx[a] += d0; sy[a] += d1;
+                                                    sxx[a] += static_cast<double>(d0) * d0;
+                                                    sxy[a] += static_cast<double>(d0) * d1;
+                                                }
+                                                if (p2[0] == q2[0] && p2[1] == q2[1]) ++uvSame;
+                                            }
+                                        }
+                                        // Least-squares uv1 = s*uv0 + o per axis, over the same
+                                        // set, with the worst residual - the number that decided
+                                        // INDEPENDENT before, now on vertices this draw uses.
+                                        if (haveUv1 && refDistinct >= 8) {
+                                            const double n = refDistinct;
+                                            for (int a = 0; a < 2; ++a) {
+                                                const double var = sxx[a] - sx[a] * sx[a] / n;
+                                                if (var <= 1e-6) continue;
+                                                fitS[a] = static_cast<float>((sxy[a] - sx[a] * sy[a] / n) / var);
+                                                fitO[a] = static_cast<float>(sy[a] / n - fitS[a] * sx[a] / n);
+                                                fitOk[a] = true;
+                                            }
+                                            for (UINT i = 0; i < g_curDrawVertexCount; ++i) {
+                                                if (!used[i]) continue;
+                                                const short* p2 = reinterpret_cast<const short*>(
+                                                    b + i * g_stream0Stride + o0);
+                                                const short* q2 = reinterpret_cast<const short*>(
+                                                    b + i * g_stream0Stride + o1);
+                                                for (int a = 0; a < 2; ++a) {
+                                                    if (!fitOk[a]) continue;
+                                                    const float r = std::fabs(q2[a] - (fitS[a] * p2[a] + fitO[a]));
+                                                    if (r > fitWorst[a]) fitWorst[a] = r;
+                                                }
+                                            }
+                                        }
+                                        if (!uv1CellVis.empty()) {
+                                            for (size_t c2 = 0; c2 < 64 * 64; ++c2) {
+                                                if (uv1CellVis[c2] && uv1CellCut[c2]) ++uv1CellsBoth;
+                                                else if (uv1CellVis[c2]) ++uv1CellsVis;
+                                                else if (uv1CellCut[c2]) ++uv1CellsCut;
+                                            }
+                                            // second pass: visible vertices sitting in a shared cell
+                                            for (UINT i = 0; i < g_curDrawVertexCount; ++i) {
+                                                if (!used[i]) continue;
+                                                const short* p2 = reinterpret_cast<const short*>(b + i * g_stream0Stride + o0);
+                                                float u = p2[0] * kShortUVScale, v = p2[1] * kShortUVScale;
+                                                u -= std::floor(u); v -= std::floor(v);
+                                                UINT tx = static_cast<UINT>(u * dw), ty = static_cast<UINT>(v * dh);
+                                                if (tx >= dw) tx = dw - 1;
+                                                if (ty >= dh) ty = dh - 1;
+                                                if (dif[(static_cast<size_t>(ty) * dw + tx) * 4 + 3] < 128) continue;
+                                                const short* q2 = reinterpret_cast<const short*>(b + i * g_stream0Stride + o1);
+                                                float pu = q2[0] * kShortUVScale * patTileU, pv = q2[1] * kShortUVScale * patTileV;
+                                                pu -= std::floor(pu); pv -= std::floor(pv);
+                                                UINT cx = static_cast<UINT>(pu * 64), cy = static_cast<UINT>(pv * 64);
+                                                if (cx >= 64) cx = 63;
+                                                if (cy >= 64) cy = 63;
+                                                if (uv1CellCut[cy * 64 + cx]) ++uv1VisInSharedCell;
+                                            }
+                                        }
+                                        refDone = true;
+                                    }
+                                }
+                            }
+                            // Every short2 the stride can hold, at the confirmed 1/1024. The
+                            // position and normal are not short2 and will score badly; that is
+                            // fine, the scan is ranked and only the top three are reported.
+                            for (UINT o = 0; o + 4 <= g_stream0Stride; o += 2) {
+                                unsigned long long nb = 0, lum = 0;
+                                float clo0 = 1e30f, chi0 = -1e30f, clo1 = 1e30f, chi1 = -1e30f;
+                                for (UINT i = 0; i < g_curDrawVertexCount; ++i) {
+                                    const short* p2 = reinterpret_cast<const short*>(
+                                        b + i * g_stream0Stride + o);
+                                    float u = p2[0] * kShortUVScale, v = p2[1] * kShortUVScale;
+                                    if (u < clo0) clo0 = u;
+                                    if (u > chi0) chi0 = u;
+                                    if (v < clo1) clo1 = v;
+                                    if (v > chi1) chi1 = v;
+                                    u -= std::floor(u);
+                                    v -= std::floor(v);
+                                    UINT tx = static_cast<UINT>(u * dw);
+                                    UINT ty = static_cast<UINT>(v * dh);
+                                    if (tx >= dw) tx = dw - 1;
+                                    if (ty >= dh) ty = dh - 1;
+                                    const size_t t = (static_cast<size_t>(ty) * dw + tx) * 4;
+                                    const unsigned bb = dif[t], gg = dif[t + 1], rr = dif[t + 2];
+                                    if (rr <= 8 && gg <= 8 && bb <= 8) ++nb;
+                                    lum += (rr * 77 + gg * 151 + bb * 28) >> 8;
+                                }
+                                UvCandidate c{o, nb * 100.0f / g_curDrawVertexCount,
+                                              lum / static_cast<float>(g_curDrawVertexCount),
+                                              clo0, chi0, clo1, chi1};
+                                for (int k = 0; k < 3; ++k) {
+                                    if (c.blackPct < best[k].blackPct) {
+                                        for (int j = 2; j > k; --j) best[j] = best[j - 1];
+                                        best[k] = c;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        g_stream0->Unlock();
+                        measured = true;
+                    }
+                }
+                if (measured) {
+                    // No verdict appended. The earlier version of this line ended in "so the
+                    // clamp shapes this garment", which was a conclusion the measurement had not
+                    // reached and which turned out to be false - the clamp constants are zero and
+                    // the shader's cmp selects the UNCLAMPED coordinate. State the numbers.
+                    Log("      albedo uv (TEXCOORD0 * 1/1024): u %.3f..%.3f  v %.3f..%.3f  "
+                        "(the sampler WRAPS, so a uv of 2.744 reaches the same texel as 0.744)",
+                        lo0, hi0, lo1, hi1);
+                    if (coverTotal) {
+                        Log("      COVERAGE: of %llu vertices, %llu (%.1f%%) land on a texel that "
+                            "is BLACK in the diffuse; mean luminance of the texels reached is "
+                            "%.1f of 255.",
+                            coverTotal, coverBlack,
+                            coverBlack * 100.0 / static_cast<double>(coverTotal),
+                            coverLum / static_cast<double>(coverTotal));
+                        for (int k = 0; k < 3; ++k) {
+                            if (best[k].blackPct > 100.0f) break;
+                            const char* label =
+                                (static_cast<int>(best[k].offset) == g_curLayout.texcoordOffset)
+                                    ? " = TEXCOORD0"
+                                : (static_cast<int>(best[k].offset) == g_curLayout.texcoord1Offset)
+                                    ? " = TEXCOORD1"
+                                    : "";
+                            Log("      SCAN #%d: short2 at vertex offset %u%s -> %.1f%% on black, "
+                                "mean lum %.1f | range u %.3f..%.3f v %.3f..%.3f  (stride %u)",
+                                k + 1, best[k].offset, label, best[k].blackPct, best[k].meanLum,
+                                best[k].lo0, best[k].hi0, best[k].lo1, best[k].hi1,
+                                g_stream0Stride);
+                        }
+                    }
+                    if (refDone) {
+                        Log("      INDEX RANGE: %s base=%d minIndex=%u numVertices=%u startIndex=%u "
+                            "prims=%u -> %u indices name %u DISTINCT vertices (index span %u..%u); "
+                            "%u indices fell outside the numVertices window",
+                            (g_curDrawPrimType == D3DPT_TRIANGLESTRIP) ? "STRIP" : "LIST",
+                            g_curDrawBaseVertex, g_curDrawMinIndex, g_curDrawVertexCount,
+                            g_curDrawStartIndex, g_curDrawPrimCount, refIndices, refDistinct,
+                            refIdxMin, refIdxMax, refOutside);
+                        if (refDistinct)
+                            Log("      COVERAGE (REFERENCED ONLY): of %u distinct vertices this draw "
+                                "uses, %u (%.1f%%) land on BLACK; mean luminance %.1f of 255. "
+                                "The range walk above said %.1f%%.",
+                                refDistinct, refBlack, refBlack * 100.0 / refDistinct,
+                                refLum / static_cast<double>(refDistinct),
+                                coverTotal ? coverBlack * 100.0 / static_cast<double>(coverTotal) : 0.0);
+                        if (fitOk[0] || fitOk[1])
+                            Log("      UV1 vs UV0 (REFERENCED ONLY): identical on %u of %u vertices, "
+                                "max |uv1-uv0| = %u raw | fit u1 = %.4f*u0 %+.1f (worst %.1f), "
+                                "v1 = %.4f*v0 %+.1f (worst %.1f)  [raw shorts; 1024 = one tile]",
+                                uvSame, refDistinct, uvMaxDiff,
+                                fitS[0], fitO[0], fitWorst[0], fitS[1], fitO[1], fitWorst[1]);
+                    } else if (g_curDrawIndexed) {
+                        Log("      INDEX RANGE: could not read the index buffer for this draw "
+                            "(type %d, prims %u) - the referenced-only numbers are absent, not zero",
+                            static_cast<int>(g_curDrawPrimType), g_curDrawPrimCount);
+                    }
+                    if (refDone && (uv1Vis || uv1Cut)) {
+                        Log("      DECAL SPACE: Pattern_Map_Tiling %s(%.3f, %.3f) | uv1*tiling/1024 "
+                            "spans u %.3f..%.3f v %.3f..%.3f (%.1f x %.1f tiles) | %u visible + %u cut "
+                            "vertices | of the 64x64 wrapped cells they touch: %u visible-only, %u "
+                            "cut-only, %u BOTH | %u of the %u visible vertices share a cell with a "
+                            "cut one -> %s",
+                            patTileFound ? "" : "(not declared, assumed 1) ", patTileU, patTileV,
+                            uv1Lo0, uv1Hi0, uv1Lo1, uv1Hi1, uv1Hi0 - uv1Lo0, uv1Hi1 - uv1Lo1,
+                            uv1Vis, uv1Cut, uv1CellsVis, uv1CellsCut, uv1CellsBoth,
+                            uv1VisInSharedCell, uv1Vis,
+                            uv1CellsBoth == 0
+                                ? "a uv1-space bake can carry the cutout with NO conflict"
+                                : (uv1VisInSharedCell * 10 < uv1Vis
+                                       ? "a uv1-space bake keeps the cutout except at these few"
+                                       : "the cutout cannot be expressed in uv1 space; it must stay on uv0"));
+                    }
+                    // THE ALPHA SIDE, which is where the answer turned out to live. The
+                    // diffuse's real transparency (after the decoder fix this is the texture's
+                    // own 1-bit alpha, not a fabricated 255), the format it arrived in, the
+                    // Tint_color alpha the shader multiplies in, and the blend/test state the
+                    // game draws this garment with.
+                    {
+                        size_t a0 = 0;
+                        for (size_t i = 0; i + 3 < dif.size(); i += 4) if (dif[i + 3] < 128) ++a0;
+                        int fmt = -1;
+                        if (g_curPS.albedoStage >= 0 && g_curPS.albedoStage < 8 &&
+                            g_curTexture[g_curPS.albedoStage] &&
+                            g_curTexture[g_curPS.albedoStage]->GetType() == D3DRTYPE_TEXTURE) {
+                            D3DSURFACE_DESC sd{};
+                            if (SUCCEEDED(static_cast<IDirect3DTexture9*>(
+                                              g_curTexture[g_curPS.albedoStage])->GetLevelDesc(0, &sd)))
+                                fmt = static_cast<int>(sd.Format);
+                        }
+                        const float tintA = (g_curPS.tintColorReg >= 0 &&
+                                             g_curPS.tintColorReg < static_cast<int>(kMaxPsConst))
+                                                ? g_psConst[g_curPS.tintColorReg][3] : -1.0f;
+                        float dc[4] = {1, 1, 1, 1};
+                        if (g_curPS.diffuseColorMulReg >= 0 &&
+                            g_curPS.diffuseColorMulReg < static_cast<int>(kMaxPsConst))
+                            memcpy(dc, g_psConst[g_curPS.diffuseColorMulReg], 16);
+                        const float* tc = (g_curPS.tintColorReg >= 0 &&
+                                           g_curPS.tintColorReg < static_cast<int>(kMaxPsConst))
+                                              ? g_psConst[g_curPS.tintColorReg] : nullptr;
+                        Log("      ALPHA: diffuse fmt=%d (DXT1=827611204 DXT5=894720068 ARGB=21) | "
+                            "%.1f%% of its texels are transparent (alpha < 128) | Tint_color (%.3f "
+                            "%.3f %.3f %.3f) | Diffuse_Color c14 (%.3f %.3f %.3f %.3f) "
+                            "| game state: alphaBlend=%lu src=%lu dst=%lu alphaTest=%lu ref=%lu "
+                            "func=%lu",
+                            fmt, dif.empty() ? 0.0 : a0 * 100.0 / (dif.size() / 4),
+                            tc ? tc[0] : -1.0f, tc ? tc[1] : -1.0f, tc ? tc[2] : -1.0f, tintA,
+                            dc[0], dc[1], dc[2], dc[3],
+                            static_cast<unsigned long>(ShadowGetRS(dev, D3DRS_ALPHABLENDENABLE)),
+                            static_cast<unsigned long>(ShadowGetRS(dev, D3DRS_SRCBLEND)),
+                            static_cast<unsigned long>(ShadowGetRS(dev, D3DRS_DESTBLEND)),
+                            static_cast<unsigned long>(ShadowGetRS(dev, D3DRS_ALPHATESTENABLE)),
+                            static_cast<unsigned long>(ShadowGetRS(dev, D3DRS_ALPHAREF)),
+                            static_cast<unsigned long>(ShadowGetRS(dev, D3DRS_ALPHAFUNC)));
+                    }
+                    // WHICH SHADERS, by bytecode size. The cloth family's vertex shader
+                    // permutations are all different sizes (ir_sr3pccloth_c: 2032/1784/2340,
+                    // _s: 1364/1116/1688, _bs: 1296/1044/1636, _mc: 2132/1884/2440, and the
+                    // ir_at_ variants differ again), so the size alone names the file AND the
+                    // permutation, and the disassembly can then be read for the right one
+                    // instead of the one that happened to be opened first.
+                    {
+                        UINT vsz = 0, psz = 0;
+                        if (g_lastVS) g_lastVS->GetFunction(nullptr, &vsz);
+                        if (g_lastPS) g_lastPS->GetFunction(nullptr, &psz);
+                        Log("      BOUND SHADERS: vertex %u bytes, pixel %u bytes | diffuse %s",
+                            vsz, psz,
+                            (g_curPS.albedoStage >= 0 && g_curPS.albedoStage < 8 &&
+                             g_curTexture[g_curPS.albedoStage] &&
+                             g_rtTextures.count(g_curTexture[g_curPS.albedoStage]))
+                                ? "IS a render target" : "is a plain texture");
+                    }
+                }
+            }
+            // AND THE INPUTS THEMSELVES. Reasoning about these from a mean lost every time it was
+            // tried; looking at them is what worked.
+            if (g_clampDumps < 8) {
+                ++g_clampDumps;
+                char ddir[MAX_PATH] = {0};
+                GetModuleFileNameA(GetModuleHandleW(nullptr), ddir, MAX_PATH);
+                char* dsl = strrchr(ddir, 0x5C);
+                if (dsl) *(dsl + 1) = 0;
+                char dpath[MAX_PATH];
+                sprintf_s(dpath, "%ssr3-remix-hard-%u-pattern.dds", ddir, g_clampDumps);
+                if (WriteBgraDds(dpath, pw, ph, pat.data()))
+                    Log("      INPUT pattern -> %s", dpath);
+                if (!dif.empty() && dw && dh) {
+                    sprintf_s(dpath, "%ssr3-remix-hard-%u-diffuse.dds", ddir, g_clampDumps);
+                    if (WriteBgraDds(dpath, dw, dh, dif.data()))
+                        Log("      INPUT diffuse -> %s", dpath);
+                }
+                // The coverage overlay. Looking at this beside the diffuse is what a percentage
+                // cannot give: WHERE the strays are, and whether they form the squares the user
+                // sees or are scattered noise.
+                if (!cover.empty() && dw && dh) {
+                    sprintf_s(dpath, "%ssr3-remix-hard-%u-coverage.dds", ddir, g_clampDumps);
+                    if (WriteBgraDds(dpath, dw, dh, cover.data()))
+                        Log("      COVERAGE overlay (red = a vertex reached this texel) -> %s",
+                            dpath);
+                }
+                if (!coverRef.empty() && dw && dh) {
+                    sprintf_s(dpath, "%ssr3-remix-hard-%u-coverage-ref.dds", ddir, g_clampDumps);
+                    if (WriteBgraDds(dpath, dw, dh, coverRef.data()))
+                        Log("      COVERAGE overlay, REFERENCED vertices only -> %s", dpath);
+                }
+                if (!uv1Over.empty() && pw && ph) {
+                    sprintf_s(dpath, "%ssr3-remix-hard-%u-uv1.dds", ddir, g_clampDumps);
+                    if (WriteBgraDds(dpath, pw * 4, ph * 4, uv1Over.data()))
+                        Log("      DECAL SPACE overlay (pattern x4; green = visible vertex, red = cut) -> %s",
+                            dpath);
+                }
+            }
+            if (have) {
+                // WHAT THE CONSTANTS MEAN, decoded from ir_sr3pccloth_c ps[6] rather than
+                // assumed from their names. The shader does NOT simply pin the coordinate:
+                //
+                //   add r0.w, r1.x, -c13.x      ; r1.x is 1.0 (mov r1.xz, c6 ; c6.x = 1)
+                //   mul r2.w, r0.w, c9.y        ; c9.y = 512
+                //   mad r0.w, r0.w, c9.y, c9.z  ; c9.z = 1
+                //   max r3.x, v5.y, -r2.w       ; window is [-(1-ClampV1)*512, (1-ClampV1)*512+1]
+                //   min r2.w, r0.w, r3.x
+                //   abs r0.w, c13.x
+                //   cmp r3.y, -r0.w, v5.y, r2.w ; ClampV1 == 0 -> take v5.y UNCLAMPED
+                //
+                // So ClampV1 = 0 disables the V clamp outright, and ClampU1 = 0 opens the U
+                // window to [-512, 513], which no uv in this game leaves. Both read 0.00000 at
+                // runtime for the player's clothing. The game is NOT pinning anything here; it
+                // falls through to the sampler, which the INHERITED probe above measures as
+                // WRAP - the same thing the conversion path does.
+                //
+                // The previous version of this line asserted the opposite as a fact and sent the
+                // work after a clamp that was never active.
+                // The windows themselves, not a verdict. U is always pinned to its window; V is
+                // bypassed outright when ClampV1 is exactly zero. A window of [-512, 513] is no
+                // clamp in practice; one of [0, 1] is ADDRESS_CLAMP.
+                const float uPad = (1.0f - cl[0]) * 512.0f;
+                const float vPad = (1.0f - cl[1]) * 512.0f;
+                char vwin[48];
+                if (got[1] && cl[1] == 0.0f) strcpy_s(vwin, "V bypassed (ClampV1 == 0)");
+                else sprintf_s(vwin, "V [%.1f, %.1f]", -vPad, vPad + 1.0f);
+                Log("      CLAMP on the albedo (%d of 4 declared): ClampU1 %s%.5f  ClampV1 %s%.5f "
+                    "ClampU2 %s%.5f  ClampV2 %s%.5f  -> windows: U [%.1f, %.1f], %s",
+                    haveCount,
+                    got[0] ? "" : "(absent) ", cl[0], got[1] ? "" : "(absent) ", cl[1],
+                    got[2] ? "" : "(absent) ", cl[2], got[3] ? "" : "(absent) ", cl[3],
+                    -uPad, uPad + 1.0f, vwin);
+            } else
+                Log("      this shader declares no ClampU1/V1/U2/V2 - the albedo is not sampled "
+                    "through a window here");
+        }
         // Not uniform as a TEXTURE - but does this garment read more than one texel of it?
         float pu = 0.0f, pv = 0.0f;
         if (!ClothPatternIsSampledAtOnePoint(&pu, &pv)) {
-            ++g_clothUniformNotUniform;
-            g_clothCache[key] = ClothTex{nullptr, nullptr};
-            return nullptr;
+            if (g_patMode != PatternUv::Affine) {
+                // TWO INDEPENDENT UNWRAPS. This is a real structural limit, not a missing trick.
+                //
+                // The albedo is a tiling detail map on TEXCOORD0 - the underwear's spans about
+                // 3.7 tiles, and the game samples it with ADDRESS_WRAP, measured from the
+                // sampler state (addressU=1), not assumed. The pattern is a DECAL placed
+                // independently on TEXCOORD1: a cat face on the underwear, a star on the bra.
+                //
+                // So one albedo texel is visited by many surface points carrying different
+                // pattern colours, and NO single texture in the albedo's space can hold that.
+                // Folding them is not hard, it is impossible.
+                //
+                // What IS true is that the decal is small and the pattern's background covers
+                // most of the garment - which is why the unmodded bra reads as one magenta with
+                // a star on it, not as a two-colour object. Taking the pattern's DOMINANT texel
+                // gets the garment's colour right and loses the decal.
+                //
+                // That is an approximation and is named as one in the log. It replaces showing
+                // the raw untinted diffuse, which is white, and is wrong in every respect rather
+                // than one.
+                if (!g_settings.clothDominantPattern) {
+                    ++g_clothUniformNotUniform;
+                    g_clothCache[key] = ClothTex{nullptr, nullptr};
+                    return nullptr;
+                }
+                unsigned best = 0, bestCount = 0;
+                {
+                    // Most frequent texel, counted on a 5-bit-per-channel quantisation so that
+                    // filtering noise inside one flat region does not split its own vote.
+                    static unsigned hist[32768];
+                    memset(hist, 0, sizeof(hist));
+                    for (size_t q2 = 0; q2 + 3 < pat.size(); q2 += 4) {
+                        const unsigned k2 = ((pat[q2 + 2] >> 3) << 10) |
+                                            ((pat[q2 + 1] >> 3) << 5) | (pat[q2] >> 3);
+                        if (++hist[k2] > bestCount) { bestCount = hist[k2]; best = k2; }
+                    }
+                    // and the representative full-precision texel from that bucket
+                    for (size_t q2 = 0; q2 + 3 < pat.size(); q2 += 4) {
+                        const unsigned k2 = ((pat[q2 + 2] >> 3) << 10) |
+                                            ((pat[q2 + 1] >> 3) << 5) | (pat[q2] >> 3);
+                        if (k2 == best) {
+                            pick[0] = pat[q2]; pick[1] = pat[q2 + 1];
+                            pick[2] = pat[q2 + 2]; pick[3] = pat[q2 + 3];
+                            break;
+                        }
+                    }
+                }
+                hardClass = true;      // dump THIS one, not whatever came first
+                ++g_clothDominantGen;
+                if (g_clothDominantGen <= 8)
+                    Log("CLOTH DOMINANT #%u: the pattern is a DECAL on an independent uv set, so "
+                        "no one texture in the albedo's space can carry it. Taking its dominant "
+                        "texel BGRA %u %u %u (%u%% of the map) as the FALLBACK colour; the mesh "
+                        "bake below recovers the decal wherever a visible triangle reaches.",
+                        g_clothDominantGen, pick[0], pick[1], pick[2],
+                        static_cast<unsigned>(bestCount * 400ull / (pat.size() ? pat.size() : 4)));
+                if (g_settings.clothMeshDecal) {
+                    const bool ok3 = BakeDecal(dev, dw, dh, dif, pat, pw, ph, pick, decal);
+                    if (ok3 && !decal.idx.empty()) decalIdx = decal.idx[0];
+                    else decalIdx.clear();
+                    if (g_clothDecalGen < 8) {
+                        ++g_clothDecalGen;
+                        if (ok3) {
+                            Log("CLOTH DECAL #%u: the MESH relates the two uv sets. %u triangles "
+                                "rasterised into the %ux%u albedo (%u skipped: fully cut or not a "
+                                "panel); %u of %u visible texels got a per-texel pattern colour "
+                                "(%.1f%%); %u texels where two visible triangles of equal rank "
+                                "disagreed (%.2f%% of written). The rest keep the fallback colour.",
+                                g_clothDecalGen, decal.tris, dw, dh, decal.skipped, decal.written,
+                                decal.visibleTexels,
+                                decal.visibleTexels ? decal.written * 100.0 / decal.visibleTexels : 0.0,
+                                decal.conflicts,
+                                decal.written ? decal.conflicts * 100.0 / decal.written : 0.0);
+                            Log("CLOTH DECAL TILES #%u: %u conflict texels (%u opposite-winding, %u "
+                                "same-winding) = %u disagreeing triangle pairs over %u triangles -> %u "
+                                "tile%s laid out as %u+%u+%u+%u copies = %u texture widths. Tris per "
+                                "tile: %u / %u / %u / %u; %u seam vertices duplicated; %u list "
+                                "triangles; refused: %u.",
+                                g_clothDecalGen, decal.conflicts, decal.oppositeWindingConflicts,
+                                decal.sameWindingConflicts, decal.conflictPairs, decal.conflictTris,
+                                decal.tiles, decal.tiles == 1 ? "" : "s",
+                                decal.copies[0], decal.copies[1], decal.copies[2], decal.copies[3],
+                                decal.totalCopies,
+                                decal.tileTris[0], decal.tileTris[1], decal.tileTris[2], decal.tileTris[3],
+                                decal.dups, static_cast<unsigned>(decal.listIdx.size() / 3),
+                                decal.seamCrossers);
+                            // WHERE the disagreements sit on the island: red = opposite winding,
+                            // yellow = same winding, over the diffuse.
+                            if (!decal.conflictMap.empty() && decal.conflictMap.size() == static_cast<size_t>(dw) * dh) {
+                                std::vector<unsigned char> cm;
+                                try { cm = dif; } catch (...) { cm.clear(); }
+                                if (!cm.empty()) {
+                                    for (size_t i2 = 0; i2 < decal.conflictMap.size(); ++i2) {
+                                        if (!decal.conflictMap[i2]) continue;
+                                        cm[i2 * 4 + 0] = 0;
+                                        cm[i2 * 4 + 1] = decal.conflictMap[i2] == 2 ? 255 : 0;
+                                        cm[i2 * 4 + 2] = 255;
+                                        cm[i2 * 4 + 3] = 255;
+                                    }
+                                    char cdir[MAX_PATH] = {0};
+                                    GetModuleFileNameA(GetModuleHandleW(nullptr), cdir, MAX_PATH);
+                                    char* csl = strrchr(cdir, 0x5C);
+                                    if (csl) *(csl + 1) = 0;
+                                    char cpath[MAX_PATH];
+                                    sprintf_s(cpath, "%ssr3-remix-decal-%u-conflicts.dds", cdir, g_clothDecalGen);
+                                    if (WriteBgraDds(cpath, dw, dh, cm.data()))
+                                        Log("      conflict map (red = opposite winding, yellow = same) -> %s", cpath);
+                                }
+                            }
+                        } else {
+                            Log("CLOTH DECAL #%u: the mesh bake could not run for this draw "
+                                "(indexed=%d prims=%u uv1 stream=%d type=%d) - fallback colour only",
+                                g_clothDecalGen, g_curDrawIndexed ? 1 : 0, g_curDrawPrimCount,
+                                g_curLayout.texcoord1Stream, g_curLayout.texcoord1Type);
+                        }
+                    }
+                }
+            } else {
+                // AFFINE: the pattern rides the albedo's own unwrap, so it can be resolved per
+                // texel right here. Nothing about the mesh is needed - only the map from one uv
+                // to the other, which the fit just measured.
+                perTexelPattern = true;
+            }
         }
+        if (!perTexelPattern) {
+        // (one-point: a single texel for the whole surface)
         int px = static_cast<int>(pu * static_cast<float>(pw)) % static_cast<int>(pw);
         int py = static_cast<int>(pv * static_cast<float>(ph)) % static_cast<int>(ph);
         if (px < 0) px += static_cast<int>(pw);
@@ -2808,14 +4086,17 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
                 "single uv (%.4f %.4f) -> texel BGRA %u %u %u. One colour for the surface, and "
                 "no mesh needed to work that out.",
                 g_clothOnePointGen, pu, pv, pick[0], pick[1], pick[2]);
+        }
+        if (perTexelPattern) {
+            ++g_clothAffineGen;
+            if (g_clothAffineGen <= 8)
+                Log("CLOTH AFFINE #%u: the pattern varies AND rides the albedo's own unwrap "
+                    "(uv1 = %.4f*u0 %+.1f, %.4f*v0 %+.1f). Resolved per texel in the albedo's "
+                    "texture space - no mesh.",
+                    g_clothAffineGen, g_patScale[0], g_patOffset[0],
+                    g_patScale[1], g_patOffset[1]);
+        }
     }
-    if (!TextureToBgra(diffuse, dif, dw, dh) || dif.empty() || !dw || !dh ||
-        dw > 2048 || dh > 2048) {
-        ++g_clothUniformNoDiffuse;
-        g_clothCache[key] = ClothTex{nullptr, nullptr};
-        return nullptr;
-    }
-
     // THE SAME RECIPE AND THE SAME OUTPUT PIPELINE AS ClothAlbedo BELOW.
     //
     // The corset is the one garment that has always rendered correctly, and it is the one that
@@ -2838,9 +4119,11 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     // branch anyway - but it is copied rather than assumed away, because the next uniform
     // pattern may well be a grey one.
     BuildClothLUTs();
-    const unsigned char pR = pick[2], pG = pick[1], pB = pick[0];     // stored BGRA
-    float c[3];
-    {
+    // One derivation, used for a single texel or for every texel. Same maths either way - the
+    // per-texel path must not become a second pipeline, which is the mistake that gave the
+    // bracelets the right hue and the wrong brightness.
+    auto colourFromPatternTexel = [&](const unsigned char* bgra, float* outC) {
+        const unsigned char pR = bgra[2], pG = bgra[1], pB = bgra[0];
         const float fr = pR / 255.0f, fg = pG / 255.0f, fb = pB / 255.0f;
         const float sum = fr + fg + fb;
         const float mean = sum * (1.0f / 3.0f);
@@ -2849,12 +4132,36 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
         if (test < 0.0f) {
             const float wr = g_gammaLUT[pR], wg = g_gammaLUT[pG], wb = g_gammaLUT[pB];
             for (int k = 0; k < 3; ++k)
-                c[k] = wr * col[0][k] + wg * col[1][k] + wb * col[2][k];
+                outC[k] = wr * col[0][k] + wg * col[1][k] + wb * col[2][k];
         } else {
             const unsigned char pk[3] = {pR, pG, pB};
-            for (int k = 0; k < 3; ++k) c[k] = g_desatLUT[pk[k]];
+            for (int k = 0; k < 3; ++k) outC[k] = g_desatLUT[pk[k]];
         }
-    }
+    };
+    // THE PLAYER SHADER'S OWN CHAIN - ir_sr3pccloth_c ps[6], read from the disassembly:
+    //
+    //     add_pp r5.xyz, -r1.x, c3        ; C - 1            (r1.x is 1.0)
+    //     mad_pp r5.xyz, r6.z, r5, c6.x   ; lerp(1, C, blue)
+    //     lrp_pp r7.xyz, r6.y, c2, r5     ; lerp(that, B, green)
+    //     lrp_pp r5.xyz, r6.x, c1, r7     ; lerp(that, A, red)
+    //
+    // There is NO desaturation branch in it and it is not a weighted sum. On a pure-channel texel
+    // the two agree - (0,0,1) is C either way - which is why every flat-pattern garment renders
+    // right through colourFromPatternTexel. On a MIXED texel they do not: cyan (0,1,1) is B here
+    // and B+C there, white (1,1,1) is A here and "near-grey, no colour" there. The underwear's cat
+    // is cyan with white eyes and the bra's star is cyan, so the first bake came out cyan and
+    // white where the game shows magenta, yellow and yellow. Used on the mesh-decal branch only.
+    auto colourFromPatternTexelChain = [&](const unsigned char* bgra, float* outC) {
+        const float r = g_gammaLUT[bgra[2]], g = g_gammaLUT[bgra[1]], b = g_gammaLUT[bgra[0]];
+        for (int k = 0; k < 3; ++k) {
+            float v = 1.0f + b * (col[2][k] - 1.0f);
+            v += g * (col[1][k] - v);
+            v += r * (col[0][k] - v);
+            outC[k] = v;
+        }
+    };
+    float c[3];
+    colourFromPatternTexel(pick, c);
     // ALREADY NORMALISED. The setting is parsed as num("clothBrightness", 100) / 100.0f, so
     // g_settings.clothBrightness is 1.0 for the default of 100 - dividing by 100 again made it
     // 0.01 and multiplied every garment down by a hundred. That is the whole "result mean 0.3 of
@@ -2864,6 +4171,17 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     // the CPU baker's separate knob. Using the wrong one is what left these garments dark even
     // after the double-division was fixed.
     const float bright = g_settings.clothTintScale;
+    // Tint_color, from the pixel shader's own constant (c37 on this family; 5.0 measured).
+    float tintC = 5.0f;
+    if (g_curPS.tintColorReg >= 0 && g_curPS.tintColorReg < static_cast<int>(kMaxPsConst)) {
+        const float t = g_psConst[g_curPS.tintColorReg][0];
+        if (std::isfinite(t) && t > 0.0f && t < 50.0f) tintC = t;
+    }
+    auto curve = [&](float c0) -> float {
+        if (!g_settings.clothColourCurve) return c0 * bright;
+        const float x = c0 * tintC;
+        return x / (1.0f + x);
+    };
 
     // WHAT DID THE DIFFUSE ACTUALLY DECODE TO?
     //
@@ -2885,8 +4203,37 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     try { pixels.assign(static_cast<size_t>(dw) * dh, 0xFF000000u); }
     catch (...) { ++g_clothGenFailed; return nullptr; }
     double acc = 0.0;
+    size_t transparent = 0;   // texels whose diffuse alpha says "not there"
+
+    // One tile of the generated texture: the diffuse times the colour the pattern puts on each
+    // texel, through the map a bake produced for THAT tile. Tile 0 is decalIdx; the bra's second
+    // cup lives in tile 1 with its own map. Stats are per call, so they describe the last tile.
+    auto genTile = [&](const std::vector<int>& tileIdx, std::vector<unsigned>& outPix) {
+    acc = 0.0;
+    transparent = 0;
     for (size_t i = 0; i < static_cast<size_t>(dw) * dh; ++i) {
         const unsigned char* q = &dif[i * 4];                 // BGRA
+        float cc[3] = {c[0], c[1], c[2]};
+        if (!tileIdx.empty() && tileIdx[i] >= 0) {
+            // The mesh said which pattern texel this albedo texel shows.
+            colourFromPatternTexelChain(&pat[static_cast<size_t>(tileIdx[i]) * 4], cc);
+        } else if (perTexelPattern) {
+            // This texel's albedo uv, mapped into the pattern's uv by the measured fit. The fit
+            // is in RAW SHORT units, which is the space the vertex attributes are in, so the
+            // texel's 0..1 coordinate goes up by 1024 and the result comes back down by it.
+            const size_t tx = i % dw, ty = i / dw;
+            const float u0 = ((tx + 0.5f) / static_cast<float>(dw)) * 1024.0f;
+            const float v0 = ((ty + 0.5f) / static_cast<float>(dh)) * 1024.0f;
+            const float u1 = (g_patScale[0] * u0 + g_patOffset[0]) * kShortUVScale;
+            const float v1 = (g_patScale[1] * v0 + g_patOffset[1]) * kShortUVScale;
+            int px = static_cast<int>(u1 * static_cast<float>(pw)) % static_cast<int>(pw);
+            int py = static_cast<int>(v1 * static_cast<float>(ph)) % static_cast<int>(ph);
+            if (px < 0) px += static_cast<int>(pw);
+            if (py < 0) py += static_cast<int>(ph);
+            // The player shader's chain, as on the mesh-decal branch: a mixed texel such as the
+            // backpack's cyan stomach is B here, and was raw cyan through the desaturation test.
+            colourFromPatternTexelChain(&pat[(static_cast<size_t>(py) * pw + px) * 4], cc);
+        }
         // The diffuse texel is sRGB, so it goes to LINEAR before being multiplied by a colour
         // the pattern path also treats as linear. Multiplying two sRGB values and encoding the
         // product - what this did before - is a different curve, and it is why the same colour
@@ -2894,30 +4241,217 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
         const unsigned char src[3] = {q[2], q[1], q[0]};      // R, G, B
         unsigned char o[3];
         for (int k = 0; k < 3; ++k) {
-            const float v = LinearToSrgb(g_gammaLUT[src[k]] * c[k] * bright);
+            const float v = LinearToSrgb(g_gammaLUT[src[k]] * curve(cc[k]));
             const float cl = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
             o[k] = static_cast<unsigned char>(cl * 255.0f + 0.5f);
             acc += o[k];
         }
-        pixels[i] = (static_cast<unsigned>(q[3]) << 24) | (static_cast<unsigned>(o[0]) << 16) |
+        if (q[3] < 128) ++transparent;
+        outPix[i] = (static_cast<unsigned>(q[3]) << 24) | (static_cast<unsigned>(o[0]) << 16) |
                     (static_cast<unsigned>(o[1]) << 8) | static_cast<unsigned>(o[2]);
+    }
+    };
+    genTile(decalIdx, pixels);
+
+    // ------------------------------------------------------------------ FURTHER TILES
+    // Side by side: tile k occupies columns [k*dw, (k+1)*dw). The vertices of the components
+    // assigned to tile k are shifted by whole tiles in SkinAndBind and the texture matrix is
+    // scaled by 1/tiles at bind time, so each cup samples its own image. Alpha is the diffuse's
+    // in every tile, which is what keeps the cut geometry invisible wherever it lands.
+    // decalTiles is the generated texture's width IN TILES: every region's copies, side by side.
+    UINT decalTiles = 1;
+    if (g_settings.clothDecalTiles && decal.tiles > 1 && decal.idx.size() == decal.tiles &&
+        decal.shiftRaw.size() == g_curDrawVertexCount && decal.totalCopies >= decal.tiles) {
+        std::vector<unsigned> wide, tilePix;
+        bool okw = true;
+        try { wide.assign(static_cast<size_t>(dw) * decal.totalCopies * dh, 0xFF000000u); } catch (...) { okw = false; }
+        for (unsigned k = 0; okw && k < decal.tiles; ++k) {
+            const std::vector<unsigned>* src = &pixels;
+            if (k > 0) {
+                try { tilePix.assign(static_cast<size_t>(dw) * dh, 0xFF000000u); } catch (...) { okw = false; break; }
+                genTile(decal.idx[k], tilePix);
+                src = &tilePix;
+            }
+            for (unsigned c2 = 0; c2 < decal.copies[k]; ++c2) {
+                const size_t col = static_cast<size_t>(decal.offsets[k] + c2) * dw;
+                for (UINT y = 0; y < dh; ++y)
+                    memcpy(&wide[static_cast<size_t>(y) * dw * decal.totalCopies + col],
+                           &(*src)[static_cast<size_t>(y) * dw], static_cast<size_t>(dw) * 4);
+            }
+        }
+        if (okw) { pixels.swap(wide); decalTiles = decal.totalCopies; }
+    }
+    const UINT gw = dw * decalTiles;   // the GENERATED texture's width; dw stays the diffuse's
+
+    // ------------------------------------------------------------------ PAD THE UNUSED SPACE
+    //
+    // These diffuse maps are mostly EMPTY: measured on the 2026-09-09 outfit, the underwear's is
+    // 88.7%% black and the bra's 74.0%%, with a few bright islands carrying the actual garment.
+    // Multiplying by a colour leaves the black black, and the user sees black square patches on
+    // both - so the mesh is sampling that padding.
+    //
+    // WHY it samples the padding - corrected 2026-09-09 after the COVERAGE probe. The first
+    // version of this comment blamed a lost pixel-shader clamp; the clamp constants are zero at
+    // runtime and the shader's own cmp bypasses it, so nothing was lost (see the clampReg comment
+    // in ShaderInfo). The measured cause is simpler and worse: through TEXCOORD0 * 1/1024 the
+    // 256x256 garment lands 0.3% of its vertices on black, the underwear lands 65.7% and the bra
+    // 63.6%, and their overlays show the vertices sprinkled evenly across the whole map. On those
+    // two draws TEXCOORD0 is NOT the albedo's unwrap. The coordinate is wrong, not unclamped.
+    //
+    // Padding cannot fix a wrong coordinate; it only makes the strays less visible by giving the
+    // empty space a colour. It stays because it costs nothing on a garment whose mesh already
+    // sits on its islands (the 256x256 one dilates 8.5% and renders right) and it softens island
+    // edges under bilinear filtering. The real fix for the two garments is the right texcoord,
+    // which the SCAN probe is there to name.
+    if (g_settings.clothPadUnused) {
+        // DILATE the islands outward, rather than flooding the empty space with one average.
+        //
+        // The flat fill removed the black, and the user reported the squares were then "a similar
+        // color to the main parts" - still visible. That is exactly what one average does: the
+        // islands carry shading and the padding does not, so every island keeps a visible border
+        // against it.
+        //
+        // Nearest-neighbour dilation has no such seam. Each empty texel takes the colour of the
+        // nearest filled one, so the padding CONTINUES whatever island it borders and a sample
+        // that strays outside gets what the edge it strayed over would have given. This is the
+        // ordinary way atlases are padded, and the reason is the same one here: a sampler that
+        // reaches past an island must not be able to tell.
+        //
+        // Bounded at 64 passes. A 256-wide map could in principle need more, but an unfilled
+        // texel that far from any island is one no sample will reach, and an unbounded loop on a
+        // pathological map is worse than a few texels of black.
+        std::vector<unsigned char> filled;
+        bool ok2 = false;
+        try { filled.assign(static_cast<size_t>(gw) * dh, 0); ok2 = true; } catch (...) {}
+        if (ok2) {
+            // SEEDED FROM THE GENERATED PIXEL, NOT THE DIFFUSE.
+            //
+            // It used to ask whether the DIFFUSE texel was above 8 and then propagate the
+            // GENERATED colour, and those are not the same question. A diffuse of 10 passes
+            // "above 8", but 10/255 through gamma 2.2 times a colour and a scale of 2 comes out
+            // at about 1 of 255 - black. So the near-black rim of every island counted as a
+            // seed, and the dilation spread black outward from it, faithfully. The dumped
+            // texture shows exactly that: dark wedges radiating from the island edges, 19.4% of
+            // the underwear and 39.7% of the bra.
+            //
+            // The counter was not wrong either - every empty texel really was reached. It was
+            // reached with black. "0 texels left unreached" was true and meaningless, which is
+            // the more dangerous kind of diagnostic.
+            //
+            // Only a texel that carries real colour may seed or spread.
+            size_t empties = 0;
+            for (size_t i = 0; i < static_cast<size_t>(gw) * dh; ++i) {
+                const unsigned p2 = pixels[i];
+                const unsigned r2 = (p2 >> 16) & 0xFF, g2 = (p2 >> 8) & 0xFF, b2 = p2 & 0xFF;
+                filled[i] = (r2 > 16 || g2 > 16 || b2 > 16) ? 1 : 0;
+                if (!filled[i]) ++empties;
+            }
+            const size_t total = static_cast<size_t>(gw) * dh;
+            if (empties && empties < total) {
+                const size_t before = empties;
+                std::vector<unsigned> next = pixels;
+                std::vector<unsigned char> nextFilled = filled;
+                for (int pass = 0; pass < 64 && empties; ++pass) {
+                    bool moved = false;
+                    for (UINT y = 0; y < dh; ++y)
+                        for (UINT x = 0; x < gw; ++x) {
+                            const size_t i = static_cast<size_t>(y) * gw + x;
+                            if (filled[i]) continue;
+                            // the four neighbours, wrapped - the sampler wraps too, so the
+                            // padding should be continuous across the seam for the same reason
+                            const UINT xm = (x + gw - 1) % gw, xp = (x + 1) % gw;
+                            const UINT ym = (y + dh - 1) % dh, yp = (y + 1) % dh;
+                            const size_t nb[4] = {static_cast<size_t>(y) * gw + xm,
+                                                  static_cast<size_t>(y) * gw + xp,
+                                                  static_cast<size_t>(ym) * gw + x,
+                                                  static_cast<size_t>(yp) * gw + x};
+                            unsigned acc2[3] = {0, 0, 0};
+                            unsigned n2 = 0;
+                            for (int k2 = 0; k2 < 4; ++k2)
+                                if (filled[nb[k2]]) {
+                                    const unsigned p2 = pixels[nb[k2]];
+                                    acc2[0] += (p2 >> 16) & 0xFF;
+                                    acc2[1] += (p2 >> 8) & 0xFF;
+                                    acc2[2] += p2 & 0xFF;
+                                    ++n2;
+                                }
+                            if (!n2) continue;
+                            // Colour only. A transparent texel keeps its alpha 0 - the fill is
+                            // there so bilinear filtering at the cutout edge blends toward the
+                            // garment's colour, not so the texel becomes visible.
+                            next[i] = (pixels[i] & 0xFF000000u) | ((acc2[0] / n2) << 16) |
+                                      ((acc2[1] / n2) << 8) | (acc2[2] / n2);
+                            nextFilled[i] = 1;
+                            --empties;
+                            moved = true;
+                        }
+                    if (!moved) break;
+                    pixels = next;
+                    filled = nextFilled;
+                }
+                if (g_clothPadReports < 8) {
+                    ++g_clothPadReports;
+                    // Measured on the RESULT, not on the loop counter. The counter said 0
+                    // while two fifths of the texture was black; a number taken from the thing
+                    // itself cannot say that.
+                    size_t stillDark = 0;
+                    for (size_t i2 = 0; i2 < total; ++i2) {
+                        const unsigned p3 = pixels[i2];
+                        if (((p3 >> 16) & 0xFF) <= 16 && ((p3 >> 8) & 0xFF) <= 16 &&
+                            (p3 & 0xFF) <= 16) ++stillDark;
+                    }
+                    Log("CLOTH PAD #%u: %ux%u was %.1f%% colourless; after dilation %.1f%% of "
+                        "the FINAL texture is still black (%u texels the loop never reached)",
+                        g_clothPadReports, gw, dh,
+                        before * 100.0 / static_cast<double>(total),
+                        stillDark * 100.0 / static_cast<double>(total),
+                        static_cast<unsigned>(empties));
+                }
+            }
+        }
+    }
+
+    // WHAT WE ACTUALLY HAND REMIX. The squares are reported as still black while the fill
+    // reports 0 texels unreached, and those two cannot both describe this texture - so write it
+    // out and look at it rather than reasoning about which is lying.
+    if (hardClass && g_genDumps < 8) {
+        ++g_genDumps;
+        char gdir[MAX_PATH] = {0};
+        GetModuleFileNameA(GetModuleHandleW(nullptr), gdir, MAX_PATH);
+        char* gsl = strrchr(gdir, 0x5C);
+        if (gsl) *(gsl + 1) = 0;
+        char gpath[MAX_PATH];
+        sprintf_s(gpath, "%ssr3-remix-gen-%u-%ux%u.dds", gdir, g_genDumps, gw, dh);
+        std::vector<unsigned char> bgra;
+        try {
+            bgra.assign(static_cast<size_t>(gw) * dh * 4, 0);
+            for (size_t i = 0; i < static_cast<size_t>(gw) * dh; ++i) {
+                const unsigned p2 = pixels[i];
+                bgra[i * 4 + 0] = static_cast<unsigned char>(p2 & 0xFF);
+                bgra[i * 4 + 1] = static_cast<unsigned char>((p2 >> 8) & 0xFF);
+                bgra[i * 4 + 2] = static_cast<unsigned char>((p2 >> 16) & 0xFF);
+                bgra[i * 4 + 3] = static_cast<unsigned char>((p2 >> 24) & 0xFF);
+            }
+            if (WriteBgraDds(gpath, gw, dh, bgra.data()))
+                Log("CLOTH GENERATED DUMP #%u -> %s", g_genDumps, gpath);
+        } catch (...) {}
     }
 
     IDirect3DTexture9* staging = nullptr;
     IDirect3DTexture9* generated = nullptr;
     const bool wasInternal = g_internal;
     g_internal = true;
-    HRESULT hr = dev->CreateTexture(dw, dh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
+    HRESULT hr = dev->CreateTexture(gw, dh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
                                     &staging, nullptr);
     if (SUCCEEDED(hr) && staging) {
         D3DLOCKED_RECT dst{};
         if (SUCCEEDED(staging->LockRect(0, &dst, nullptr, 0)) && dst.pBits) {
             for (UINT y = 0; y < dh; ++y)
                 memcpy(static_cast<unsigned char*>(dst.pBits) + y * dst.Pitch,
-                       &pixels[static_cast<size_t>(y) * dw], static_cast<size_t>(dw) * 4);
+                       &pixels[static_cast<size_t>(y) * gw], static_cast<size_t>(gw) * 4);
             staging->UnlockRect(0);
         }
-        hr = dev->CreateTexture(dw, dh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &generated,
+        hr = dev->CreateTexture(gw, dh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &generated,
                                 nullptr);
         if (SUCCEEDED(hr) && generated && FAILED(dev->UpdateTexture(staging, generated))) {
             generated->Release();
@@ -2938,10 +4472,30 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
             "(%.3f %.3f %.3f) | a(%.3f %.3f %.3f) b(%.3f %.3f %.3f) c(%.3f %.3f %.3f) | "
             "DIFFUSE DECODED mean %.1f of 255 | result mean %.1f of 255",
             g_clothUniformGen, dw, dh, c[0], c[1], c[2],
-            pR / 255.0f, pG / 255.0f, pB / 255.0f,
+            pick[2] / 255.0f, pick[1] / 255.0f, pick[0] / 255.0f,
             col[0][0], col[0][1], col[0][2], col[1][0], col[1][1], col[1][2],
             col[2][0], col[2][1], col[2][2], difMean,
             acc / (3.0 * static_cast<double>(dw) * dh));
+    if (decalTiles > 1 && generated) {
+        ClothTileLayout lay;
+        lay.tiles = decalTiles;
+        lay.firstVertex = g_curDrawFirstVertex;
+        lay.vertexCount = g_curDrawVertexCount;
+        lay.minIndex = g_curDrawMinIndex;
+        lay.shiftRaw = decal.shiftRaw;
+        lay.dupSrc = decal.dupSrc;
+        lay.dupShiftRaw = decal.dupShiftRaw;
+        lay.listIdx = decal.listIdx;
+        g_clothTileLayout[generated] = lay;
+    }
+    if (transparent && generated && g_settings.clothCutout) {
+        g_clothCutoutTex.insert(generated);
+        if (g_clothCutoutGen < 8)
+            Log("CLOTH CUTOUT #%u: %.1f%% of this %ux%u diffuse is transparent in its alpha "
+                "channel. The generated texture carries that alpha, the dilation leaves it alone, "
+                "and the converted draw alpha-tests it, so the template mesh is cut to shape.",
+                ++g_clothCutoutGen, transparent * 100.0 / (static_cast<double>(dw) * dh), dw, dh);
+    }
 
     pattern->AddRef();
     g_clothCache[key] = ClothTex{pattern, generated};
@@ -6966,6 +8520,7 @@ bool InstallFloatUV(IDirect3DDevice9* dev, FFPScope& scope, bool deinstance) {
 }
 
 Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
+    g_clothRemap = nullptr;
     const Disp d = Classify(dev);
     if (d != Disp::Convert) {
         // cameraOnly touches nothing EXCEPT this, and this is value-identical to what the
@@ -7156,7 +8711,80 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     // the base vertex, which together identify a mesh inside SR3's shared buffers; the pointer
     // alone would merge every mesh sharing a buffer onto one texture.
     // The player's chosen clothing colours, evaluated per texel into a texture of our own.
-    if (IDirect3DBaseTexture9* cloth = ClothAlbedo(dev)) albedo = cloth;
+    if (IDirect3DBaseTexture9* cloth = ClothAlbedo(dev)) {
+        albedo = cloth;
+        // A generated texture that carries a cutout is alpha-tested, the way a shader texkill is
+        // in SetupTextureStages. That function has already run, and decided TFACTOR alpha for
+        // this draw because the game's own state shows no test and ps[6] has no texkill - the
+        // game gets its cutout from the pixel's alpha and whatever blend it draws with. Under
+        // fixed function the texture's alpha has to be routed through the test explicitly, and
+        // the test is also the signal Remix reads as "cutout" rather than "glass". The game
+        // blends this alpha (src=5 dst=6); 128 splits a DXT5 cutout cleanly. Saved and restored
+        // by the same EndFFP path as the texkill case.
+        if (g_settings.clothCutout && g_clothCutoutTex.count(cloth)) {
+            if (!g_alphaStateOverridden) {
+                g_savedAlphaTest = ShadowGetRS(dev, D3DRS_ALPHATESTENABLE);
+                g_savedAlphaRef = ShadowGetRS(dev, D3DRS_ALPHAREF);
+                g_savedAlphaFunc = ShadowGetRS(dev, D3DRS_ALPHAFUNC);
+                g_alphaStateOverridden = true;
+            }
+            ShadowSetRS(dev, D3DRS_ALPHATESTENABLE, TRUE);
+            ShadowSetRS(dev, D3DRS_ALPHAREF, 128);
+            ShadowSetRS(dev, D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+            ShadowSetTSS(dev, 0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        }
+        // A TILED texture: the skinned copy shifts each component's u0 into its tile and appends
+        // the duplicated seam vertices (SkinAndBind reads g_clothRemap), the draw goes through a
+        // private triangle list that references them, and the texture matrix spreads `tiles`
+        // tiles across u. Skinned draws only - that is the path that rewrites vertices. The
+        // layout is only valid for the draw it was baked from; anything else keeps one tile.
+        if (g_settings.clothDecalTiles && g_curLayout.skinned) {
+            const auto lt = g_clothTileLayout.find(cloth);
+            if (lt != g_clothTileLayout.end() && lt->second.tiles > 1 &&
+                lt->second.firstVertex == g_curDrawFirstVertex &&
+                lt->second.vertexCount == g_curDrawVertexCount &&
+                lt->second.minIndex == g_curDrawMinIndex &&
+                lt->second.shiftRaw.size() == g_curDrawVertexCount) {
+                ClothTileLayout& lay = lt->second;
+                if (!lay.ib && !lay.listIdx.empty()) {
+                    const bool wasInt = g_internal;
+                    g_internal = true;
+                    IDirect3DIndexBuffer9* nib = nullptr;
+                    if (SUCCEEDED(dev->CreateIndexBuffer(static_cast<UINT>(lay.listIdx.size() * 4),
+                                                         D3DUSAGE_WRITEONLY, D3DFMT_INDEX32,
+                                                         D3DPOOL_DEFAULT, &nib, nullptr)) && nib) {
+                        void* m = nullptr;
+                        if (SUCCEEDED(nib->Lock(0, 0, &m, 0)) && m) {
+                            memcpy(m, lay.listIdx.data(), lay.listIdx.size() * 4);
+                            nib->Unlock();
+                            lay.ib = nib;
+                            lay.tris = static_cast<UINT>(lay.listIdx.size() / 3);
+                        } else {
+                            nib->Release();
+                            lay.listIdx.clear();   // do not retry into a buffer that will not lock
+                        }
+                    } else {
+                        lay.listIdx.clear();
+                    }
+                    g_internal = wasInt;
+                }
+                g_clothRemap = &lay;
+                float su = 1.0f, sv = 1.0f;
+                if (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2) su = sv = CurrentShortUVScale();
+                int tu = -1, tv = -1;
+                TilingForAlbedo(tu, tv);
+                if (tu >= 0 && tu < static_cast<int>(kMaxVsConst)) su *= g_vsConst[tu][0];
+                if (tv >= 0 && tv < static_cast<int>(kMaxVsConst)) sv *= g_vsConst[tv][0];
+                D3DMATRIX uv = kIdentity;
+                uv._11 = su / static_cast<float>(lay.tiles);
+                uv._22 = sv;
+                g_origSetTransform(dev, D3DTS_TEXTURE0, &uv);
+                g_appliedU = uv._11;
+                g_appliedV = sv;
+                ShadowSetTSS(dev, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+            }
+        }
+    }
     // Hair takes the same route. Its ranked albedo is the Diffuse_Map, which for hair is
     // DIRECTIONAL data rather than colour - binding it is what made hair render as a mask.
     else if (IDirect3DBaseTexture9* hair = HairAlbedo(dev)) albedo = hair;
@@ -7252,6 +8880,7 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
 }
 
 void EndFFP(IDirect3DDevice9* dev, const FFPScope& scope) {
+    g_clothRemap = nullptr;
     if (!scope.active) return;
     g_internal = true;
     // Put the alpha test back exactly as the engine had it. This function restores textures and
@@ -8241,6 +9870,7 @@ HRESULT WINAPI Hook_DrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, 
     // reading past the end of the mesh. Left at zero instead: the probes that use this window all
     // require a minimum size, so they simply decline rather than read something arbitrary.
     g_curDrawVertexCount = 0;
+    g_curDrawIndexed = false;
     EmitLight(dev);   // harvest lights before anything else touches device state
     FFPScope scope;
     const Disp d = BeginFFP(dev, scope);
@@ -10420,7 +12050,10 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
     }
 
     const UINT stride = sizeof(SkinnedVertex);
-    const UINT need = numVertices * stride;
+    // Seam duplicates for a tiled cloth texture ride behind the draw's own vertices.
+    const UINT dups = (g_clothRemap && g_clothRemap->dupSrc.size() == g_clothRemap->dupShiftRaw.size())
+                          ? static_cast<UINT>(g_clothRemap->dupSrc.size()) : 0u;
+    const UINT need = (numVertices + dups) * stride;
     // Index i reads at (streamOffset + (baseVertex + i) * stride), so our vertex 0 must land on
     // index minIndex: the write position has to be at least (baseVertex + minIndex) * stride.
     // Meeting that here is what lets the game's own index buffer be reused verbatim - no index
@@ -10681,7 +12314,8 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
             ++g_skinVertsBindPose;
             memcpy(out[i].pos, mpos, sizeof(mpos));
             memcpy(out[i].nrm, mnrm, sizeof(mnrm));
-            out[i].uv[0] = b.uv[0];
+            out[i].uv[0] = b.uv[0] + ((g_clothRemap && i < g_clothRemap->shiftRaw.size())
+                                          ? g_clothRemap->shiftRaw[i] : 0.0f);
             out[i].uv[1] = b.uv[1];
             continue;
         }
@@ -10700,7 +12334,10 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
         const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         const float ninv = (len > 1e-8f) ? 1.0f / len : 0.0f;
         for (int r = 0; r < 3; ++r) out[i].nrm[r] = n[r] * ninv;
-        out[i].uv[0] = b.uv[0];
+        // The tile shift, when this draw's generated texture is wider than one tile. Raw units:
+        // b.uv holds the short2 as a float and the texture matrix still divides by 1024.
+        out[i].uv[0] = b.uv[0] + ((g_clothRemap && i < g_clothRemap->shiftRaw.size())
+                                      ? g_clothRemap->shiftRaw[i] : 0.0f);
         out[i].uv[1] = b.uv[1];
         for (int r = 0; r < 3; ++r) { cSkin[r] += out[i].pos[r]; cBind[r] += mpos[r]; }
         ++cN;
@@ -10872,6 +12509,18 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
             g_apiCapMinIndex = minIndex;
             ++g_apiPendingCount;
         } catch (...) {
+        }
+    }
+    // The duplicated seam vertices: copies of already-skinned vertices, with the OTHER tile's
+    // shift. out[src] carries its home shift, so that is taken back out before the new one goes
+    // in. The private index list refers to these as minIndex + numVertices + j.
+    if (dups) {
+        for (UINT j = 0; j < dups; ++j) {
+            const unsigned srcV = g_clothRemap->dupSrc[j];
+            if (srcV >= numVertices) continue;
+            out[numVertices + j] = out[srcV];
+            const float home = (srcV < g_clothRemap->shiftRaw.size()) ? g_clothRemap->shiftRaw[srcV] : 0.0f;
+            out[numVertices + j].uv[0] = out[srcV].uv[0] - home + g_clothRemap->dupShiftRaw[j];
         }
     }
     g_skinVB->Unlock();
@@ -11867,13 +13516,13 @@ void RemixCollectCharacterSlot(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT
                 int q = 0;
                 for (int st = 0; st < 8 && q < 130; ++st)
                     if (g_curPS.samplerName[st][0] || g_curTexture[st])
-                        q += _snprintf_s(uvmap + q, sizeof(uvmap) - q, _TRUNCATE, "s%d<-%s ", st,
+                        q += _snprintf_s(uvmap + q, sizeof(uvmap) - q, _TRUNCATE,
+                                         "s%d<-%s%d%s ", st,
+                                         g_curPS.samplerUv[st] < 0 ? "unknown(" : "TEXCOORD",
+                                         g_curPS.samplerUv[st] < 0 ? 0 : g_curPS.samplerUv[st],
                                          g_curPS.samplerUv[st] < 0
-                                             ? "computed"
-                                             : (g_curPS.samplerUv[st] == 0 ? "TEXCOORD0"
-                                                : g_curPS.samplerUv[st] == 1 ? "TEXCOORD1"
-                                                : g_curPS.samplerUv[st] == 6 ? "TEXCOORD6"
-                                                : "TEXCOORDn"));
+                                             ? ")"
+                                             : (g_curPS.samplerUvDirect[st] ? "" : "*traced"));
             }
             Log("      UV SET PER SAMPLER (from the shader's own texld): %s", uvmap);
             Log("CLOTH SLOT (API) #%u: pattern %ux%u at stage %d, albedo stage %d, "
@@ -12169,7 +13818,10 @@ void DecodeDxtBlockColour(const unsigned char* b, unsigned char out[16][4], bool
         out[i][2] = col[sel][0];   // stored BGRA
         out[i][1] = col[sel][1];
         out[i][0] = col[sel][2];
-        out[i][3] = 255;
+        // DXT1's 3-colour mode (c0 <= c1) makes index 3 the TRANSPARENT texel. It was written
+        // as opaque black, which is what turned a garment's cutout into black squares. Its colour
+        // is left black - that is what the block encodes - and only the alpha says "not there".
+        out[i][3] = (dxt1 && !fourColour && sel == 3 && g_settings.clothCutout) ? 0 : 255;
     }
 }
 
@@ -13386,6 +15038,12 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     g_meshKeyBaseVertex = static_cast<unsigned>(baseVertex) + minIndex;
     g_curDrawFirstVertex = static_cast<UINT>(max(0, baseVertex + static_cast<INT>(minIndex)));
     g_curDrawVertexCount = numVertices;
+    g_curDrawIndexed = true;
+    g_curDrawBaseVertex = baseVertex;
+    g_curDrawMinIndex = minIndex;
+    g_curDrawStartIndex = startIndex;
+    g_curDrawPrimCount = primitiveCount;
+    g_curDrawPrimType = type;
     EmitLight(dev);
     FFPScope scope;
     Disp d = BeginFFP(dev, scope);
@@ -13604,8 +15262,26 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // Everything up to here is ours; the draw call itself is not, so the timer stops before it
     // and resumes after. Otherwise the measurement would blame us for the bridge's own cost.
     g_shimMsThisFrame += MsSince(tShim);
-    const HRESULT hr = g_origDrawIndexedPrimitive(dev, type, baseVertex, minIndex, numVertices,
-                                                  startIndex, primitiveCount);
+    // A tiled cloth draw: the same mesh as a triangle list over originals + seam duplicates.
+    // The game's index buffer is put back the moment the draw returns.
+    HRESULT hr;
+    if (skinned && g_clothRemap && g_clothRemap->ib && g_clothRemap->tris) {
+        IDirect3DIndexBuffer9* gameIB = nullptr;
+        g_internal = true;
+        dev->GetIndices(&gameIB);
+        g_origSetIndices(dev, g_clothRemap->ib);
+        g_internal = false;
+        hr = g_origDrawIndexedPrimitive(dev, D3DPT_TRIANGLELIST, baseVertex, minIndex,
+                                        numVertices + static_cast<UINT>(g_clothRemap->dupSrc.size()),
+                                        0, g_clothRemap->tris);
+        g_internal = true;
+        g_origSetIndices(dev, gameIB);
+        g_internal = false;
+        if (gameIB) gameIB->Release();
+    } else {
+        hr = g_origDrawIndexedPrimitive(dev, type, baseVertex, minIndex, numVertices,
+                                        startIndex, primitiveCount);
+    }
     const LONGLONG tShim2 = Now();
     // AFTER the draw, not before it.
     //

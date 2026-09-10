@@ -40,9 +40,10 @@ and thanks to RTX REMIX and Nvidia!
 
 ## Status: work in progress
 
-The path-traced world renders, is textured and is lit. **The HUD is back as of v0.1.4**, and so is
-the character's skin and their clothing colours. **The sky is still missing** — see
-[Known issues](#known-issues) before you install, so you know what you are getting.
+The path-traced world renders, is textured and is lit. Characters render with correct skin, hair
+and — as of v0.1.5 — **correct customisation colours on every garment**, confirmed on screen piece
+by piece. **The sky and the in-game HUD are still missing** — see [Known issues](#known-issues)
+before you install, so you know what you are getting.
 
 **Install: [INSTALL.md](INSTALL.md)** · **What changed: [CHANGELOG.md](CHANGELOG.md)** ·
 **Credits: [CREDITS.md](CREDITS.md)** · **Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)**
@@ -54,13 +55,13 @@ the character's skin and their clothing colours. **The sky is still missing** �
 exists to capture *vertex-shader* output. The pixel shader was never the problem.
 
 So a draw re-issued with **fixed-function vertex processing** while **the game's own pixel shader
-stays bound** is a combination Remix executes happily with capture off. One fact, three fixes:
+stays bound** is a combination Remix executes happily with capture off:
 
 | what it fixed | how |
 |---|---|
-| **the HUD** | `DrawPrimitiveUP` draws rebuilt as `D3DFVF_XYZRHW` quads — positions are already screen pixels, so it is a 28-byte field reorder |
 | **the character's skin** | the atlas composites re-issued as a full-target quad with their own pixel shader kept |
 | the menu video | proved the rule: nulling the pixel shader turned it greyscale, because Bink is Y/Cr/Cb across three stages and stage 0 alone is luma |
+| the HUD's draws — *found*, not yet fixed | a whole D3D9 entry point, `DrawPrimitiveUP`, had never been hooked, so 13–30 draws a frame were invisible to the shim. They are now rebuilt as `D3DFVF_XYZRHW` quads (a 28-byte field reorder, since the positions are already screen pixels) — but the in-game HUD is still not visible. See [Known issues](#known-issues). |
 
 ### The Remix programmatic API (v0.1.2, now optional)
 
@@ -89,9 +90,10 @@ Remix had no camera at all and was simply rasterising the whole game.
 matrices from vertex-shader constant registers, hands them to D3D9 through `SetTransform`, binds
 the real albedo map to stage 0, draws, and restores. Remix then receives unambiguous geometry.
 
-**For characters**, since v0.1.2, it skips that entirely and describes them to Remix through the
-programmatic API — meshes, materials and textures, named directly. That sidesteps reconstruction
-altogether, and it is where the project is heading generally.
+**For characters**, it re-issues the draw with fixed-function *vertex* processing while leaving the
+game's own *pixel* shader bound, and generates the customisation textures itself — the game builds
+clothing colour per texel from a pattern map and three constants, which no texture-stage
+arrangement can express.
 
 That required reverse-engineering a fair amount of the engine — including, eventually, the
 renderer itself: the command buffer, the render thread, a 74-opcode dispatch table, and the
@@ -108,9 +110,14 @@ to be established along the way:
   `D3DRS_ALPHATESTENABLE`, so a render-state rule cannot see them;
 - **Remix discards SHORT2 texcoords** (`VkFormat 80 = R16G16_SSCALED`) — which is why the world
   rendered as flat material colour until the UVs were converted to a float2 stream;
-- **SR3's per-texel material recipes**, disassembled out of the shaders, because NPC clothing
-  colour is computed per texel from a mask plus three constants and no texture-stage arrangement
-  can express it. The generator is verified byte-exact against the shader.
+- **SR3's per-texel material recipes**, disassembled out of the shaders. The NPC and player
+  families use *different* rules — a weighted sum with a desaturation branch versus a lerp chain —
+  and the player's tint is a Reinhard tonemap at ×5, not a brightness scale, which is why every
+  linear correction preserved the hue and never produced the game's saturated colours;
+- **which UV set feeds which sampler**, per shader and per draw. "Albedo is TEXCOORD0, pattern is
+  TEXCOORD1" is not a rule — see [docs/cloth-uv-map.md](docs/cloth-uv-map.md);
+- that a garment's second UV set can be **unrelated** to its first, and that the *mesh* is what
+  relates them: rasterise the triangles into the diffuse's space and interpolate.
 
 Full reverse-engineering results: [docs/shader-map.md](docs/shader-map.md) and
 [docs/YOUR-INSTRUCTIONS.md](docs/YOUR-INSTRUCTIONS.md). The complete run-by-run history, including
@@ -123,8 +130,8 @@ Stated plainly, because a compatibility mod that hides its gaps wastes everyone'
 | issue | status |
 |---|---|
 | **No sky.** The `rfg-skybox` family (~50 draws/frame) is passed through rather than converted, and pass-through draws are skipped now that vertex capture is off. | open — needs conversion; the dome is 343 verts one unit from the camera, so it needs care |
-| **The underwear.** The one garment class that genuinely needs the mesh to relate two UV sets — a varying pattern on a second texture coordinate set. The CPU baker produces it in the right colour; whether the islands land where the mesh samples is unestablished. | open — every other garment works |
-| **Clothes brightness overall.** The recipe is proven correct against both the exe and the shader, so the fault is in how Remix lights these meshes rather than in the albedo. `clothAlbedoPercent` is the single knob. | open |
+| **No in-game HUD.** Its draws are found and rebuilt now, but it does not appear, and sub-menu text and backgrounds are missing. The menu video works. Parked. | open — **v0.1.4 reported this as fixed and it was not** |
+| **Other outfits.** Every colour mechanism is general, but only one outfit is confirmed on screen. A garment needing more than 4 tiles, or with a visible panel wider than 12 texture widths, is refused by its own guard and falls back to a single tile. | open |
 | ~11 draws/frame still have unreadable texcoords — their source vertex buffer is DYNAMIC, so the per-buffer UV conversion cannot cache them. | open — needs a per-draw ring |
 | **The Remix-API character path**, when enabled, is frozen and stands beside the game's own copy — handing Remix `MeshInfoSkinning` crashed its 64-bit server. It ships **off**, so this is not something you will see. | open, but not in the shipped config |
 | **Shim time grows across a session**, ~24% → ~44% of frame time, worst-case stalls around 300 ms. | open |
@@ -134,8 +141,8 @@ Fixed and no longer a concern: z-fighting / doubled world, the crash on fast mov
 sky, white surfaces, frozen character animation, the camera-blocking particle plane, the flat
 untextured world, over-tiled roads, churning geometry hashes, black cars, objects popping out of
 existence as they entered the frustum, car parts and glass drifting in rhythm with character
-animation (v0.1.1), the black character texture (v0.1.2), and — in v0.1.4 — **the missing HUD**,
-the player's untinted clothing, and hair with no strand detail.
+animation (v0.1.1), the black character texture (v0.1.2), the character skin and menu video (v0.1.4),
+hair with no strand detail (v0.1.4), and — in v0.1.5 — **the player's clothing colours, on every garment**.
 
 Release history and what changed in each: **[CHANGELOG.md](CHANGELOG.md)**.
 
@@ -176,6 +183,7 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 │   ├── HANDOFF-PROMPT.md    start here if you are picking the project up
 │   ├── YOUR-INSTRUCTIONS.md current state, engine facts, and the dead ends not to retry
 │   ├── engine-map.md        the renderer: command buffer, opcodes, dispatch table
+│   ├── cloth-uv-map.md      which UV set feeds which sampler, per shader
 │   └── worklog.md           the run-by-run history
 ├── engine-control/      a SEPARATE plugin, sr3-engine.asi — see below
 └── srttr-hair/          a SEPARATE mod, the SRTTR hair reshape — see below
@@ -232,13 +240,16 @@ copy of the game.
 
 ## Roadmap
 
-1. **Convert the sky** — the last population lost when vertex capture was turned off. ~14 draws a
-   frame, still passed through.
-2. **The underwear**, and the lighting gap that makes clothes read dark overall.
-3. Performance: the growing shim time and its stalls.
-4. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
+1. **The in-game HUD.** Its draws are found and rebuilt; it still does not appear. Currently
+   parked.
+2. **Convert the sky** — the last population lost when vertex capture was turned off, still passed
+   through.
+3. **Confirm the colour work on other outfits.** Every mechanism is general; only one outfit has
+   been checked on screen.
+4. Performance: the growing shim time and its stalls.
+5. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
    fallback light.
-5. **The goal: replace assets with the Saints Row: The Third Remastered versions, which are
+6. **The goal: replace assets with the Saints Row: The Third Remastered versions, which are
    already PBR.** The plan and its two substitution points are in
    [docs/asset-replacement-plan.md](docs/asset-replacement-plan.md).
 
