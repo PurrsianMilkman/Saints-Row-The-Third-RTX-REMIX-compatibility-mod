@@ -1,0 +1,7 @@
+# Context guard (hooks in ~/.claude/settings.json; script in ~/.claude/context-guard/).
+# Presence of this file opts the project in. Keys documented in
+# ~/.claude/context-guard/context-guard.example.toml
+threshold_percent = 75
+handoff_file = "docs/HANDOFF-PROMPT.md"
+max_inject_bytes = 24000
+mode = "auto"

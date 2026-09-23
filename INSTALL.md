@@ -8,6 +8,12 @@
 - **Ultimate ASI Loader** (if you don't have it): https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases
 - **Back up `display.ini`** (to restore your display settings after uninstall)
 
+**Note on the runtime.** The stock Remix runtime works, but it has two bugs that this project found
+and fixed: a memory leak that **crashes the game after about eight minutes**, and hard, faceted
+shading on GPU-skinned characters. To avoid the shading bug on the stock runtime, set
+`skinViaFixedFunction=0` in `sr3-rtx.ini`. To fix both properly, build a patched runtime — see
+`remix-fork-patches/` in the repository.
+
 ## How to install
 
 Copy these files next to `SaintsRowTheThird.exe`:

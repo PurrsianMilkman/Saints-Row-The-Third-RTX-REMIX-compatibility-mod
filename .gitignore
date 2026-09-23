@@ -65,3 +65,9 @@ docs/*.md.before-*
 # Regenerable by running with the dump switches on, and 700 MB of it. The findings that
 # matter are written up in docs/, and the curated subset lives in player-textures/.
 dumps/
+
+# Claude Code personal project settings (context guard auto-compact window)
+.claude/settings.local.json
+
+# Files parked after being pulled out of the game directory
+engine-control/removed-from-game-dir-*/

@@ -40,13 +40,28 @@ and thanks to RTX REMIX and Nvidia!
 
 ## Status: work in progress
 
-The path-traced world renders, is textured and is lit. Characters render with correct skin, hair
-and — as of v0.1.5 — **correct customisation colours on every garment**, confirmed on screen piece
-by piece. **The sky and the in-game HUD are still missing** — see [Known issues](#known-issues)
-before you install, so you know what you are getting.
+The path-traced world renders, is textured and is lit. Characters render with correct skin, hair and
+correct customisation colours on every garment. As of v0.1.6 it runs at **roughly twice the frame
+rate** and no longer crashes after eight minutes. **The sky and the in-game HUD are still missing** —
+see [Known issues](#known-issues) before you install, so you know what you are getting.
 
 **Install: [INSTALL.md](INSTALL.md)** · **What changed: [CHANGELOG.md](CHANGELOG.md)** ·
 **Credits: [CREDITS.md](CREDITS.md)** · **Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)**
+
+### v0.1.6 found two bugs in RTX Remix itself
+
+This project now runs a **patched Remix runtime**. Both bugs are in NVIDIA's shipped build *and* in
+`origin/main`, and neither is SR3-specific — any game that skins on the GPU through Remix hits both.
+
+- **A staging-buffer memory leak.** A slice of `RtxStagingDataAlloc` is acquired and never released
+  on one path. On SR3 that reached **13.7 GB across 428 × 32 MB blocks** and crashed the game after
+  about eight minutes. With the fix: 5 blocks, 160 MB.
+- **The skinning kernel reads normals as floats only**, so packed normals arrive as garbage — hard,
+  faceted shading on every GPU-skinned character.
+
+The patches are in [`remix-fork-patches/`](remix-fork-patches/), with the trade-off explained: the
+stock runtime works and gives you everything the mod does, it just also gives you the crash and the
+faceted shading.
 
 ### The technique that unlocked v0.1.4
 
@@ -104,8 +119,11 @@ to be established along the way:
   at c48, the 64-bone palette at c52, three registers per bone;
 - **the UV formula**, `uv = raw * tiling / 1024`, where the tiling uniforms live at *different
   registers in different shaders* and must be read from each shader's CTAB;
-- **skinning** — the skinned vertex buffer is STATIC and holds the bind pose; all animation lives
-  in the c52 constants, invisible to Remix, so characters are skinned on the CPU before submission;
+- **skinning** — the skinned vertex buffer is STATIC and holds the bind pose; all animation lives in
+  the c52 constants, invisible to Remix. Characters were skinned on the CPU until v0.1.6, which
+  moved them onto the GPU through fixed-function vertex blending (a side stream of `FLOAT3` weights
+  and `UBYTE4` indices, palette in `WORLDMATRIX(0..255)`). Remix hashes geometry *before* skinning,
+  so asset identity stays stable;
 - **alpha cutouts** are done with `texkill` inside 403 pixel shaders, never via
   `D3DRS_ALPHATESTENABLE`, so a render-state rule cannot see them;
 - **Remix discards SHORT2 texcoords** (`VkFormat 80 = R16G16_SSCALED`) — which is why the world
@@ -132,17 +150,24 @@ Stated plainly, because a compatibility mod that hides its gaps wastes everyone'
 | **No sky.** The `rfg-skybox` family (~50 draws/frame) is passed through rather than converted, and pass-through draws are skipped now that vertex capture is off. | open — needs conversion; the dome is 343 verts one unit from the camera, so it needs care |
 | **No in-game HUD.** Its draws are found and rebuilt now, but it does not appear, and sub-menu text and backgrounds are missing. The menu video works. Parked. | open — **v0.1.4 reported this as fixed and it was not** |
 | **Other outfits.** Every colour mechanism is general, but only one outfit is confirmed on screen. A garment needing more than 4 tiles, or with a visible panel wider than 12 texture widths, is refused by its own guard and falls back to a single tile. | open |
-| ~11 draws/frame still have unreadable texcoords — their source vertex buffer is DYNAMIC, so the per-buffer UV conversion cannot cache them. | open — needs a per-draw ring |
+| **Misplaced buildings.** Rare, sticks for a few seconds, angle- and location-dependent, seen while flying. | open — **the top correctness bug, and unattributed.** The shim's own data is correct and a 60-frame ring recording found no object moving, so whether the patched runtime is involved is not yet known |
+| **Body skin and head colours do not match** on characters. | open — probably the most visible remaining fault |
+| **Decal flicker** in Remix's Geometry Hash view. Proven *not* to be a hash change. | open |
 | **The Remix-API character path**, when enabled, is frozen and stands beside the game's own copy — handing Remix `MeshInfoSkinning` crashed its 64-bit server. It ships **off**, so this is not something you will see. | open, but not in the shipped config |
-| **Shim time grows across a session**, ~24% → ~44% of frame time, worst-case stalls around 300 ms. | open |
-| **Performance.** The occlusion-query hook deliberately answers "visible" to every query, so the game submits more geometry than it normally would. Functionality was prioritised over frame rate. | by design, for now |
+| **First-time per-buffer conversions run on the game's render thread** when content streams in — worst spike 219 ms. They belong on a worker. | open |
+| **Performance.** The occlusion-query hook fabricates a "visible" answer to every query first (still necessary - see below), but the shim now runs its own occlusion test on a worker thread and refines that answer to 0 pixels for a box entirely behind opaque geometry (`occlusionCull=1`, `occlusionDryRun=0`). Some geometry the game would have culled itself still reaches the path tracer. | partially addressed |
 
 Fixed and no longer a concern: z-fighting / doubled world, the crash on fast movement, the black
 sky, white surfaces, frozen character animation, the camera-blocking particle plane, the flat
-untextured world, over-tiled roads, churning geometry hashes, black cars, objects popping out of
+untextured world, over-tiled roads, churning geometry hashes, unreadable texcoords on DYNAMIC
+vertex buffers (fixed by a per-draw ring, `convertDynamicUV=1`), black cars, objects popping out of
 existence as they entered the frustum, car parts and glass drifting in rhythm with character
 animation (v0.1.1), the black character texture (v0.1.2), the character skin and menu video (v0.1.4),
 hair with no strand detail (v0.1.4), and — in v0.1.5 — **the player's clothing colours, on every garment**.
+
+In v0.1.6: the ~8-minute crash from a Remix memory leak, hard faceted shading on GPU-skinned
+characters, the raster overlay that stopped path tracing, stretched bracelets and glasses lenses,
+car parts floating with animation in the new GPU path, and roughly half the frame time.
 
 Release history and what changed in each: **[CHANGELOG.md](CHANGELOG.md)**.
 
@@ -162,7 +187,7 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 
 ```
 ├── src/sr3-rtx/         the shim: sr3rtx.cpp + build.ps1
-├── build/               the built sr3-rtx.asi (committed, so releases are reproducible)
+├── build/               the built sr3-rtx.asi (committed so a release needs no local build; NOT byte-reproducible - the PE timestamp changes on every compile, and the toolchain is whatever `vswhere -latest` finds)
 ├── configs/
 │   ├── sr3-rtx.ini          shim settings — every one documented with the measurement behind it
 │   ├── rtx.conf             the Remix config (texture categorisation, options)
@@ -185,6 +210,7 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 │   ├── engine-map.md        the renderer: command buffer, opcodes, dispatch table
 │   ├── cloth-uv-map.md      which UV set feeds which sampler, per shader
 │   └── worklog.md           the run-by-run history
+├── remix-fork-patches/  patches to RTX Remix itself — two upstream bug fixes
 ├── engine-control/      a SEPARATE plugin, sr3-engine.asi — see below
 └── srttr-hair/          a SEPARATE mod, the SRTTR hair reshape — see below
 ```
@@ -240,16 +266,19 @@ copy of the game.
 
 ## Roadmap
 
-1. **The in-game HUD.** Its draws are found and rebuilt; it still does not appear. Currently
-   parked.
-2. **Convert the sky** — the last population lost when vertex capture was turned off, still passed
-   through.
-3. **Confirm the colour work on other outfits.** Every mechanism is general; only one outfit has
+1. **Attribute the misplaced buildings.** The top correctness bug. The control run — stock runtime,
+   memoization back on, same flight path — has not been done.
+2. **Character body/head colour mismatch**, the most visible remaining fault.
+3. **The in-game HUD.** Its draws are found and rebuilt; it still does not appear. Parked.
+4. **Convert the sky** — the last population lost when vertex capture was turned off.
+5. **Report both Remix bugs upstream**, and restore index memoization properly by giving each
+   memoized copy its own host-visible buffer instead of carving it from the staging allocator.
+6. **Confirm the colour work on other outfits.** Every mechanism is general; only one outfit has
    been checked on screen.
-4. Performance: the growing shim time and its stalls.
-5. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
+7. Move first-time per-buffer conversions off the render thread.
+8. Scene captures into the RTX Remix Toolkit; proper sun/sky and key lights, replacing the
    fallback light.
-6. **The goal: replace assets with the Saints Row: The Third Remastered versions, which are
+9. **The goal: replace assets with the Saints Row: The Third Remastered versions, which are
    already PBR.** The plan and its two substitution points are in
    [docs/asset-replacement-plan.md](docs/asset-replacement-plan.md).
 

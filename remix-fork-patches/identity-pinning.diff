@@ -1,0 +1,84 @@
+diff --git a/src/d3d9/d3d9_rtx_utils.cpp b/src/d3d9/d3d9_rtx_utils.cpp
+index b59da3b2..181d43d7 100644
+--- a/src/d3d9/d3d9_rtx_utils.cpp
++++ b/src/d3d9/d3d9_rtx_utils.cpp
+@@ -221,6 +221,12 @@ namespace dxvk {
+ 
+     // Allow the users to configure vertex color as baked lighting for legacy draw calls.
+     materialData.isVertexColorBakedLighting = RtxOptions::vertexColorIsBakedLighting();
++
++    // Identity pinning: usage of unused renderstates - unused values are set to 0xfefefefe
++    // (ported from xoxor4d/dxvk-remix game/gta4_atmos10_nr2)
++    materialData.remixTextureCategoryFlagsFromD3D = d3d9State.renderStates[42] != 0xfefefefe ? d3d9State.renderStates[42] : 0u;
++    materialData.remixHashFromD3D = d3d9State.renderStates[150] != 0xfefefefe ? d3d9State.renderStates[150] : 0u;
++    materialData.remixHashModifierFromD3D = d3d9State.renderStates[220] != 0xfefefefe ? d3d9State.renderStates[220] : 0u;
+   }
+ 
+ 
+diff --git a/src/dxvk/rtx_render/rtx_materials.h b/src/dxvk/rtx_render/rtx_materials.h
+index 7acfae9d..155fb12c 100644
+--- a/src/dxvk/rtx_render/rtx_materials.h
++++ b/src/dxvk/rtx_render/rtx_materials.h
+@@ -1778,6 +1778,12 @@ struct LegacyMaterialData {
+   bool isTextureFactorBlend = false;
+   bool isVertexColorBakedLighting = true;
+ 
++  // Identity pinning: values read from otherwise-unused D3D9 render states, set by the game/shim
++  // to control replacement-asset matching directly. Ported from xoxor4d/dxvk-remix game/gta4_atmos10_nr2.
++  uint32_t remixTextureCategoryFlagsFromD3D = 0u; // RS 42
++  XXH64_hash_t remixHashFromD3D = 0; // RS 150
++  uint32_t remixHashModifierFromD3D = 0u; // RS 220
++
+   void setHashOverride(XXH64_hash_t hash) {
+     m_cachedHash = hash;
+   }
+@@ -1795,6 +1801,15 @@ private:
+     // plain data hash used by the RtSurfaceMaterial for storage in map-like data structures, but rather
+     // one used to identify a material and compare to user-provided hashes.
+     m_cachedHash = colorTextures[0].getImageHash();
++
++    // Identity pinning: re-hash with a seed set via an unused D3D RenderState (RS 220)
++    if (remixHashModifierFromD3D) {
++      m_cachedHash = XXH64(&m_cachedHash, sizeof(m_cachedHash), remixHashModifierFromD3D);
++    }
++    // Identity pinning: custom hash set via an unused D3D RenderState (RS 150)
++    else if (remixHashFromD3D) {
++      m_cachedHash = remixHashFromD3D;
++    }
+   }
+ 
+   const static uint32_t kMaxSupportedTextures = 2;
+diff --git a/src/dxvk/rtx_render/rtx_types.cpp b/src/dxvk/rtx_render/rtx_types.cpp
+index 68db5241..4e5535c0 100644
+--- a/src/dxvk/rtx_render/rtx_types.cpp
++++ b/src/dxvk/rtx_render/rtx_types.cpp
+@@ -377,6 +377,10 @@ namespace dxvk {
+     //                   than doing N lookups per texture hash for each category.
+     const XXH64_hash_t& textureHash = materialData.getColorTexture().getImageHash();
+ 
++    // Identity pinning: seed categories from an unused D3D RenderState (RS 42), texture-hash lists below OR their
++    // own categories on top. Ported from xoxor4d/dxvk-remix game/gta4_atmos10_nr2.
++    categories = CategoryFlags(materialData.remixTextureCategoryFlagsFromD3D);
++
+     setCategory(InstanceCategories::WorldUI, lookupHash(RtxOptions::worldSpaceUiTextures(), textureHash));
+     setCategory(InstanceCategories::WorldMatte, lookupHash(RtxOptions::worldSpaceUiBackgroundTextures(), textureHash));
+ 
+@@ -550,9 +554,15 @@ namespace dxvk {
+       return SkyDetectionSource::Explicit;
+     }
+ 
+-    // NOTE: we use color texture hash for sky detection, however the replacement is hashed with
+-    // the whole legacy material hash (which, as of 12/9/2022, equals to color texture hash). Adding a check just in case.
+-    assert(drawCallState.getMaterialData().getColorTexture().getImageHash() == drawCallState.getMaterialData().getHash() && "Texture or material hash method changed!");
++    // Identity pinning: disable the assert below if the material is using a custom hash (or hash
++    // modifier) set via an unused D3D RenderState, since that intentionally diverges the material
++    // hash from the color texture hash. Ported from xoxor4d/dxvk-remix game/gta4_atmos10_nr2
++    // (adapted: that fork also gates on its RS149 shader-modifier field, which is out of scope here).
++    if (!drawCallState.getMaterialData().remixHashFromD3D && !drawCallState.getMaterialData().remixHashModifierFromD3D) {
++      // NOTE: we use color texture hash for sky detection, however the replacement is hashed with
++      // the whole legacy material hash (which, as of 12/9/2022, equals to color texture hash). Adding a check just in case.
++      assert(drawCallState.getMaterialData().getColorTexture().getImageHash() == drawCallState.getMaterialData().getHash() && "Texture or material hash method changed!");
++    }
+ 
+     if (drawCallState.getMaterialData().usesTexture()) {
+       if (lookupHash(RtxOptions::skyBoxTextures(), drawCallState.getMaterialData().getHash())) {

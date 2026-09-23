@@ -51,6 +51,13 @@
 #include <unordered_set>
 #include <vector>
 #include <algorithm>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <atomic>
+#include <intrin.h>
 
 namespace {
 
@@ -112,6 +119,7 @@ constexpr int kSlotSetPixelShaderConstantF = 109;
 constexpr int kSlotCreateQuery = 118;   // last method on IDirect3DDevice9
 // IDirect3DQuery9: QueryInterface/AddRef/Release, GetDevice, GetType, GetDataSize, Issue, GetData
 constexpr int kSlotQueryGetData = 7;
+constexpr int kSlotQueryIssue = 6;
 
 const D3DMATRIX kIdentity = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
 
@@ -181,18 +189,26 @@ constexpr float kShortUVScale = 1.0f / 1024.0f;
 // and the API character capture ask through here, so the two can never drift apart again - which
 // is the bug that put the underwear's UVs at four times their proper size in BOTH copies.
 float CurrentShortUVScale();
+// Forward-declared (defined below, with FIX A): SetupTextureStages' texture-matrix scale
+// (2026-09-18 audit fix) needs this before its own definition is reached.
+int DecalUvSourceSet();
 
 // The float2 texture-coordinate stream; see the uv conversion further down.
 constexpr DWORD kUvStreamDefault = 7;              // clamped to the device's stream count at init
+// One below the uv stream's own default, so a device with room for both never collides them -
+// see g_skinFFStreamsOk (HookDevice) for what happens when there is not room for both.
+constexpr DWORD kSkinFFStreamDefault = 6;
 constexpr UINT kUvBytesPerVertex = 8;              // float2
 constexpr size_t kMaxUvBufferBytes = 48u << 20;    // total held across all converted buffers
 
 
 struct Settings {
     bool ffp = true;             // master switch; 0 = passive observer, for A/B against no conversion
-    bool convertSkinned = false; // characters need CPU skinning first (phase 2)
+    bool convertSkinned = true;  // characters need CPU skinning first (phase 2); ON by default as of 2026-09-17, synced to the deployed ini - 0 means no characters render
+    // Adopt the frame's main camera by WHAT IT IS, not by what arrives first. See BeginFFP.
+    bool mainCameraScreenSizedOnly = true;
     bool skipMirrored = true;    // skip passes whose handedness differs from the main camera
-    bool cacheMeshAlbedo = true; // pin each mesh to its first-seen texture (streaming eviction)
+    bool cacheMeshAlbedo = false; // pin each mesh to its first-seen texture (streaming eviction); OFF by default as of 2026-09-17, synced to the deployed ini
     bool skipUntextured = true;  // don't convert passes whose shader samples nothing (the prepass)
     // Don't convert a draw into a render target that cannot hold colour. 0 restores the old
     // behaviour, which is the A/B for the doubled characters.
@@ -200,7 +216,18 @@ struct Settings {
     // Don't convert a draw whose PIXEL SHADER writes more than one render target. 0 restores
     // the old behaviour, which is the A/B for the head texture and the head z-fighting.
     bool skipDeferredGBuffer = true;
-    int screenSpaceMode = 2;     // 0 pass, 1 ortho demote, 2 mark the ones sampling a render target
+    // CHANGE 1, 2026-09-18: don't convert a VFX mask material (ir_vfxmask / ir_vfxmasktod)
+    // whose whole shape lives in Alpha_MaskSampler - a sampler this shim's own AlbedoRank
+    // scores 0, so SetupTextureStages never binds it and disables every stage past 0 anyway.
+    // With no Alpha_Threshold declared and no Decal-named albedo, ALPHAARG1 falls back to
+    // D3DTA_TFACTOR, TFACTOR is pinned to 0xFFFFFFFF, and additive blending hands Remix the
+    // full diffuse texture at alpha 1.0 - a soft light shaft rendered as an opaque slab. See
+    // Classify's rule immediately before its final return. shader_constants.csv shows Alpha_
+    // Mask is named ONLY by this one shader family in the whole game (grepped 2026-09-18), so
+    // the rule cannot reach a character, a vehicle or a wall. ON by default: a bug fix, not a
+    // guess.
+    bool skipMaskOnlyVfx = true;
+    int screenSpaceMode = 0;     // 0 pass, 1 ortho demote, 2 mark the ones sampling a render target; default 0 as of 2026-09-17, synced to the deployed ini
     // Demote the HUD to a UI overlay. The HUD arrives through DrawPrimitiveUP, which nothing
     // hooked until 2026-09-04, so it has been reaching Remix unclassified since the fork.
     // 0 restores that - the A/B for anything this changes.
@@ -210,6 +237,11 @@ struct Settings {
     // the HUD survive capture-off, which is the configuration that finally removed the fullscreen
     // quads from in front of the camera.
     bool uiConvertUP = true;
+    // 1 restores the double draw that put the menu, the map and the HUD in the world: after a
+    // HUD draw was rebuilt as fixed function, the game's own draw still went out (a missing
+    // brace) with float4 PIXEL positions through whatever vertex processing the bridge had
+    // bound - (2560, 1440, 0) as world coordinates, a thousand units above the player.
+    bool uiRawAfterHud = false;
     // KEEP the game's pixel shader on the rebuilt HUD draw. Nulling it is what this shim does for
     // WORLD geometry, where Remix wants the albedo texture rather than the shader - but for the
     // UI the pixel shader IS the content, and throwing it away is what produced a greyscale
@@ -274,73 +306,434 @@ struct Settings {
     bool clothColourCurve = true;
     // Take the UV divide from the vertex shader's own def constant instead of assuming 1/1024.
     // 0 restores the hardcoded value, which is the A/B for anything this changes.
-    bool uvScaleFromShader = true;
+    // Default 0 (hardcoded 1/1024) as of 2026-09-17, synced to the deployed ini.
+    bool uvScaleFromShader = false;
     // Census of every draw we PASS THROUGH. With capture off a passed-through shader draw is
     // invisible, so this names exactly what is being lost.
     bool passCensus = true;
     // One-shot dump of every draw into a character-atlas-sized render target. The atlas is
     // composited at character load, not per frame, so no frame dump has ever caught it.
     bool atlasCompositeProbe = true;
-    bool compositeToTexturePass = true;  // never SKIP a composite into an off-screen texture
-    bool markAuxCamera = false;  // mark the 512x288 reflection pass; needs the post chain hidden
+    bool compositeToTexturePass = false; // never SKIP a composite into an off-screen texture; OFF by default as of 2026-09-17, synced to the deployed ini - reverted 2026-08-28, see the ini
+    bool markAuxCamera = true;   // mark the 512x288 reflection pass; ON by default as of 2026-09-17, synced to the deployed ini - turned on 2026-08-18 once the post chain was confirmed hidden
     bool clearBackBuffer = true; // nothing writes it once the composite is marked - see the clear
     bool hideLightVolumes = true;// light volumes (their light is already injected separately)
     bool injectLights = true;
     bool rankAlbedo = true;      // use CTAB sampler names to choose base colour
     bool excludeRTAlbedo = true; // never use a render-target texture as base colour
+    // A texture with fewer than 3 colour channels (D3DFMT_A8 and similar) carries no colour
+    // at all, only alpha. SetupTextureStages used to select its colour anyway whenever it was
+    // the chosen albedo (COLORARG1=D3DTA_TEXTURE), and an alpha-only format samples RGB=0 in
+    // fixed function, so the surface rendered solid BLACK under its own alpha mask. Measured
+    // 2026-09-18 on the decal probe: fmt=28 (D3DFMT_A8), stage=2, albedoSampler='Decal_MapSampler'
+    // - a static world decal, not a particle. ON takes COLORARG1 from D3DTA_TFACTOR instead
+    // when this happens, so the colour comes from whatever this branch already puts in
+    // TEXTUREFACTOR (opaque white here; see SetupTextureStages for what TFACTOR does and does
+    // not carry for this population) while the texture stays bound for its alpha. OFF restores
+    // today's behaviour for an A/B. Default ON: this is a bug fix, not a guess.
+    bool albedoRejectColourlessTexture = true;
+    // Instrumentation only - it only logs and counts. Detects a converted draw whose chosen
+    // albedo (EffectiveAlbedo's pick, not just g_curTexture[0]) differs from what the SAME draw
+    // picked last frame - the shape of bug behind surfaces flickering through unrelated images.
+    bool albedoChurnProbe = true;
     float lightScale = 1.0f;
     float lightRangeScale = 1.0f;
-    int hiddenPassMode = 3;      // 0 pass, 1 ortho demote, 2 skip, 3 bind the marker texture
+    int hiddenPassMode = 2;      // 0 pass, 1 ortho demote, 2 skip, 3 bind the marker texture; default 2 as of 2026-09-17, synced to the deployed ini - mode 3's marker subsystem is retired, see CreateMarkerTexture
     // --- diagnostics ---
-    int dumpFrame = 1800;        // frames to wait after the camera appears before dumping one
+    int dumpFrame = 60;          // frames to wait after the camera appears before dumping one; default 60 as of 2026-09-17, synced to the deployed ini
     bool logLayouts = true;      // one line per distinct vertex layout, capped
     bool shapeProbe = true;      // one frame of world-space bounds for draws near the camera
     bool skinProbe = true;       // one frame of skinned-draw layout, bones and objTM
     bool rigidSkinProbe = true;  // one frame of the weightless BLENDINDICES layout
     bool remixShortUV = true;    // re-declare short2 texcoords as short2n so Remix reads them
-    bool deinstanceConverted = true;  // reset stream frequency on single-instance converted draws
+    // FIX 3: UvBufferFor's static (whole-buffer) and dynamic (snooped/ring) decodes both assumed
+    // stream 0 was bound at byte offset 0 - a pooled buffer at a non-zero offset fed every vertex
+    // ANOTHER vertex's texcoords. See UvBufferFor's own comment for the phase/base split. Off
+    // restores the exact old, offset-blind addressing.
+    bool uvHonourStreamOffset = true;
+    // FIX A: sample a decal draw's albedo from vertex TEXCOORD1 when its vertex shader declares
+    // that but no TEXCOORD0 at all. See DecalUvSourceSet.
+    bool decalUvFromDeclaredSet = true;
+    // 2026-09-18 AUDIT FIX: SetupTextureStages computed its short2 texture-matrix scale from
+    // g_curLayout.texcoordType (set 0) even on a FIX A set-1 draw, whose texcoordType is -1 for
+    // want of any stream-0 TEXCOORD0 - so su/sv fell back to 1.0, D3DTTFF_DISABLE let the raw
+    // short values UvBufferFor deliberately left unscaled reach the sampler directly, and 1024
+    // raw units became 1024 UV: about a thousand texture repeats, a fine stripe pattern standing
+    // in for the real image. ir_sr3fauxinterior (fake window interiors) is one of the FIX A
+    // families. ON takes the scale from whichever set the conversion actually used; OFF restores
+    // today's texcoordType-only behaviour for an A/B. See SetupTextureStages.
+    bool decalUvScaleFromSet = true;
+    // FIX B: take ALPHAARG1 from the texture, not TFACTOR, when the chosen albedo sampler names
+    // a Decal map AND the draw is genuinely blended by its factors. See SetupTextureStages.
+    bool decalAlphaFromTexture = true;
+    // DIAGNOSTIC: building decals (signs, logos, posters - the family whose CHOSEN albedo
+    // sampler name contains "Decal") render as a flat quad showing a fine repeating stripe
+    // pattern instead of their image. FIX A and FIX B above did not change it, and depth,
+    // blinking, albedo churn, the alpha path, the texcoord SET and the tiling lookup have all
+    // been measured and ruled out. The two things left that decide what appears on the quad -
+    // which texture is bound as albedo, and what coordinate range is fed to it - have never
+    // been measured; this does that, for the first 8 qualifying draws, and changes no render
+    // state. See ProbeDecalDraw.
+    bool decalProbe = true;
+    bool decalProbeDumpTexture = true;  // also write the bound albedo's top mip as a .dds
+    // STRICT TARGET, 2026-09-18: without this, ProbeDecalDraw armed on the first 8 converted
+    // draws whose albedo sampler merely NAMED a Decal map, and in practice that population is
+    // dominated by particle billboards (verts=20 prims=10 at the origin, usesObjTM=0) whose
+    // source buffer is DYNAMIC, so the raw-coordinate read then refused every one of the 8
+    // reports. ON also requires stream 0 to be static, the draw to be indexed, and the draw to
+    // carry an object transform that does not place it at the origin - the shape of a BUILDING
+    // decal, not a particle effect. OFF restores the old, permissive test for an A/B; see the
+    // rejection counters beside ProbeDecalDraw for which test is excluding candidates when this
+    // is ON.
+    bool decalProbeStrictTarget = true;
+    bool deinstanceConverted = false; // reset stream frequency on single-instance converted draws; OFF by default as of 2026-09-17, synced to the deployed ini - measured not to fix the popping it targeted, see the ini
     bool clothProbe = true;      // one pass over the customisable-clothing material inputs
     bool diffuseColorProbe = true;  // distribution of the Diffuse_Color constant we discard
     bool rtAlbedoCopy = true;    // re-upload a render-target albedo so Remix can hash it
     bool atlasSnoop = true;      // snoop the game's own writes to the character atlas
+    // Validate the source range (VirtualQuery, in Hook_SurfUnlockRect) before the atlas
+    // snoop copies from it, and run the copy itself under a structured-exception guard.
+    // Off reverts to the old unconditional memcpy. See the ini for why this exists.
+    bool snoopValidateSource = true;
+    // THREAD-SCOPED g_internal. Before this, g_internal was a plain global the render thread
+    // held true across the whole of BeginFFP while the game's own atlas/vertex-buffer lock and
+    // unlock pairs ran concurrently on its MAIN thread - a main-thread call in that window read
+    // g_internal == true and wrongly skipped its own bookkeeping, which is what orphaned a
+    // pending atlas entry and produced the September 14 crash (see g_internalThread and
+    // InternalHere, above the hooks). ON scopes every guard read to "the thread that actually
+    // set it"; OFF restores the bare global for an A/B.
+    bool snoopThreadScopedInternal = true;
+    // 2026-09-18 AUDIT FIX: Hook_VBUnlock consumed g_pendingLock whenever self matched, with no
+    // check on WHICH thread was calling. UvBufferFor's RegisterSnoop(g_stream0) makes every
+    // DYNAMIC stream-0 buffer a snooped instance stream, and roughly a dozen probes read-lock
+    // g_stream0 without checking DYNAMIC first (BakeDecal, MeasureShortUVs, OcclMeshFor and
+    // others) - so the render thread's own internal Unlock could land while a GAME thread's write
+    // Lock on the same buffer was still pending, consume THAT entry, copy a half-written buffer
+    // into the snoop cache, and clear the pending slot before the game's real Unlock ever ran -
+    // whose finished write was then never snooped. ON restricts consumption to the thread that
+    // set the pending entry (a main-thread unlock still consumes its own main-thread entry
+    // regardless of the internal flag, which is what the September 14 change was actually for);
+    // OFF restores that change's unconditional consume for an A/B.
+    bool vbUnlockOwnerThread = true;
     bool cameraOnly = false;     // hand Remix a camera and touch no draw at all
     bool cameraOnlyFloatUV = false;  // also convert SHORT2 texcoords on pass-through draws
     bool cameraMainViewOnly = true;  // give Remix ONLY the main scene camera, not all ~11
     bool convertDynamicUV = true;    // convert SHORT2 UVs on DYNAMIC buffers via the snoop
     bool remixApi = true;            // initialize Remix's programmatic API and register the device
     bool remixApiCamera = false;     // AND hand it the camera through SetupCamera (step 1b)
-    bool remixApiTestCube = true;    // step 2: one API-submitted mesh, to prove it appears
-    bool remixApiCharacter = true;   // step 3a: submit one character mesh through the API
+    bool remixApiTestCube = false;   // step 2: one API-submitted mesh, to prove it appears; OFF by default as of 2026-09-17, synced to the deployed ini
+    bool remixApiCharacter = false;  // step 3a: submit one character mesh through the API; OFF by default as of 2026-09-17, synced to the deployed ini
     bool remixApiSkinning = false;   // step 3c: let Remix skin. CRASHED 2026-09-02, see the ini
     bool remixApiClothAlbedo = false;  // replace a cloth slot texture with a generated one
-    bool bakeShaderAlbedo = false;    // run the game's pixel shader into a UV-space target
+    bool bakeShaderAlbedo = false;    // run the game's pixel shader into a UV-space target; CLOSED, do not reopen (exhausted memory, see the ini) - 2026-09-17: the LoadSettings fallback below used to default this to true, contradicting this false; both now agree
     bool clothUseDiffuse = true;      // multiply the customisation colour by the Diffuse_Map
     float clothBrightness = 1.0f;     // scale the baked cloth albedo (tuning, not a fix)
     float remixApiCharacterOffset = 3.0f;  // stand it beside the real one, so they cannot z-fight
-    bool scanCommandBlocks = true;   // walk each command block to see what the engine will do
+    bool scanCommandBlocks = false;  // walk each command block to see what the engine will do; OFF by default as of 2026-09-17, synced to the deployed ini
     // OFF by default and on its own key. Reading the GAME's render targets with
     // GetRenderTargetData froze SR3 twice - once unbounded, and again at one read per 120
     // frames with a 60-read budget, which means the cost was never the problem: Remix's
     // D3D9 cannot service a readback of a surface it owns and is using. Sharing a gate with
     // atlasSnoop meant the harmless snoop could not be enabled without the dangerous probe.
     bool rtContentProbe = false;
-    int rtAlbedoRetries = 240;   // frames to keep retrying while the source reads back blank
+    int rtAlbedoRetries = 3000;  // frames to keep retrying while the source reads back blank; default 3000 (~2 minutes) as of 2026-09-17, synced to the deployed ini
     bool generateCloth = true;   // build clothing albedo per outfit from the pattern + colours
     bool clothDump = false;      // write the first 3 outfits and their patterns out as raw RGB
     bool charTexDump = false;    // write every named stage of the probed character materials
     int captureKey = 0x78;       // VK_F9: re-arm the frame and shape dumps, 0 disables
+    // Write ONE minidump (sr3-rtx-test.dmp) at device-hook time, with a null exception pointer,
+    // so MiniDumpWriteDump and its flags can be verified on demand - a wrong flag or a bad file
+    // handle would otherwise only be discovered the next time the game actually crashes. OFF by
+    // default: this is a diagnostic, not something to leave writing a dump file every launch.
+    bool crashTestDumpAtStart = false;
     // Refuse to read a bone palette for a draw whose vertex shader declares no BLENDINDICES
     // input. Such a shader places the mesh by objTM alone; posing it costs a bone matrix that
     // belongs to whatever was drawn before. 0 restores the old fallback-to-c52 behaviour, which
     // is what makes this a controlled experiment rather than an assertion.
     int skinRequireBoneDecl = 1;
-    int skinRingMB = 8;          // size of the CPU-skinning ring; larger means fewer wraps
-    bool forceOcclusionVisible = false;  // answer the engine's occlusion queries "fully visible"
-    bool rejectStaleBones = true;  // drop bone influences belonging to a different object
-    bool clampBonesToUpload = true;  // ignore bones outside this object's own palette upload
+    int skinRingMB = 24;         // size of the CPU-skinning ring; larger means fewer wraps; default 24 as of 2026-09-17, synced to the deployed ini
+    bool forceOcclusionVisible = true;   // answer the engine's occlusion queries "fully visible"; ON by default as of 2026-09-17, synced to the deployed ini - must stay 1 with capture off, see the ini
+    // PERFORMANCE. Two kinds of draw cost a bridge round trip each and produce nothing:
+    //  - the OCCLUSION PROXIES: the draw the engine issues between Query::Issue(BEGIN) and (END)
+    //    so the query can count its pixels. With forceOcclusionVisible the count is fabricated, so
+    //    neither the proxy draw nor the Issue calls need to reach D3D9. A proxy is a box - the
+    //    skip is gated on primitive count so a real object drawn inside a query is left alone,
+    //    and the frame report histograms what was actually seen inside queries.
+    //  - DECLINED PASS-THROUGH: a pass-through draw with a programmable vertex shader bound.
+    //    With rtx.useVertexCapture = False Remix drops those outright (that is why the HUD was
+    //    invisible until it was rebuilt), so forwarding them buys nothing. Turn this OFF if
+    //    vertex capture is ever turned back on.
+    bool skipOcclusionProxies = true;
+    int occlusionProxyMaxPrims = 12;
+    bool skipDeclinedPassThrough = true;
+    // CPU SKINNING is the shim's dominant cost: PROFILE measured 12.27 ms of a 27 ms city frame
+    // in the vertex loop, 117,984 skinned vertices over 24 draws, ~104 ns each. Every vertex was
+    // paying for four per-influence policy checks and six global counters that the same report
+    // shows inert. skinFast runs a straight blend when every one of those policies is off - the
+    // output is identical by construction - and skinThreads splits draws of 2048+ vertices over
+    // a persistent worker pool (0 = half the cores, capped at 4).
+    bool skinFast = true;
+    // Default 1 as of 2026-09-17, synced to the deployed ini (0 = auto: half the cores, capped at 4).
+    int skinThreads = 1;
+    // Fixed-function (hardware) skinning: the alternative to CPU skinning above, through
+    // D3D9's indexed vertex blending - see the big comment beside SkinViaFixedFunction, below
+    // UnbindSkinned, for why this was thought closed (MaxVertexBlendMatrixIndex=8 in dxvk-
+    // remix's reported caps) and why it is not (that cap describes something else; the actual
+    // path stages maxBone+1 matrices and both SetTransform and the bridge validate indices up
+    // to WORLDMATRIX(255)). OFF by default: the CPU ring above remains the default path and is
+    // completely untouched when this is off. ON, a draw that would go to SkinAndBind tries the
+    // hardware path first and falls back to CPU skinning - not to pass-through - for anything
+    // it refuses (cloth, morph, a declaration it cannot read, a bone it cannot stage safely).
+    bool skinViaFixedFunction = false;
+    // THE SHAPE BAKE (morphBake): apply a character's morph delta ONCE into a whole-buffer copy
+    // of its source mesh, instead of refusing every morph-active draw from the GPU (fixed-
+    // function) skin path outright. Only safe when the delta itself rarely changes frame to
+    // frame - see morphProbe, which measures that before this is trusted. OFF by default.
+    bool morphBake = false;
+    // Cap on the total bytes held by every baked copy at once (sum of each source VB's own
+    // desc.Size) - LRU-evicted by last-used frame when a new bake would exceed it.
+    int morphBakeMaxMB = 24;
+    // New (first-time) bakes AND rebuilds (the delta actually changed) are each capped at this
+    // many per frame - a rebuild count exceeding it is the delta-churn guard: the shim would
+    // otherwise pay a full re-bake every frame for a delta that is not, in fact, static.
+    int morphBakeMaxPerFrame = 2;
+    // Measures whether a character's morph delta changes frame to frame at all, and how often -
+    // read this BEFORE trusting morphBake=1. OFF by default; the ini ships it ON for the next run.
+    bool morphProbe = false;
+    // FIX 1: WORLDMATRIX(0) IS D3DTS_WORLD - staging it for a mesh that uses bone 0 overwrites
+    // it, UnbindSkinFF restores plain objTM after the draw, and the NEXT draw sharing this
+    // palette (the sameStage branch in SkinViaFixedFunction, common - 8.9 draws/frame share one
+    // mesh key) restages NOTHING, so WORLDMATRIX(0) stays at the WRONG objTM for every vertex
+    // weighted to bone 0. Off restores the old, restage-nothing-on-reuse behaviour.
+    bool skinFFRestageBone0 = true;
+    // FIX 2: SkinFFBufferFor decodes its side buffer assuming stream 0 starts at byte 0, and
+    // SkinViaFixedFunction always bound it at offset 0 - so a pooled source buffer bound at a
+    // non-zero stream-0 offset (several accessories sharing one VB) fed every vertex ANOTHER
+    // vertex's weights/indices, addressing bone slots this draw never staged. See
+    // SkinFFBufferFor's own comment for the phase/base split. Off restores the old, offset-blind
+    // addressing and the old 0-only bind.
+    bool skinFFHonourStreamOffset = true;
+    // FIX 4: SkinFFDeclarationFor only clones a declaration that carries BOTH BLENDWEIGHT and
+    // BLENDINDICES, but a rigid single-bone mesh (skinRigidSingleBone) legitimately carries
+    // BLENDINDICES and NO BLENDWEIGHT at all - SkinFFBufferFor already writes an implicit [1,0,0]
+    // weight for these, but the clone had nothing to retarget, so every one of these declarations
+    // failed and ~10-11 draws/frame fell back to CPU skinning ("declarations: 3 made, 7 failed").
+    // On, with skinRigidSingleBone also on, appends the missing BLENDWEIGHT element instead of
+    // requiring one to already exist. Off restores the old retarget-only cloning.
+    bool skinFFRigidDecl = true;
+    // FIX 5: SkinViaFixedFunction stages every draw's bones from mesh->usedBones - built by
+    // GetBaseMesh from the VERTEX DECLARATION's weight/index bytes - never from what the VERTEX
+    // SHADER actually reads. SkinAndBind (the proven CPU path) does the opposite: reads =
+    // usesBlendIndices || !skinRequireBoneDecl, influences = usesBlendWeights ? 4 : 1 - see its
+    // own "A shader that declares no blendweight input uses exactly ONE bone" comment. A shader
+    // that reads no BLENDINDICES at all places the mesh by objTM alone; one that reads
+    // BLENDINDICES but no BLENDWEIGHT (every vehicle body/glass variant, and any other rigid
+    // attachment) uses exactly bone idx[0] at weight 1, regardless of what the declaration's
+    // other three weight bytes hold. The GPU path ignored both distinctions and staged whatever
+    // the declaration happened to carry - including palette slots the object never uploaded,
+    // still holding the PREVIOUS character's bones, which is why car windows and other rigid
+    // parts floated with player/NPC animation once FIX 4 (skinFFRigidDecl) started cloning these
+    // declarations successfully and moved this population onto the GPU path. On: refuse a
+    // no-BLENDINDICES shader outright (CPU path handles it), stage exactly idx[0] for a
+    // no-BLENDWEIGHT shader instead of the declaration's other three weights, and refuse a
+    // four-bone draw with any vertex the shader would otherwise leave at its bind pose. Off
+    // restores today's declaration-driven staging.
+    bool skinFFFollowShaderInfluences = true;
+    // THE BRIDGE DIET. Averaged over 60 city hitches: 24 ms inside our hooks, 43 ms outside -
+    // and "outside" is mostly the game's own D3D9 traffic crossing the 32->64-bit bridge for
+    // draws that are then skipped or declined. With rtx.useVertexCapture = False no programmable
+    // vertex shader ever runs on the bridge, so two whole classes of call are dead weight:
+    //   dietVsConstants  SetVertexShaderConstantF - bone palettes (3 KB per skinned draw) and
+    //                    per-draw matrices. Shadowed in g_vsConst, which is all the shim reads.
+    //   dietVsBinds      SetVertexShader - shadowed in g_lastVS; the bridge's own binding is
+    //                    synced lazily (SyncBridgeVS) only before a draw that is forwarded, so
+    //                    a converted draw gets null and a raw pass-through gets the game's.
+    // Both must be OFF if vertex capture is ever turned back on.
+    bool dietVsConstants = true;
+    bool dietVsBinds = true;
+    // CPU OCCLUSION CULLING. forceOcclusionVisible answers every query "visible", so the engine
+    // draws everything in the frustum and Remix path-traces the block behind the building. The
+    // engine's own test cannot be handed back (it needs the depth prepass Remix never executes),
+    // so the test is done here: the proxy drawn inside each query is the object's box (a unit
+    // cube placed by Scale/Offset/World_xform/Render_offset, read from the proxy shader's own
+    // constants), the rigid opaque converted draws are the occluders (geometry cached once per
+    // mesh), and a worker thread rasterises the largest occluders into a small depth buffer and
+    // tests each box against it. In doubt - near plane, off-screen, no data - the answer is
+    // VISIBLE; only a box entirely behind rasterised opaque geometry is culled. One frame late.
+    bool occlusionCull = true;
+    bool occlusionDryRun = false;        // compute and report, but keep answering "visible"; OFF by default as of 2026-09-17, synced to the deployed ini - real culling is engaged
+    int occlusionMaxOccluders = 2000;    // largest on screen, per frame; default 2000 as of 2026-09-17, synced to the deployed ini
+    int occlusionMaxTris = 250000;       // rasterisation budget per frame; default 250000 as of 2026-09-17, synced to the deployed ini
+    int occlusionMeshBudget = 16;        // new meshes read from the bridge per frame; default 16 as of 2026-09-17, synced to the deployed ini
+    int occlusionWidth = 320;            // depth buffer; height follows the back buffer aspect
+    // Nothing within this distance of the camera (view depth of the box's nearest corner, in
+    // game units) is ever culled by us: inside it the engine's own behaviour stands. The user's
+    // rule, 2026-09-10 - the near field is where a wrong answer is most visible and least worth it.
+    int occlusionMinDistance = 5;
+    // Hysteresis and answers keyed by the OBJECT (quantised box translation + size) rather than
+    // by the query pointer, which the engine may hand to a different object next frame.
+    bool occlusionKeyByObject = true;
+    // An occluder within this many centimetres of a box's translation is the box's own object
+    // and never occludes it; 0 = the exact quantised key only.
+    int occlusionSelfToleranceCm = 50;
+    int occlusionExplainFlips = 40;      // verdict flips explained in the log per report window
+    // The uv and occluder caches are invalidated through a per-buffer index instead of a scan
+    // of the whole cache per invalidated buffer (~60 a frame x ~2300 entries = the 1.2 ms drain).
+    bool indexedInvalidation = true;
+    // A game lock drops only the cached occluder meshes whose byte range it overlaps (DISCARD
+    // or a size-0 lock drops the buffer's all). Meshes in a buffer the game appends to every
+    // frame otherwise blink out of the pool, and everything behind them flips visible.
+    bool occlusionRangeInvalidation = true;
+    // An occluder used last job stays in the pool past occlusionMaxOccluders: the boundary at
+    // that rank otherwise moves with every change in the offered set.
+    bool occlusionStickyOccluders = true;
+    // Scan each skinned draw's index range once (a read lock, 8 new ranges a frame) and count
+    // indices outside the declared vertex window. Our ring copy holds only the window; an index
+    // past it reads another mesh's vertices - a triangle stretched across the screen.
+    bool probeIndexWindow = true;
+    // A converted, non-skinned, indexed draw narrowed to the tight vertex range its own indices
+    // reference, instead of the whole-mesh window SR3 declares for a building decal (2-4
+    // triangles submitted with NumVertices set to the whole mesh, measured at 28336). Remix's
+    // geometry hash covers positions and texcoords over that whole declared window, so the
+    // decal's identity to Remix churns every time the game's streamer writes anywhere else in
+    // the shared buffer, although the decal's own six vertices never move. OFF by default: this
+    // only changes what the device is told to process, and is meant to be turned on after a
+    // session has been read with it off - see the TIGHTEN WINDOW report line, which is printed
+    // and measured regardless of this switch.
+    bool tightenConvertedWindow = false;
+    // 2026-09-18 AUDIT FIX: g_tightWin above used to cache a tight window keyed on a raw
+    // IDirect3DIndexBuffer9* with nothing AddRef'd and nothing invalidated - SR3 streams
+    // geometry, so a released index buffer's address handed straight back to a new one made the
+    // cache answer with a different mesh's range. ON pins every index buffer this cache ever
+    // learns the shape of (see GetTightIbShape) so its address cannot be recycled while known to
+    // it; OFF restores today's unreferenced cache for an A/B.
+    bool tightenWindowPinIndexBuffers = true;
+    // The 2026-09-18 PROFILE audit: TightenConvertedWindow's cache-miss path evicted an
+    // ARBITRARY entry (erase(g_tightWin.begin())) once full, rather than the least recently
+    // used one, so a decal-dense area holding more than the cache's cap thrashed and spent the
+    // 32-lock-a-frame budget every frame forever instead of once. ON replaces that with the
+    // same age-based scheme OcclMeshFor/KickOcclusionJob already use - a lastUsed frame stamp
+    // and a periodic sweep (SweepTightWin, called from Hook_Present); OFF restores today's
+    // arbitrary eviction for an A/B.
+    bool tightWinEvictByAge = true;
+    // TightenConvertedWindow's safety net used to only ever refuse when the referenced range
+    // fell outside what the game declared (see g_tightRefuseNotSubset, and the OUTSIDE WINDOW
+    // report line printed alongside TIGHTEN WINDOW). A refusal falls back to the game's own
+    // declared window, which is exactly the undefined case in D3D9: a vertex the indices
+    // reference but the declared window does not cover has no obligation to exist there, and
+    // Remix builds the draw's geometry from the range it is handed - a triangle stretched across
+    // the scene. ON widens the window instead, to [min(minIndex, lo), max(minIndex+numVertices,
+    // hi+1)), so the device is always given a window that actually contains every vertex the
+    // indices touch; the widened window is clamped to the bound vertex buffer first (see
+    // g_tightRefuseWidenBeyondBuffer), so this can never declare a vertex that does not exist.
+    // OFF restores today's refuse-and-fall-back for an A/B.
+    bool widenUnderDeclaredWindow = true;
+    // ORPHAN SWEEP (2026-09-21): every pointer-keyed cache in this file AddRefs a game-owned
+    // resource so a recycled address can never be handed an old buffer's cached data - correct,
+    // but for STATIC resources the only release paths were "the game writes the buffer again"
+    // (never happens for static geometry), a size-cap flush (rarely tripped), or nothing at all.
+    // A district the game streams out, or the whole city at the menu, then stayed alive in
+    // NvRemixBridge.exe forever: measured at exit, 11,960 resources / 148 declarations / 1,902 VS
+    // / 886 PS still alive on the server with nothing left on screen that needed them.
+    //
+    // SweepOrphans (called from Hook_Present) periodically probes every reference this shim
+    // holds - `const ULONG pub = p->AddRef() - 1; p->Release();` is a LOCAL atomic read, no IPC -
+    // and releases whatever the shim turns out to be the ONLY holder of. Device bindings
+    // (SetStreamSource/SetTexture/SetIndices/state blocks) do not add to the public count, so an
+    // object still bound is never mistaken for an orphan; the shadow state this shim already
+    // tracks is checked before anything is probed. Master switch; 0 behaves exactly as before.
+    bool orphanSweep = true;
+    // How often the sweep runs, in frames. It walks every cache this shim owns, so it is not
+    // free - see the ORPHAN SWEEP report line for its own measured cost.
+    int orphanSweepFrames = 120;
+    // Tally and log what WOULD be released, release nothing. The A/B for "is this finding the
+    // population it should" before it is trusted to touch a live cache.
+    bool orphanSweepReportOnly = false;
+    // Shaders and vertex declarations stay PINNED unless this is on. They were pinned for the
+    // process lifetime before the sweep existed, so any memo keyed by a shader or declaration
+    // ADDRESS could never go stale; releasing them makes address reuse possible, and not every
+    // such memo has been audited. They are also bounded by the game's own shader set, so they
+    // do not grow as the player drives - the unbounded growth is vertex/index buffers and
+    // textures, which the sweep always handles.
+    bool orphanSweepShadersDecls = false;
+    // GROUND TRUTH probe (SkinAndBind, "GROUND TRUTH: is our shadow..."): reads back the
+    // device's own vertex shader constants to check them against this shim's g_vsConst shadow,
+    // two GetVertexShaderConstantF calls - reads, therefore synchronous bridge round trips - per
+    // single-bone skinned draw while armed. It already produced its answer: the SHADOW vs DEVICE
+    // report line reads 12 checked, 0 matched, 12 mismatched, every run of this session. OFF by
+    // default because of that - there is nothing left this probe would tell us that the log does
+    // not already say.
+    bool shadowCheckProbe = false;
+    // ProbeHudDraw: two uncached GetDesc bridge round trips (g_curRenderTarget, then g_stream0)
+    // per draw for every draw in the frame until it has produced 8 reports - and every F9
+    // (RingRecordDraw's capture key) re-arms it by resetting g_hudProbeReports to 0. Purely a
+    // Log()-only diagnostic: nothing else in this file reads anything it sets. OFF by default so
+    // a capture taken with F9 does not pay for it at exactly the moment someone is diagnosing
+    // something else.
+    bool hudProbe = false;
+    // A converted draw whose STATIC stream-0 range was written within the last N frames is
+    // skipped for those frames. The one-frame stretched polygons appear "when meshes load";
+    // whether the fault is bridge ordering or Remix's geometry cache, the first draw after
+    // the write is the one that shows it, and one frame of pop-in is invisible next to that.
+    bool deferFreshStaticDraws = true;
+    int deferFreshFrames = 1;
+    int ringFrames = 60;                 // frames kept in the rolling draw record written on F9
+    // ASSET HASH PROBE: reproduces Remix's own geometry-hash inputs (indices, geometry
+    // descriptor, texcoords) for CONVERTED decal-named/skinned draws across a short burst
+    // armed by the capture key (F9), to tell whether the hash genuinely changes frame to
+    // frame (the flicker in Remix's Geometry Hash debug view) or this shim resubmits
+    // identical geometry under a churning identity. Diagnostic only: every buffer it touches
+    // is locked read-only (or read from the existing snoop copy for a dynamic source), and it
+    // binds nothing and draws nothing - see the ASSET HASH PROBE summary this logs at the end
+    // of each burst. 0/false disables entirely: the burst never arms and the per-draw hook
+    // returns on its first line.
+    bool assetHashProbe = true;
+    int assetHashProbeFrames = 60;       // frames captured per F9-armed burst
+    // Frame stepping: frameStepPauseKey (F7) freezes the game at Present with the frame on
+    // screen; frameStepKey (F8) releases exactly one frame; every stepped frame gets a full
+    // frame dump when frameStepDumpEachStep=1; the capture key still writes the rolling
+    // record while frozen. 0 disables.
+    int frameStepPauseKey = 0x76;
+    int frameStepKey = 0x77;
+    bool frameStepDumpEachStep = true;
+    // Decal offset: a converted draw that does not write depth (or tests ZFUNC=EQUAL) is a
+    // layer on top of other geometry - posters, signs, dirt, road paint. In a path tracer two
+    // coplanar surfaces shimmer; the rasteriser resolved them by draw order and depth bias.
+    // Such a draw is pulled toward the camera by this many parts per thousand of its distance
+    // (1 = 1 mm per metre). 0 disables.
+    // Default 0 as of 2026-09-17, synced to the deployed ini - the pull is currently DISABLED,
+    // which makes decalPrimaryOffset/biasOffset/blendedOffset/decalByLowestSampler inert,
+    // since they only affect the offset computed under decalOffsetPermille > 0.
+    int decalOffsetPermille = 0;
+    // Layer offset: the same triangles (vertex window AND index range) at the same placement,
+    // converted again in the same frame with another texture or state, are a second material
+    // pass over the same surface - coplanar by construction, and the exact-duplicate filter
+    // keeps both because their textures differ. Pulled toward the eye by pass number times this.
+    bool layerOffset = true;
+    // Default 0 as of 2026-09-17, synced to the deployed ini - the per-pass pull is disabled.
+    int layerOffsetPermille = 0;
+    bool biasOffset = true;              // a draw the game gives a depth bias is a decal: pull it too
+    // THE GAME'S OWN WORD for a decal: a pixel shader whose FIRST (lowest-register) sampler is
+    // a Decal map is a dedicated decal pass - the sign, the logo, the poster on a wall. A
+    // building's material shader carries Decal_Map too, but behind Diffuse_Map, so testing the
+    // FIRST sampler names the decal pass and never the wall. 32 such draws a frame, measured.
+    bool decalPrimaryOffset = true;
+    // Which sampler decalPrimaryOffset above tests. 1 = lowestSampler, the sampler bound to the
+    // LOWEST register - what the shader actually samples first when it runs. 0 = the old test,
+    // firstSampler, which is only whichever sampler name sorts ALPHABETICALLY first in D3DX's
+    // CTAB and is a different sampler entirely: measured, 400 pixel shaders report a Decal map
+    // alphabetically first while only 126 of them actually have one at the lowest register - the
+    // other 274 are ordinary wall/building materials. Kept togglable so the two can be compared
+    // in a capture without a rebuild.
+    bool decalByLowestSampler = true;
+    // A draw that really blends (by the FACTORS - SR3 leaves ALPHABLENDENABLE on with ONE/ZERO
+    // for opaque draws) is a layer over whatever is behind it.
+    bool blendedOffset = true;
+    bool rejectStaleBones = false; // drop bone influences belonging to a different object; OFF by default as of 2026-09-17, synced to the deployed ini
+    bool clampBonesToUpload = false; // ignore bones outside this object's own palette upload; OFF by default as of 2026-09-17, synced to the deployed ini
     bool vehicleBonesOff = false;    // single-bone draws: ignore the palette, use objTM alone
-    bool paletteSetupScope = true;   // only pose by a palette published in this draw's own setup
-    float clothTintScale = 1.0f; // clothAlbedoPercent/100; see the ini
+    bool paletteSetupScope = false;  // only pose by a palette published in this draw's own setup; OFF by default as of 2026-09-17, synced to the deployed ini
+    float clothTintScale = 2.0f; // clothAlbedoPercent/100; see the ini - default 2.0 (200%) as of 2026-09-17, synced to the deployed ini
     // OFF. Three attempts, three regressions, and no run in which it demonstrably reduced the
     // double-draw it was written for. See the ini for the full history. Kept as a switch because
     // the analysis is sound and the key is now complete; it simply has never paid for itself.
@@ -351,21 +744,54 @@ struct Settings {
     // sub-range of one mesh looked like a duplicate. Then it omitted the pose, so two NPCs in the
     // same garment looked like one object and the second lost its clothing. The key now folds in
     // eight bone matrices, which is what makes "the same object" mean the same object.
-    bool dedupSkinned = false;
+    // 2026-09-17: the deployed ini nonetheless has this ON; the default here is synced to match
+    // it rather than assume off. The "never paid for itself" history above still stands - this
+    // sync doesn't endorse re-enabling it, only ends the code/ini disagreement.
+    bool dedupSkinned = true;
     // Extend the same duplicate test to NON-skinned draws. Measured 2026-08-27: 94 redundant
     // converted copies a frame, and only 4 of them were skinned.
-    bool dedupAll = false;
+    // Default ON as of 2026-09-17, synced to the deployed ini (see dedupSkinned above - same caveat).
+    bool dedupAll = true;
     // Apply the per-character morph delta from stream 2. 0 renders the base mesh, which is what
     // every build before 2026-08-27 did.
     bool applyMorph = true;
     bool tintFallbackAlbedo = false;  // OFF: measured to darken clothing, see SetupTextureStages
-    bool skinRigidSingleBone = false; // OFF: correlated with clothing vanishing, see GetBaseMesh
+    bool skinRigidSingleBone = true;  // ON by default as of 2026-09-17, synced to the deployed ini - 0 means cars do not render; the "correlated with clothing vanishing" concern that shipped this OFF is unresolved, see GetBaseMesh
     // Any frame at or above this many ms writes one line partitioning where the time went.
     // 40 ms is ~2.3 frames at the measured 58 fps: long enough that the player sees a hitch,
     // short enough to catch the 100 ms ones with room to spare.
     int hitchMs = 40;
     int probeVerts[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
     int probeVertCount = 0;
+    // THE RASTERIZED-FRAME INVARIANT: a draw that SAMPLES a render target on any bound stage
+    // AND WRITES a screen-sized target (render target 0 exactly the back buffer's own size)
+    // must never reach the device unless Remix is already guaranteed to decline it. This is the
+    // permanent, path-independent fix for the user's stated top priority - "at some camera
+    // angles, the rasterized render of the game replaces the scene" - a bug this project has
+    // fixed before on one path while it returned through another. See
+    // CompositesEngineOutputToScreen (defined with g_rtTextures, well above Classify) for the
+    // predicate itself and why both halves are needed to leave the character atlas composite
+    // untouched. Default ON: this is a correctness invariant, not a tuning knob. 0 restores
+    // today's per-path behaviour for an A/B.
+    bool blockEngineOutputToScreen = true;
+    // injectProbe: MEASURE ONLY where the shim's own fixed-function draws satisfy Remix's OWN
+    // UI-classification trigger for RtxContext::injectRTX (read out of remix-1.5.2's
+    // d3d9_rtx.cpp, not guessed - see EvaluateInjectTrigger, defined beside the marker texture
+    // section below). blockEngineOutputToScreen above is this project's EARLIER attempt at the
+    // same user-reported bug, from a different angle (catch the game's rasterised composite
+    // before it reaches the device); injectProbe and injectControl are the diagnosis Remix's
+    // own source gives instead, and the two are independent - this one changes no render state
+    // and no pixel, so there is no reason to ship it off. Default ON.
+    bool injectProbe = true;
+    // injectControl: THE FIX. (a) suppresses an accidental early trigger from one of the
+    // shim's own PRETRANSFORMED (RHW) draws by forcing D3DTS_PROJECTION off-identity for just
+    // that one draw - invisible, since RHW vertices ignore the transform pipeline for
+    // rendering and Remix's classifier reads the transform, not the vertex; (b) issues the
+    // GTA4-RTX-mod's own deliberate, invisible trigger quad once per frame, immediately after
+    // the game's final composite and before the first HUD draw, so injectRTX fires at the
+    // RIGHT moment on every frame instead of by camera-angle accident. Default ON: this is the
+    // permanent fix, not a tuning knob.
+    bool injectControl = true;
 } g_settings;
 
 void LoadSettings() {
@@ -373,23 +799,44 @@ void LoadSettings() {
     GetModuleFileNameA(nullptr, path, MAX_PATH);
     if (char* slash = strrchr(path, '\\')) strcpy_s(slash + 1, 32, "sr3-rtx.ini");
 
+    // Detect a key ABSENT from the ini rather than silently falling back - a missing or
+    // misspelt key was previously indistinguishable from an explicit one, and the startup log
+    // said nothing about it. The sentinel is never a legal value for any key here (every key in
+    // this file is numeric or boolean), so an unchanged buffer means GetPrivateProfileStringA
+    // used ITS default, i.e. the key was not found.
+    int iniPresentCount = 0, iniAbsentCount = 0;
+    auto checkPresent = [&](const char* key) {
+        char sentinel[8];
+        GetPrivateProfileStringA("sr3-rtx", key, "\x01", sentinel, sizeof(sentinel), path);
+        const bool present = !(sentinel[0] == '\x01' && sentinel[1] == '\0');
+        if (present) ++iniPresentCount; else ++iniAbsentCount;
+        return present;
+    };
+
     auto flag = [&](const char* key, bool def) {
+        if (!checkPresent(key))
+            Log("ini: key '%s' ABSENT - using built-in default %d", key, def ? 1 : 0);
         return GetPrivateProfileIntA("sr3-rtx", key, def ? 1 : 0, path) != 0;
     };
     auto num = [&](const char* key, int def) {
+        if (!checkPresent(key))
+            Log("ini: key '%s' ABSENT - using built-in default %d", key, def);
         return GetPrivateProfileIntA("sr3-rtx", key, def, path);
     };
 
     g_settings.ffp = flag("ffp", true);
-    g_settings.convertSkinned = flag("convertSkinned", false);
+    g_settings.convertSkinned = flag("convertSkinned", true);
+    g_settings.mainCameraScreenSizedOnly = flag("mainCameraScreenSizedOnly", true);
     g_settings.skipMirrored = flag("skipMirrored", true);
-    g_settings.cacheMeshAlbedo = flag("cacheMeshAlbedo", true);
+    g_settings.cacheMeshAlbedo = flag("cacheMeshAlbedo", false);
     g_settings.skipUntextured = flag("skipUntextured", true);
     g_settings.skipNonColourTargets = flag("skipNonColourTargets", true);
     g_settings.skipDeferredGBuffer = flag("skipDeferredGBuffer", true);
-    g_settings.screenSpaceMode = num("screenSpaceMode", 2);
+    g_settings.skipMaskOnlyVfx = flag("skipMaskOnlyVfx", true);
+    g_settings.screenSpaceMode = num("screenSpaceMode", 0);
     g_settings.uiDemoteUP = flag("uiDemoteUP", true);
     g_settings.uiConvertUP = flag("uiConvertUP", true);
+    g_settings.uiRawAfterHud = flag("uiRawAfterHud", false);
     g_settings.uiKeepPixelShader = flag("uiKeepPixelShader", true);
     g_settings.compositeFfp = flag("compositeFfp", true);
     g_settings.clothUniformFromDiffuse = flag("clothUniformFromDiffuse", true);
@@ -400,69 +847,142 @@ void LoadSettings() {
     g_settings.clothMeshDecal = flag("clothMeshDecal", true);
     g_settings.clothDecalTiles = flag("clothDecalTiles", true);
     g_settings.clothColourCurve = flag("clothColourCurve", true);
-    g_settings.uvScaleFromShader = flag("uvScaleFromShader", true);
+    g_settings.uvScaleFromShader = flag("uvScaleFromShader", false);
     g_settings.passCensus = flag("passCensus", true);
     g_settings.atlasCompositeProbe = flag("atlasCompositeProbe", true);
-    g_settings.compositeToTexturePass = flag("compositeToTexturePass", true);
-    g_settings.markAuxCamera = flag("markAuxCamera", false);
+    g_settings.compositeToTexturePass = flag("compositeToTexturePass", false);
+    g_settings.markAuxCamera = flag("markAuxCamera", true);
     g_settings.clearBackBuffer = flag("clearBackBuffer", true);
     g_settings.hideLightVolumes = flag("hideLightVolumes", true);
     g_settings.injectLights = flag("injectLights", true);
     g_settings.rankAlbedo = flag("rankAlbedo", true);
     g_settings.excludeRTAlbedo = flag("excludeRTAlbedo", true);
+    g_settings.albedoRejectColourlessTexture = flag("albedoRejectColourlessTexture", true);
+    g_settings.albedoChurnProbe = flag("albedoChurnProbe", true);
     g_settings.logLayouts = flag("logLayouts", true);
     g_settings.lightScale = num("lightScalePercent", 100) / 100.0f;
     g_settings.lightRangeScale = num("lightRangePercent", 100) / 100.0f;
-    g_settings.dumpFrame = num("dumpFrame", 1800);
+    g_settings.dumpFrame = num("dumpFrame", 60);
     g_settings.shapeProbe = flag("shapeProbe", true);
     g_settings.hitchMs = num("hitchMs", 40);
     g_settings.skinProbe = flag("skinProbe", true);
     g_settings.rigidSkinProbe = flag("rigidSkinProbe", true);
     g_settings.remixShortUV = flag("remixShortUV", true);
-    g_settings.deinstanceConverted = flag("deinstanceConverted", true);
+    g_settings.uvHonourStreamOffset = flag("uvHonourStreamOffset", true);
+    g_settings.decalUvFromDeclaredSet = flag("decalUvFromDeclaredSet", true);
+    g_settings.decalUvScaleFromSet = flag("decalUvScaleFromSet", true);
+    g_settings.decalAlphaFromTexture = flag("decalAlphaFromTexture", true);
+    g_settings.decalProbe = flag("decalProbe", true);
+    g_settings.decalProbeDumpTexture = flag("decalProbeDumpTexture", true);
+    g_settings.decalProbeStrictTarget = flag("decalProbeStrictTarget", true);
+    g_settings.deinstanceConverted = flag("deinstanceConverted", false);
     g_settings.clothProbe = flag("clothProbe", true);
     g_settings.diffuseColorProbe = flag("diffuseColorProbe", true);
     g_settings.rtAlbedoCopy = flag("rtAlbedoCopy", true);
     g_settings.atlasSnoop = flag("atlasSnoop", true);
+    g_settings.snoopValidateSource = flag("snoopValidateSource", true);
+    g_settings.snoopThreadScopedInternal = flag("snoopThreadScopedInternal", true);
+    g_settings.vbUnlockOwnerThread = flag("vbUnlockOwnerThread", true);
     g_settings.cameraOnly = flag("cameraOnly", false);
     g_settings.cameraOnlyFloatUV = flag("cameraOnlyFloatUV", false);
     g_settings.cameraMainViewOnly = flag("cameraMainViewOnly", true);
     g_settings.convertDynamicUV = flag("convertDynamicUV", true);
     g_settings.remixApi = flag("remixApi", true);
     g_settings.remixApiCamera = flag("remixApiCamera", false);
-    g_settings.remixApiTestCube = flag("remixApiTestCube", true);
-    g_settings.remixApiCharacter = flag("remixApiCharacter", true);
+    g_settings.remixApiTestCube = flag("remixApiTestCube", false);
+    g_settings.remixApiCharacter = flag("remixApiCharacter", false);
     g_settings.remixApiSkinning = flag("remixApiSkinning", false);
     g_settings.remixApiClothAlbedo = flag("remixApiClothAlbedo", false);
-    g_settings.bakeShaderAlbedo = flag("bakeShaderAlbedo", true);
+    g_settings.bakeShaderAlbedo = flag("bakeShaderAlbedo", false);
     g_settings.clothUseDiffuse = flag("clothUseDiffuse", true);
     g_settings.clothBrightness =
         static_cast<float>(num("clothBrightness", 100)) / 100.0f;
     g_settings.remixApiCharacterOffset =
         static_cast<float>(num("remixApiCharacterOffset", 3));
-    g_settings.scanCommandBlocks = flag("scanCommandBlocks", true);
+    g_settings.scanCommandBlocks = flag("scanCommandBlocks", false);
     g_settings.rtContentProbe = flag("rtContentProbe", false);
-    g_settings.rtAlbedoRetries = num("rtAlbedoRetries", 240);
+    g_settings.rtAlbedoRetries = num("rtAlbedoRetries", 3000);
     g_settings.generateCloth = flag("generateCloth", true);
     g_settings.clothDump = flag("clothDump", false);
     g_settings.charTexDump = flag("charTexDump", false);
     g_settings.captureKey = num("captureKey", 0x78);
+    g_settings.crashTestDumpAtStart = flag("crashTestDumpAtStart", false);
     g_settings.skinRequireBoneDecl = num("skinRequireBoneDecl", 1);
-    g_settings.skinRingMB = num("skinRingMB", 8);
-    g_settings.forceOcclusionVisible = flag("forceOcclusionVisible", false);
-    g_settings.rejectStaleBones = flag("rejectStaleBones", true);
-    g_settings.clampBonesToUpload = flag("clampBonesToUpload", true);
+    g_settings.skinRingMB = num("skinRingMB", 24);
+    g_settings.forceOcclusionVisible = flag("forceOcclusionVisible", true);
+    g_settings.skipOcclusionProxies = flag("skipOcclusionProxies", true);
+    g_settings.occlusionProxyMaxPrims = static_cast<int>(num("occlusionProxyMaxPrims", 12));
+    g_settings.skipDeclinedPassThrough = flag("skipDeclinedPassThrough", true);
+    g_settings.skinFast = flag("skinFast", true);
+    g_settings.skinThreads = static_cast<int>(num("skinThreads", 1));
+    g_settings.skinViaFixedFunction = flag("skinViaFixedFunction", false);
+    g_settings.skinFFRestageBone0 = flag("skinFFRestageBone0", true);
+    g_settings.skinFFHonourStreamOffset = flag("skinFFHonourStreamOffset", true);
+    g_settings.skinFFRigidDecl = flag("skinFFRigidDecl", true);
+    g_settings.skinFFFollowShaderInfluences = flag("skinFFFollowShaderInfluences", true);
+    g_settings.dietVsConstants = flag("dietVsConstants", true);
+    g_settings.dietVsBinds = flag("dietVsBinds", true);
+    g_settings.occlusionCull = flag("occlusionCull", true);
+    g_settings.occlusionDryRun = flag("occlusionDryRun", false);
+    g_settings.occlusionMaxOccluders = static_cast<int>(num("occlusionMaxOccluders", 2000));
+    g_settings.occlusionMaxTris = static_cast<int>(num("occlusionMaxTris", 250000));
+    g_settings.occlusionMeshBudget = static_cast<int>(num("occlusionMeshBudget", 16));
+    g_settings.occlusionWidth = static_cast<int>(num("occlusionWidth", 320));
+    g_settings.occlusionMinDistance = static_cast<int>(num("occlusionMinDistance", 5));
+    g_settings.occlusionKeyByObject = flag("occlusionKeyByObject", true);
+    g_settings.occlusionSelfToleranceCm = static_cast<int>(num("occlusionSelfToleranceCm", 50));
+    g_settings.occlusionExplainFlips = static_cast<int>(num("occlusionExplainFlips", 40));
+    g_settings.indexedInvalidation = flag("indexedInvalidation", true);
+    g_settings.occlusionRangeInvalidation = flag("occlusionRangeInvalidation", true);
+    g_settings.occlusionStickyOccluders = flag("occlusionStickyOccluders", true);
+    g_settings.probeIndexWindow = flag("probeIndexWindow", true);
+    g_settings.tightenConvertedWindow = flag("tightenConvertedWindow", false);
+    g_settings.tightenWindowPinIndexBuffers = flag("tightenWindowPinIndexBuffers", true);
+    g_settings.tightWinEvictByAge = flag("tightWinEvictByAge", true);
+    g_settings.widenUnderDeclaredWindow = flag("widenUnderDeclaredWindow", true);
+    g_settings.orphanSweep = flag("orphanSweep", true);
+    g_settings.orphanSweepFrames = static_cast<int>(num("orphanSweepFrames", 120));
+    g_settings.orphanSweepReportOnly = flag("orphanSweepReportOnly", false);
+    g_settings.orphanSweepShadersDecls = flag("orphanSweepShadersDecls", false);
+    g_settings.shadowCheckProbe = flag("shadowCheckProbe", false);
+    g_settings.hudProbe = flag("hudProbe", false);
+    g_settings.deferFreshStaticDraws = flag("deferFreshStaticDraws", true);
+    g_settings.deferFreshFrames = static_cast<int>(num("deferFreshFrames", 1));
+    g_settings.ringFrames = static_cast<int>(num("ringFrames", 60));
+    g_settings.assetHashProbe = flag("assetHashProbe", true);
+    g_settings.assetHashProbeFrames = static_cast<int>(num("assetHashProbeFrames", 60));
+    g_settings.frameStepPauseKey = static_cast<int>(num("frameStepPauseKey", 0x76));
+    g_settings.frameStepKey = static_cast<int>(num("frameStepKey", 0x77));
+    g_settings.frameStepDumpEachStep = flag("frameStepDumpEachStep", true);
+    g_settings.decalOffsetPermille = static_cast<int>(num("decalOffsetPermille", 0));
+    g_settings.layerOffset = flag("layerOffset", true);
+    g_settings.layerOffsetPermille = static_cast<int>(num("layerOffsetPermille", 0));
+    g_settings.biasOffset = flag("biasOffset", true);
+    g_settings.decalPrimaryOffset = flag("decalPrimaryOffset", true);
+    g_settings.decalByLowestSampler = flag("decalByLowestSampler", true);
+    g_settings.blendedOffset = flag("blendedOffset", true);
+    g_settings.rejectStaleBones = flag("rejectStaleBones", false);
+    g_settings.clampBonesToUpload = flag("clampBonesToUpload", false);
     g_settings.vehicleBonesOff = flag("vehicleBonesOff", false);
-    g_settings.paletteSetupScope = flag("paletteSetupScope", true);
-    g_settings.clothTintScale = num("clothAlbedoPercent", 100) / 100.0f;
-    g_settings.dedupSkinned = flag("dedupSkinned", false);
-    g_settings.dedupAll = flag("dedupAll", false);
+    g_settings.paletteSetupScope = flag("paletteSetupScope", false);
+    g_settings.clothTintScale = num("clothAlbedoPercent", 200) / 100.0f;
+    g_settings.dedupSkinned = flag("dedupSkinned", true);
+    g_settings.dedupAll = flag("dedupAll", true);
     g_settings.applyMorph = flag("applyMorph", true);
+    g_settings.morphBake = flag("morphBake", false);
+    g_settings.morphBakeMaxMB = num("morphBakeMaxMB", 24);
+    g_settings.morphBakeMaxPerFrame = num("morphBakeMaxPerFrame", 2);
+    g_settings.morphProbe = flag("morphProbe", false);
     g_settings.tintFallbackAlbedo = flag("tintFallbackAlbedo", false);
-    g_settings.skinRigidSingleBone = flag("skinRigidSingleBone", false);
-    g_settings.hiddenPassMode = num("hiddenPassMode", 3);
+    g_settings.skinRigidSingleBone = flag("skinRigidSingleBone", true);
+    g_settings.hiddenPassMode = num("hiddenPassMode", 2);
+    g_settings.blockEngineOutputToScreen = flag("blockEngineOutputToScreen", true);
+    g_settings.injectProbe = flag("injectProbe", true);
+    g_settings.injectControl = flag("injectControl", true);
     {
         char list[128]{};
+        if (!checkPresent("probeVerts"))
+            Log("ini: key 'probeVerts' ABSENT - using built-in default (empty list)");
         GetPrivateProfileStringA("sr3-rtx", "probeVerts", "", list, sizeof(list), path);
         char* ctx = nullptr;
         for (char* tok = strtok_s(list, ", \t", &ctx);
@@ -471,6 +991,15 @@ void LoadSettings() {
             if (v > 0) g_settings.probeVerts[g_settings.probeVertCount++] = v;
         }
     }
+
+    // This exists to end a silent failure: a missing or misspelt ini key used to look exactly
+    // like an explicit one, with nothing in the log to tell them apart. A clean run is worth
+    // stating for the same reason - it says the ini was actually read, not merely present.
+    if (iniAbsentCount == 0)
+        Log("ini: all %d keys present in sr3-rtx.ini", iniPresentCount);
+    else
+        Log("ini: %d of %d keys ABSENT from sr3-rtx.ini (see lines above; built-in defaults used)",
+            iniAbsentCount, iniPresentCount + iniAbsentCount);
 }
 
 // ---------------------------------------------------------------- math
@@ -620,11 +1149,57 @@ SetVSConstF_t g_origSetVSConstF = nullptr;
 SetStreamSource_t g_origSetStreamSource = nullptr;
 SetStreamSourceFreq_t g_origSetStreamSourceFreq = nullptr;
 SetIndices_t g_origSetIndices = nullptr;
+IDirect3DIndexBuffer9* g_curIB = nullptr;   // what the game last bound; no bridge call to ask
+// A vertex buffer's description never changes for its lifetime, and asking the bridge for it is
+// a synchronous round trip. UvBufferFor asked on EVERY converted draw, before its own cache
+// lookup - 4 ms of a city frame. Cleared with the uv cache when the game rewrites the buffer.
+std::unordered_map<IDirect3DVertexBuffer9*, D3DVERTEXBUFFER_DESC> g_vbDescCache;
+UINT g_uvBindOffset = 0;   // set by UvBufferFor (the uv ring's offset for this entry), used by InstallFloatUV
 CreatePixelShader_t g_origCreatePixelShader = nullptr;
 SetPixelShader_t g_origSetPixelShader = nullptr;
 SetPSConstF_t g_origSetPSConstF = nullptr;
 
 bool g_internal = false;   // guards against re-entering our own hooks
+// Which thread SET g_internal true, so a read of it can tell "I am the render thread doing my
+// own internal work" from "some other thread happened to read this while the render thread was
+// internal". The render thread holds g_internal true across the whole of BeginFFP - cloth
+// generation, uv buffer creation and locks, the atlas re-upload, the decal probe's DDS writes -
+// while the game does its own atlas and vertex-buffer lock/unlock pairs on its MAIN thread. A
+// main-thread call landing in that window used to read the bare global, see true, and wrongly
+// treat itself as internal: Hook_SurfUnlockRect skipped consuming its own pending atlas entry,
+// which left it with a bits pointer the real Unlock had already invalidated, and the next lock
+// of the same surface appended a SECOND entry that Hook_SurfUnlockRect later found first and
+// copied from - the September 14 crash (memcpy source 0x59ADF000, size 0x2000, one atlas row,
+// inside the game's own CRT memmove). Only the render thread ever writes g_internal true, so
+// this pair is read and written without a lock: it can only ever name that one thread or none,
+// and a torn read of a DWORD cannot invent a thread id that thread never had.
+volatile DWORD g_internalThread = 0;
+// True only when the CURRENT thread is the one that actually set g_internal - see
+// g_internalThread just above. snoopThreadScopedInternal is the kill switch back to a bare read
+// of g_internal (every race this exists to fix, restored) for an A/B if this is ever wrong.
+inline bool InternalHere() {
+    return g_internal && (!g_settings.snoopThreadScopedInternal ||
+                          g_internalThread == GetCurrentThreadId());
+}
+// What crosses the bridge, per call type, so the frame report can say where the traffic is.
+unsigned long long g_callVsConst = 0, g_callVsConstRegs = 0, g_callPsConst = 0, g_callPsConstRegs = 0,
+                   g_callSetVS = 0, g_callSetPS = 0, g_callSetTex = 0, g_callRS = 0, g_callTSS = 0,
+                   g_callSS = 0, g_callStream = 0, g_callDecl = 0, g_callTransform = 0,
+                   g_dietVsConstDropped = 0, g_dietVsBindDropped = 0, g_bridgeVsSyncs = 0;
+// The vertex shader the BRIDGE currently has bound - distinct from g_lastVS, which is what the
+// game last asked for. Every bind that reaches the bridge goes through here, so the two can
+// differ only by design (the diet), never by accident.
+IDirect3DVertexShader9* g_bridgeVS = nullptr;
+inline void SyncBridgeVS(IDirect3DDevice9* dev, IDirect3DVertexShader9* want) {
+    if (g_bridgeVS == want) return;
+    g_origSetVertexShader(dev, want);
+    g_bridgeVS = want;
+    ++g_bridgeVsSyncs;
+}
+HRESULT WINAPI Hook_SetIndices(IDirect3DDevice9* dev, IDirect3DIndexBuffer9* ib) {
+    if (!InternalHere()) g_curIB = ib;
+    return g_origSetIndices(dev, ib);
+}
 
 // ---------------------------------------------------------------- shader reflection
 
@@ -894,6 +1469,32 @@ struct ShaderInfo {
     // Over half of converted draws currently render untextured and the reason has been inferred
     // rather than observed.
     char firstSampler[28] = {};
+    // D3DX writes the CTAB constant table sorted ALPHABETICALLY by name, never by register, so
+    // firstSampler above is only whichever sampler name happens to sort first - not the shader's
+    // primary texture. Measured on ir_bbstandard_bs: s1 Diffuse_Map, s2 Specular_Map, s3
+    // Decal_Map, s4 Decal_Map_2, yet firstSampler comes out "Decal_MapSampler" because "Decal"
+    // sorts before "Diffuse". lowestSampler instead names whichever sampler is bound to the
+    // LOWEST register number - the one the shader actually samples first when it runs.
+    char lowestSampler[28] = {};
+    int lowestSamplerReg = 9999;   // sentinel, lowered as the CTAB walk finds smaller registers
+    // Decal-named tests, computed ONCE here instead of by StrStrIA(...,"Decal") on every
+    // converted draw. Three call sites ran that search per draw over these exact three fixed
+    // ShaderInfo strings (SetupTextureStages's decalAlphaBlend on albedoSampler, and the
+    // decalByLowestReg/decalByFirstAlpha pair in BeginFFP on lowestSampler/firstSampler) -
+    // ~0.09 ms/frame of recomputing an answer that cannot change for the shader's lifetime.
+    // isDecalAlbedo is the third one: the task that named isDecalLowest/isDecalFirst only
+    // listed two fields, but SetupTextureStages's albedoSampler test is a distinct string from
+    // both of those and needs its own cached answer to actually remove all three searches.
+    bool isDecalLowest = false;
+    bool isDecalFirst = false;
+    bool isDecalAlbedo = false;
+    // FIX A: does this VERTEX shader's own input declaration carry a usage-index-0 TEXCOORD at
+    // all, and if not, what is the LOWEST texcoord usage index it does declare? Read from the
+    // shader's own dcl_texcoordN INPUT instructions in ReflectShader - never from a pixel
+    // shader's dcl_texcoordN, which names an INTERPOLATOR input (the vertex shader's output),
+    // a completely different thing. See DecalUvSourceSet for what these decide.
+    bool declaresTexcoord0 = false;
+    int lowestDeclaredTexcoord = 99;   // sentinel: no texcoordN input declared at all
 };
 
 // Keyed on the shader's own address, and every entry holds a reference.
@@ -947,6 +1548,13 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
     if (!length) return result;
 
     const char* bytes = reinterpret_cast<const char*>(tokens);
+    // D3DVS_VERSION packs 0xFFFE into the version token's top 16 bits, D3DPS_VERSION packs
+    // 0xFFFF. Needed because THIS SAME FUNCTION reflects both kinds of shader -
+    // Hook_CreatePixelShader only sets isPixelShader on the result AFTER calling it - and a
+    // pixel shader's own dcl_texcoordN declares its INTERPOLATOR inputs (what the vertex shader
+    // already output), not a vertex attribute. declaresTexcoord0 / lowestDeclaredTexcoord below
+    // must only ever be filled from a genuine vertex shader's input declarations.
+    const bool isVertexShader = (tokens[0] >> 16) == 0xFFFE;
     // Scan the instruction stream for dcl_blendweight on an INPUT register. Opcode 0x1F is DCL;
     // its first source token carries the D3DDECLUSAGE in the low five bits (BLENDWEIGHT == 1) and
     // its second is the destination register. Length lives in bits 24-27 for SM2+, so the walk
@@ -988,6 +1596,18 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
                 if (usage == 0 /* D3DDECLUSAGE_POSITION */ && ((t[1] >> 16) & 0xF) == 1 &&
                     regType == 1 /* INPUT */)
                     result.usesMorph = true;
+                // TEXCOORD input declarations, VERTEX SHADER ONLY (see isVertexShader above).
+                // ir_at_sr3decalonly_{s,bs} VS 0-4, ir_sr3diffcol_normal_decal_{s,bs} VS 2-5,
+                // ir_at_decalonly_cuberef_* VS 5 and ir_sr3fauxinterior_{s,bs} VS 0-1 build their
+                // decal coordinate from TEXCOORD1 and declare NO usage-index-0 input at all - this
+                // is exactly what lets DecalUvSourceSet notice them instead of blindly sampling
+                // whatever index 0 happens to hold.
+                if (usage == 5 /* D3DDECLUSAGE_TEXCOORD */ && regType == 1 /* INPUT */ &&
+                    isVertexShader) {
+                    const int idx = static_cast<int>((t[1] >> 16) & 0xF);
+                    if (idx == 0) result.declaresTexcoord0 = true;
+                    if (idx < result.lowestDeclaredTexcoord) result.lowestDeclaredTexcoord = idx;
+                }
             }
             // D3DSIO_TEX / texld (0x42) in ps_3_0: dst, source coordinate, sampler.
             //
@@ -1140,6 +1760,10 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
             result.anySampler = true;
             if (!result.firstSampler[0])
                 strncpy_s(result.firstSampler, name, sizeof(result.firstSampler) - 1);
+            if (reg < result.lowestSamplerReg) {
+                result.lowestSamplerReg = reg;
+                strncpy_s(result.lowestSampler, name, sizeof(result.lowestSampler) - 1);
+            }
             if (reg >= 0 && reg < 8) strncpy_s(result.samplerName[reg], name, 19);
             if (!_stricmp(name, "Pattern_MapSampler")) result.patternStage = reg;
             const int rank = AlbedoRank(name);
@@ -1236,6 +1860,12 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
         else if (info.regInfo >= 0) info.kind = LightShader::Point;
         else info.kind = LightShader::Directional;
     }
+    // Computed once here, after every sampler name in the CTAB has been walked (lowestSampler,
+    // firstSampler and albedoSampler above are all only final once the loop is done), rather
+    // than re-run by StrStrIA on every converted draw this shader is bound for.
+    result.isDecalLowest = result.lowestSampler[0] != '\0' && StrStrIA(result.lowestSampler, "Decal") != nullptr;
+    result.isDecalFirst = result.firstSampler[0] != '\0' && StrStrIA(result.firstSampler, "Decal") != nullptr;
+    result.isDecalAlbedo = result.albedoSampler[0] != '\0' && StrStrIA(result.albedoSampler, "Decal") != nullptr;
     return result;
 }
 
@@ -1275,6 +1905,14 @@ struct VertexLayout {
     bool skinned = false;
     int texcoordType = -1;
     int texcoordOffset = -1;
+    // CHANGE 3, 2026-09-18: WHICH STREAM the usage-index-0 TEXCOORD actually lives on, read
+    // the same way texcoord1Stream already is (below) - BEFORE the stream-0 filter this loop
+    // applies to texcoordType/texcoordOffset. Without this there is no way to tell "this
+    // shader declares no TEXCOORD0 at all" apart from "it declares one, but ParseDeclaration
+    // skipped it because it sits on a stream other than 0": both left texcoordType at -1.
+    // The frame dump's tc0type/tc0stream fields exist to make that declaration-side blind
+    // spot visible: tc0type=-1 together with a non-zero tc0stream names it outright.
+    int texcoordStream = -1;
     // THE SECOND UV SET. SR3's clothing shaders declare three texcoord inputs -
     // dcl_texcoord v1, dcl_texcoord1 v4, dcl_texcoord2 v5 - and the PATTERN map is sampled with
     // TEXCOORD1, not TEXCOORD0. Only set 0 was ever decoded, which is why the customisation
@@ -1368,6 +2006,41 @@ inline unsigned FormatColourChannels(D3DFORMAT f) {
     }
 }
 
+// The chosen albedo's format and colour-channel count, cached by POINTER exactly the way
+// g_rtCopies and g_vbDescCache above are: GetLevelDesc is a bridge round trip, so it must be
+// paid once per distinct texture and never once per draw. Read by SetupTextureStages, which
+// uses the channel count to decide whether stage 0 may take its COLOUR from this texture at
+// all (see albedoRejectColourlessTexture), and by RecordFrameDraw, which prints it so a frame
+// dump shows how many bound albedos are colourless across the WHOLE frame rather than only the
+// eight decal-probe slots. A texture's format cannot change over its own lifetime, so unlike a
+// render target's contents this needs no invalidation - only the same pointer-reuse caution
+// g_rtCopies already accepts for its own non-render-target entries: a freed texture's address
+// handed to an unrelated new texture would read this cache's stale answer, which is wrong but
+// not unsafe, since the worst it does is pick the wrong side of a channel-count comparison and
+// nothing here ever dereferences the pointer itself.
+struct AlbedoFormatInfo {
+    D3DFORMAT fmt = D3DFMT_UNKNOWN;
+    unsigned channels = 4;   // unknown defaults to 4: this test may only ever REMOVE a draw's
+                             // texture colour, so anything it cannot identify must be left alone
+};
+std::unordered_map<IDirect3DBaseTexture9*, AlbedoFormatInfo> g_albedoFormatCache;
+
+const AlbedoFormatInfo& AlbedoFormatFor(IDirect3DBaseTexture9* tex) {
+    static const AlbedoFormatInfo kUnknown{};
+    if (!tex) return kUnknown;
+    const auto it = g_albedoFormatCache.find(tex);
+    if (it != g_albedoFormatCache.end()) return it->second;
+    AlbedoFormatInfo info;
+    if (tex->GetType() == D3DRTYPE_TEXTURE) {
+        D3DSURFACE_DESC d{};
+        if (SUCCEEDED(static_cast<IDirect3DTexture9*>(tex)->GetLevelDesc(0, &d))) {
+            info.fmt = d.Format;
+            info.channels = FormatColourChannels(d.Format);
+        }
+    }
+    return g_albedoFormatCache.emplace(tex, info).first->second;
+}
+
 // Instance-stream contents, cached one lock per buffer per frame. Locking per draw would be
 // ~860 buffer locks a frame, each a round trip across the 32->64-bit bridge; the whole buffer
 // is filled once per frame and indexed by offset, so one copy serves every draw that uses it.
@@ -1394,6 +2067,15 @@ struct InstanceCache {
     std::vector<unsigned char> fresh;
     unsigned frame = 0xFFFFFFFFu;
     bool valid = false;
+    // THE SHAPE BAKE: per-buffer write/discard generation counters, and whether this buffer is
+    // known to be a MORPH stream (set by MorphForThisDraw, never by RegisterSnoop itself - see
+    // MorphForThisDraw's own comment). writeSeq increments on every real write this shim actually
+    // captures (Hook_VBUnlock's copy branch) AND on every DISCARD (Hook_VBLock), so a bake's
+    // cached snoopWriteSeq can tell "this buffer was touched since I baked" without re-hashing.
+    // discardSeq increments only on DISCARD, for the probe's "changed after a repack" split.
+    unsigned writeSeq = 0;
+    unsigned discardSeq = 0;
+    bool isMorph = false;
 };
 std::unordered_map<IDirect3DVertexBuffer9*, InstanceCache> g_instCache;
 unsigned g_instanceConverted = 0, g_instanceLocks = 0, g_instCacheInvalidations = 0;
@@ -1401,6 +2083,12 @@ unsigned g_instFreshTransform = 0;   // instanced draws whose transform bytes we
 unsigned g_instStaleTransform = 0;   // ...and those reading bytes left over from a previous fill
 unsigned g_instDiscards = 0;         // whole-buffer discards seen on an instance stream
 unsigned g_instStaleReports = 0;
+// THE SHAPE BAKE: the morph VB's own write traffic - declared here (rather than beside the rest
+// of the bake machinery, much further down) because Hook_VBLock/Hook_VBUnlock, which bump these,
+// are defined before that point in the file. Not gated on morphProbe: MorphBakeFor's validation
+// needs writeSeq (InstanceCache::writeSeq, beside it) whether or not the probe is on.
+unsigned g_morphVbWrites = 0, g_morphVbDiscards = 0;
+unsigned long long g_morphVbBytes = 0;
 
 // Occlusion-query interception; the hooks themselves live next to HookDevice. Declared here so
 // the per-frame report, which is written earlier in the file, can read them.
@@ -1442,7 +2130,24 @@ UINT g_curDrawMinIndex = 0, g_curDrawStartIndex = 0, g_curDrawPrimCount = 0;
 D3DPRIMITIVETYPE g_curDrawPrimType = D3DPT_TRIANGLELIST;
 float g_appliedU = 0.0f, g_appliedV = 0.0f;   // cached texture-matrix scale
 unsigned g_uvMatrixWrites = 0;
+// 2026-09-18 audit fix counter: how often SetupTextureStages' corrected uvSrcType (the set FIX A
+// actually used) disagrees with the old texcoordType-only test - see SetupTextureStages.
+unsigned long long g_decalUvScaleFixChanged = 0;
+// Published by SetupTextureStages, one draw at a time, for ProbeDecalDraw (defined far
+// below, after TextureToBgra): the su/sv THIS draw's texture matrix was set to, and whether
+// D3DTSS_TEXTURETRANSFORMFLAGS ended up COUNT2 or DISABLE. The probe exists because the
+// applied scale and the bound texture have never actually been measured on the building
+// decals that render as a stripe pattern instead of their image.
+float g_decalProbeSu = 1.0f, g_decalProbeSv = 1.0f;
+bool g_decalProbeCount2 = false;   // true: D3DTTFF_COUNT2 was set; false: D3DTTFF_DISABLE
 unsigned g_samplerProbeReports = 0;
+// A second, separate cap: the population above (INHERITED sampler0 before conversion) armed
+// on whichever draw happened to convert first, and measured 2026-09-18 that was six reports
+// of 'Diffuse_MapSampler' - ordinary wall materials - and never once a decal, which is the
+// population whose measured UVs run from -0.95 to +1.24 (see ProbeDecalDraw) and would
+// actually be visible under CLAMP versus WRAP. Gated on the CHOSEN albedo sampler naming a
+// Decal map so the next run answers the question for the population that matters.
+unsigned g_samplerProbeDecalReports = 0;
 bool g_alphaStateOverridden = false;
 DWORD g_savedAlphaTest = 0, g_savedAlphaRef = 0, g_savedAlphaFunc = 0;
 unsigned g_drawIndexThisFrame = 0;
@@ -1546,6 +2251,9 @@ unsigned g_rigidOwnObject = 0, g_rigidForeignObject = 0, g_rigidForeignReports =
 // the total vertex count means it is rejecting nearly everything and flattening meshes instead.
 unsigned g_staleBoneVerts = 0, g_skinVertsTotal = 0, g_vehicleBonesSkipped = 0;
 unsigned g_shadowCheckReports = 0, g_shadowMismatch = 0, g_shadowMatch = 0;
+// Counts every ACTUAL round trip (win or lose), unlike g_shadowCheckReports below, which only
+// ever incremented in the mismatch branch - see the 2026-09-18 audit comment at the probe site.
+unsigned g_shadowCheckRuns = 0;
 // __popcnt64 is not available to this 32-bit build; the mask is only 64 bits and this runs a
 // handful of times per frame, so a plain loop costs nothing worth optimising.
 inline unsigned BonesUsedCount(unsigned long long m) {
@@ -1570,6 +2278,14 @@ D3DMATRIX g_appliedWorld{}, g_appliedView{}, g_appliedProj{};
 bool g_haveAppliedWorld = false, g_haveAppliedView = false, g_haveAppliedProj = false;
 bool g_ffpActive = false, g_lightingSetUp = false;
 
+// injectProbe/injectControl (see EvaluateInjectTrigger, below the marker texture section):
+// whatever D3DTS_PROJECTION ACTUALLY holds on the device right now. The game never calls
+// SetTransform at all (see Hook_SetTransform's own comment), so every write to this state
+// comes from this shim, at exactly four sites - ApplyTransforms, ApplyCameraOnly,
+// BeginUIDemote, EndUIDemote - each of which keeps this shadow exact with no extra bridge
+// call. Starts identity: D3D9's own default before this shim ever calls SetTransform.
+D3DMATRIX g_curDeviceProj = kIdentity;
+
 // Cached camera, for logging and for placing injected lights. g_cameraCaptured resets each
 // frame (it gates the once-per-frame capture); g_haveCamera does not, so a light volume drawn
 // before the frame's first converted draw still has a view matrix to be placed against.
@@ -1588,6 +2304,31 @@ unsigned g_frames = 0;
 
 // Statistics.
 unsigned g_drawsTotal = 0, g_ffpConverted = 0, g_albedoBlanked = 0, g_albedoMoved = 0;
+// FIX B: draws routed to alpha-from-texture in SetupTextureStages because the chosen albedo
+// sampler names a Decal map AND the draw is genuinely blended by its FACTORS - not merely
+// alpha-test cutouts (shaderCutout already counts those separately). See decalAlphaFromTexture.
+unsigned g_decalAlphaFromTexture = 0;
+// What EffectiveAlbedo() actually returned for the current draw, published so downstream code
+// (the churn probe below, the frame dump, the rolling record) can see the texture that was
+// CHOSEN rather than re-deriving it from g_curTexture[0], which is not necessarily the same
+// thing - that is the whole point of AlbedoRank existing. Stage -1 means nothing was chosen
+// (the null/blanked returns).
+IDirect3DBaseTexture9* g_lastEffectiveAlbedo = nullptr;
+int g_lastEffectiveAlbedoStage = -1;
+// albedoChurnProbe: converted draws whose EffectiveAlbedo() pick differs from what the SAME
+// draw (by vertex window, index range and placement, never by texture) picked last frame. See
+// the churn-detection block in BeginFFP, right after EffectiveAlbedo() is called.
+unsigned g_albedoChurnDraws = 0;
+unsigned g_albedoChurnReports = 0;   // ALBEDO CHURN log lines written so far, capped at 10
+// Per-draw breakdown of which texcoord set the CHOSEN albedo sampler reads (g_curPS.samplerUv at
+// g_lastEffectiveAlbedoStage), counted only when a stage was actually chosen (0..7). The three
+// buckets are mutually exclusive and cover every counted draw: samplerUv==0 is "set 0" (what the
+// shim currently forces via D3DTSS_TEXCOORDINDEX), samplerUv>0 is "non-zero set" (texturing would
+// be wrong), samplerUv==-1 is "unknown/computed in the shader" (traced, not a plain input read -
+// neither provably right nor provably wrong). Filled in the albedoChurnProbe block in BeginFFP.
+unsigned g_albedoUvSet0Draws = 0;
+unsigned g_albedoUvNonZeroDraws = 0;
+unsigned g_albedoUvUnknownDraws = 0;
 unsigned g_skipNotEligible = 0, g_skipSkinned = 0, g_skipScreenSpace = 0, g_skipOrtho = 0;
 unsigned g_skipNoVP = 0, g_skipVertexFormat = 0;
 unsigned g_outlierDraws = 0;   // converted draws whose vertices land absurdly far away
@@ -1648,13 +2389,32 @@ unsigned g_boneRangeReports = 0;
 // take with them. This counts the population and changes nothing.
 unsigned g_mrtConverted = 0, g_mrtWouldHide = 0, g_singleTargetConverted = 0;
 unsigned g_mrtSamplerReports = 0;
+// Diagnostic for the skinFFHonourStreamOffset/uvHonourStreamOffset fixes: the denominator over
+// ALL converted draws, not only the skinned or SHORT2-uv populations those two switches touch.
+unsigned g_convertedNonZeroStreamOffset = 0;
 unsigned g_gbufferHidden = 0;
+// CHANGE 1, 2026-09-18: VFX mask materials (ir_vfxmask / ir_vfxmasktod) whose opacity lives
+// entirely in Alpha_MaskSampler - a sampler AlbedoRank scores 0 and SetupTextureStages never
+// binds - caught by Classify's rule just before its final return. The distinct-shader set is
+// what would show an over-broad match: shader_constants.csv names only four files in this
+// family, so more than a handful of distinct shaders here means the test is catching
+// something else and needs to be narrowed.
+unsigned g_vfxMaskHidden = 0;
+std::unordered_set<IDirect3DPixelShader9*> g_vfxMaskShaders;
 char g_mrtSamplerNames[10][28] = {};
 unsigned g_morphNoStride = 0, g_morphNoDesc = 0, g_morphDynamic = 0,
          g_morphOutOfRange = 0, g_morphLockFail = 0, g_morphWhyReports = 0;
 unsigned g_skinRepeatHidden = 0;     // ...and dropped because of it
 unsigned g_tintedAlbedo = 0;         // fallback maps modulated by the shader's tint constant
 unsigned g_blankAlbedo = 0;          // rank 0 AND no colour constant: the only truly white draws
+// albedoRejectColourlessTexture: converted draws whose CHOSEN albedo has fewer than 3 colour
+// channels (D3DFMT_A8 and the like - measured on the decal probe's fmt=28 report, 2026-09-18).
+// SetupTextureStages used to select this texture's colour anyway, which for an alpha-only
+// format is always RGB=0 in fixed function - a mask rendered as solid black. Counted here so
+// the size of that population is known; the distinct-texture set is what tells whether this is
+// one shared mask atlas or many unrelated ones.
+unsigned g_albedoColourlessRejected = 0;
+std::unordered_set<IDirect3DBaseTexture9*> g_albedoColourlessTextures;
 unsigned g_hudDemoted = 0;           // authored-texture screen-space quads given an ortho projection
 unsigned g_skipNoColourPass = 0;     // hidden: no colour map, no constant, no L-buffer read
 unsigned g_skipScreenSpacePass = 0;  // hidden: samples the G-buffer normals (decals, AO, lights)
@@ -1709,6 +2469,162 @@ bool g_haveMainCamera = false;
 float g_backAspect = 0.0f;
 UINT g_backBufferW = 0, g_backBufferH = 0;   // the screen's own size, for the composite test
 unsigned g_skipOtherCamera = 0;
+
+// ---------------------------------------------------------------- the rasterized-frame invariant
+//
+// THE USER'S STATED TOP PRIORITY, verbatim: "at some camera angles, the rasterized render of the
+// game replaces the scene. we have had this issue before. we must find a permanent solution for
+// this no matter what." This project has fixed that symptom before, each time on ONE path, and it
+// has come back through another. CompositesEngineOutputToScreen is the fix as an INVARIANT
+// instead of one more per-path rule: called from Classify (the primary gate, ahead of every rule
+// that can Convert, Hide or Mark a draw) and from the two USER-POINTER draw hooks, which bypass
+// Classify entirely and so need their own call.
+//
+// The gap that made this necessary: the HUD test in Hook_DrawPrimitiveUP is "no projection matrix
+// and depth test off" and NEVER asks what the quad SAMPLES. A real HUD icon samples an authored
+// texture; a full-screen post effect (sun glare, a lens flare, bloom, anything that reads the
+// game's own rendered frame) meets the identical test and rides the SAME rebuild that keeps the
+// HUD alive with vertex capture off - straight to Remix, rasterised as a UI overlay ON TOP of the
+// path-traced world (rtx.orthographicIsUI). "At some camera angles" is exactly what a
+// camera-angle-dependent effect like glare looks like from the player's chair.
+//
+// THE INVARIANT: a draw that SAMPLES a render target on ANY bound stage (0-7, not only stage 0 -
+// a post effect can read the scene from a secondary stage) AND WRITES a screen-sized target
+// (render target 0 exactly the back buffer's own size) is compositing the engine's own rendered
+// output onto the screen, whichever path it arrived by.
+//
+// Both halves matter, and it is their CONJUNCTION that keeps this from also catching the
+// character atlas composite: the atlas legitimately samples render targets (two DXT5 layers, see
+// DrawCompositeFixedFunction above) but writes an off-screen 2048x1024/1024x512 texture, never a
+// target the size of the screen. Only the rasterized frame painted onto the screen matches both
+// halves at once.
+unsigned g_rtInvariantIndexedPass = 0, g_rtInvariantIndexedSkip = 0;      // Classify, DrawIndexedPrimitive
+unsigned g_rtInvariantDrawPass = 0, g_rtInvariantDrawSkip = 0;            // Classify, DrawPrimitive (non-indexed)
+unsigned g_rtInvariantUPPass = 0, g_rtInvariantUPSkip = 0;                // Hook_DrawPrimitiveUP - the confirmed gap
+unsigned g_rtInvariantIndexedUPPass = 0, g_rtInvariantIndexedUPSkip = 0;  // Hook_DrawIndexedPrimitiveUP - unclassified before this
+unsigned g_rtInvariantFallbackHits = 0;   // caught live, off the texture's own usage flags, not g_rtTextures
+unsigned g_rtInvariantProbeReports = 0;   // the capped report below; re-armed by the capture key
+
+bool CompositesEngineOutputToScreen(IDirect3DDevice9* dev, int* rtStage, UINT* rtW, UINT* rtH) {
+    (void)dev;
+    if (rtStage) *rtStage = -1;
+    if (rtW) *rtW = 0;
+    if (rtH) *rtH = 0;
+    if (!g_settings.blockEngineOutputToScreen) return false;
+
+    // HALF ZERO, added 2026-09-21 before this ever shipped: SCREEN-SPACE draws only. A vertex
+    // shader that transforms by projTM is WORLD GEOMETRY, and SR3's world materials legitimately
+    // sample render targets while writing the screen-sized main target: ir_sr3fauxinterior
+    // declares Reflection_MapSampler at s4, car paint samples a reflection map that is very
+    // likely a dynamically rendered cube target, and the deferred material pass writes the
+    // screen-sized main RT on every draw. Without this gate the check runs in Classify BEFORE
+    // conversion, so a world draw that is converted and visible today would be passed through
+    // instead and would simply vanish. The rasterised frame is painted by a SCREEN-SPACE quad,
+    // and this is the file's own definition of one: the screen-space branch in Classify opens
+    // with `if (!g_curVS.usesProjTM)`, a shader that emits clip-space positions itself. A draw
+    // with NO vertex shader (pretransformed, already fixed function) reads usesProjTM false and
+    // is still checked, which is right: those are the ones Remix accepts whatever the capture
+    // setting says, so they are the most dangerous of all.
+    if (g_curVS.usesProjTM) return false;
+
+    // HALF TWO, tested first because it is free: render target 0's own size against the back
+    // buffer's, both already tracked (Hook_SetRenderTarget, CreateDevice/Reset) with no bridge
+    // call here. Not the screen means not this bug, whatever any stage samples - which is what
+    // keeps the character atlas composite working: it writes an off-screen 2048x1024/1024x512
+    // texture and never reaches half one below.
+    if (!g_backBufferW || !g_backBufferH || !g_rt0Width || !g_rt0Height) return false;
+    if (g_rt0Width != g_backBufferW || g_rt0Height != g_backBufferH) return false;
+
+    // HALF ONE: does any stage this draw can read hold a render target? Every bound stage, 0
+    // through 7 - the confirmed gap this closes (Hook_DrawPrimitiveUP's HUD test) checked NO
+    // stage at all, and a post effect can sample the scene on any of them, not only stage 0. When
+    // the pixel shader is reflected and names at least one sampler, only the stages it actually
+    // declares are checked, so an unrelated leftover texture on another stage cannot trip this by
+    // accident; with no reflection (fixed-function pixel pipeline, or a shader this shim never
+    // saw) every bound stage is checked, because there is nothing narrower to trust.
+    const bool haveReflection = g_curPS.isPixelShader && g_curPS.anySampler;
+    for (int st = 0; st < 8; ++st) {
+        IDirect3DBaseTexture9* const t = g_curTexture[st];
+        if (!t) continue;
+        if (haveReflection && !g_curPS.samplerName[st][0]) continue;
+        if (g_rtTextures.count(t)) {
+            if (rtStage) *rtStage = st;
+            if (t->GetType() == D3DRTYPE_TEXTURE) {
+                D3DSURFACE_DESC sd{};
+                if (SUCCEEDED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &sd))) {
+                    if (rtW) *rtW = sd.Width;
+                    if (rtH) *rtH = sd.Height;
+                }
+            }
+            return true;
+        }
+        // FALLBACK for a render target g_rtTextures never saw: created before the CreateTexture
+        // hook was installed, or through CreateCubeTexture/CreateVolumeTexture, neither of which
+        // this shim hooks - the coverage gap the build report names plainly. Asked LIVE off the
+        // texture's own usage flags rather than trusting a creation-time record, and only ever
+        // reached here, after half two has already proven render target 0 is screen-sized, so it
+        // adds no bridge call to the other ~1,700 draws a frame that never reach this line.
+        DWORD usage = 0;
+        UINT w = 0, h = 0;
+        switch (t->GetType()) {
+            case D3DRTYPE_TEXTURE: {
+                D3DSURFACE_DESC sd{};
+                if (SUCCEEDED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &sd))) {
+                    usage = sd.Usage; w = sd.Width; h = sd.Height;
+                }
+                break;
+            }
+            case D3DRTYPE_CUBETEXTURE: {
+                D3DSURFACE_DESC sd{};
+                if (SUCCEEDED(static_cast<IDirect3DCubeTexture9*>(t)->GetLevelDesc(0, &sd))) {
+                    usage = sd.Usage; w = sd.Width; h = sd.Height;
+                }
+                break;
+            }
+            case D3DRTYPE_VOLUMETEXTURE: {
+                D3DVOLUME_DESC vd{};
+                if (SUCCEEDED(static_cast<IDirect3DVolumeTexture9*>(t)->GetLevelDesc(0, &vd))) {
+                    usage = vd.Usage; w = vd.Width; h = vd.Height;
+                }
+                break;
+            }
+            default: break;
+        }
+        if (usage & D3DUSAGE_RENDERTARGET) {
+            ++g_rtInvariantFallbackHits;
+            if (rtStage) *rtStage = st;
+            if (rtW) *rtW = w;
+            if (rtH) *rtH = h;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Capped at 12 and re-armed by the capture key, exactly like ProbeDecalDraw/ProbeHudDraw
+// (RearmCaptures resets g_rtInvariantProbeReports to 0 alongside them). Prints numbers, not a
+// verdict: which path, which stage held the render target and its own dimensions, render target
+// 0's dimensions, the back buffer's, the pixel shader's declared sampler names if reflected, the
+// primitive count, and whether a vertex shader was bound - everything the next run needs to prove
+// which draw was painting the rasterized frame.
+void LogRtInvariantBlock(const char* path, int rtStage, UINT rtW, UINT rtH, UINT primitiveCount,
+                         bool hasVS) {
+    if (g_rtInvariantProbeReports >= 12) return;
+    ++g_rtInvariantProbeReports;
+    char samplers[256] = {}; int p = 0;
+    for (int st = 0; st < 8; ++st) {
+        if (!g_curTexture[st]) continue;
+        const char* name = g_curPS.samplerName[st][0] ? g_curPS.samplerName[st] : "(unreflected)";
+        p += _snprintf_s(samplers + p, sizeof(samplers) - p, _TRUNCATE, "%s%d:%s", p ? " " : "",
+                         st, name);
+    }
+    Log("BLOCKED (rasterized-frame invariant) #%u: path=%s stage=%d holds the render target "
+        "(%ux%u) | target0=%ux%u backBuffer=%ux%u | prims=%u | vertex shader %s | bound stages: %s",
+        g_rtInvariantProbeReports, path, rtStage, rtW, rtH, g_rt0Width, g_rt0Height, g_backBufferW,
+        g_backBufferH, primitiveCount,
+        hasVS ? "present - passed through raw" : "NULL - already fixed function, not issued",
+        samplers[0] ? samplers : "(none bound)");
+}
 
 // Event trace. Three builds in a row have guessed at when the engine uploads objTM relative to
 // binding a shader and issuing a draw, and each guess produced a different wrong placement.
@@ -1914,8 +2830,26 @@ struct PendingLock {
     IDirect3DVertexBuffer9* vb = nullptr;
     void* ptr = nullptr;
     UINT offset = 0, size = 0;
+    // 2026-09-18 AUDIT FIX: which thread's Lock call populated this entry, so Hook_VBUnlock can
+    // tell "the thread that locked this is the one unlocking it" from "some OTHER thread's
+    // Unlock landed while this entry was still waiting" - see g_settings.vbUnlockOwnerThread.
+    DWORD owner = 0;
 };
 PendingLock g_pendingLock;
+// Snoop refusals on the copy below: a stale/unmapped source range rejected before copying, or
+// an exception caught during the copy itself despite passing that check. One counter for both
+// (unlike the atlas snoop's two), since this hook never had either defence before - any nonzero
+// count here says the same thing the atlas snoop's crash did, just caught instead of crashing.
+unsigned g_vbCopyRefused = 0;
+// Forward-declared: defined with the atlas snoop's validated copy (AtlasSourceRangeReadable /
+// CopyAtlasRowsGuarded), far below - this hook shares both the VirtualQuery range check and
+// the guarded memcpy with that code rather than duplicating either. MSVC forbids __try in a
+// function that also requires object unwinding (error C2712), and this function has plenty
+// (InstanceCache&, several vectors), so the __try could not live here even if it were the only
+// copy of it in the file.
+static bool MemoryRangeReadable(const void* src, size_t len, const void** onFailAddr,
+                                 MEMORY_BASIC_INFORMATION* onFailInfo);
+static bool CopyRangeGuarded(void* dst, const void* src, size_t len);
 
 // Snoop the game's own write instead of locking the buffer ourselves.
 //
@@ -1931,6 +2865,11 @@ PendingLock g_pendingLock;
 // Defined with the uv conversion, further down.
 void InvalidateUvBuffers(IDirect3DVertexBuffer9* vb);
 void InvalidateBaseMeshes(IDirect3DVertexBuffer9* vb);
+// Defined with the GPU skinning side stream, further down (after CreateSkinBuffer) - it needs
+// SkinFFBuffer, declared there.
+void InvalidateSkinFFBuffers(IDirect3DVertexBuffer9* vb);
+void InvalidateOccluders(IDirect3DVertexBuffer9* vb, UINT offset = 0, UINT size = 0);   // size 0 = whole buffer
+void InvalidateMorphBakesBySrc(IDirect3DVertexBuffer9* vb);   // THE SHAPE BAKE - defined with the rest of the bake machinery, after MorphForThisDraw
 
 // The game locks vertex buffers from MORE THAN ONE THREAD.
 //
@@ -1950,7 +2889,11 @@ void InvalidateBaseMeshes(IDirect3DVertexBuffer9* vb);
 // requests are queued here and drained on the render thread at the top of the next draw.
 CRITICAL_SECTION g_snoopCs;
 bool g_snoopCsReady = false;
-std::vector<IDirect3DVertexBuffer9*> g_pendingInvalidations;
+// What the game locked: the buffer, and the byte range when it was not a DISCARD / to-the-end
+// lock. The uv and bind-pose caches invalidate per buffer as before; the occluder cache keeps
+// the meshes the range does not touch.
+struct PendingInvalidation { IDirect3DVertexBuffer9* vb; UINT offset, size; bool whole; };
+std::vector<PendingInvalidation> g_pendingInvalidations;
 unsigned g_deferredInvalidations = 0, g_invalidationsCoalesced = 0;
 // Total bytes held by the snoop, and its ceiling. This is a 32-bit process sharing an address
 // space with the game, Remix's client and a 24 MB skinning ring; the snoop does not get to
@@ -1966,17 +2909,67 @@ struct SnoopGuard {
 
 // Render thread only. Called at the top of every draw, before anything takes a pointer into the
 // caches those invalidations would erase from.
+// ---------------------------------------------------------------- recent buffer writes
+// Which byte ranges of which vertex buffers the game wrote, and in which frame. Fed from the
+// drained lock queue on the render thread; asked by the draw hook to defer a converted draw
+// whose static buffer range is fresher than deferFreshFrames, and by the rolling draw record.
+struct RecentWrite { UINT offset, size; bool whole; unsigned frame; };
+std::unordered_map<IDirect3DVertexBuffer9*, std::vector<RecentWrite>> g_recentWrites;
+unsigned long long g_deferredFresh = 0, g_freshSeen = 0;
+void NoteRecentWrite(IDirect3DVertexBuffer9* vb, UINT offset, UINT size, bool whole) {
+    try {
+        auto& v = g_recentWrites[vb];
+        for (auto it = v.begin(); it != v.end();)
+            if (g_frames > it->frame + 8) it = v.erase(it); else ++it;
+        if (v.size() >= 8) v.erase(v.begin());
+        v.push_back(RecentWrite{offset, size, whole, g_frames});
+    } catch (...) {}
+}
+// Frames since the newest write overlapping [begin, end), or -1 when none within `within`.
+int FramesSinceWrite(IDirect3DVertexBuffer9* vb, UINT begin, UINT end, unsigned within) {
+    const auto it = g_recentWrites.find(vb);
+    if (it == g_recentWrites.end()) return -1;
+    int best = -1;
+    for (const RecentWrite& w : it->second) {
+        if (g_frames > w.frame + within) continue;
+        if (!w.whole && !(w.offset < end && begin < w.offset + w.size)) continue;
+        const int age = static_cast<int>(g_frames - w.frame);
+        if (best < 0 || age < best) best = age;
+    }
+    return best;
+}
+bool IsDynamicVB(IDirect3DVertexBuffer9* vb) {
+    if (!vb) return false;
+    const auto it = g_vbDescCache.find(vb);
+    if (it != g_vbDescCache.end()) return (it->second.Usage & D3DUSAGE_DYNAMIC) != 0;
+    D3DVERTEXBUFFER_DESC d{};
+    if (FAILED(vb->GetDesc(&d))) return false;
+    try { g_vbDescCache[vb] = d; } catch (...) {}
+    return (d.Usage & D3DUSAGE_DYNAMIC) != 0;
+}
+void PruneRecentWrites() {
+    for (auto it = g_recentWrites.begin(); it != g_recentWrites.end();) {
+        bool live = false;
+        for (const RecentWrite& w : it->second) if (g_frames <= w.frame + 8) { live = true; break; }
+        if (!live) it = g_recentWrites.erase(it); else ++it;
+    }
+}
+
 void DrainPendingInvalidations() {
     if (!g_snoopCsReady) return;
-    std::vector<IDirect3DVertexBuffer9*> todo;
+    std::vector<PendingInvalidation> todo;
     {
         SnoopGuard g;
         if (g_pendingInvalidations.empty()) return;
         todo.swap(g_pendingInvalidations);
     }
-    for (IDirect3DVertexBuffer9* vb : todo) {
-        InvalidateUvBuffers(vb);
-        InvalidateBaseMeshes(vb);
+    for (const PendingInvalidation& p : todo) {
+        InvalidateUvBuffers(p.vb);
+        InvalidateBaseMeshes(p.vb);
+        InvalidateSkinFFBuffers(p.vb);
+        InvalidateMorphBakesBySrc(p.vb);   // THE SHAPE BAKE
+        InvalidateOccluders(p.vb, p.whole ? 0 : p.offset, p.whole ? 0 : p.size);
+        NoteRecentWrite(p.vb, p.offset, p.size, p.whole);
         ++g_deferredInvalidations;
     }
 }
@@ -1987,7 +2980,7 @@ bool VertexRangeFits(IDirect3DVertexBuffer9* vb, UINT streamOffset, UINT firstVe
 HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size, void** data,
                            DWORD flags) {
     const HRESULT hr = g_origVBLock(self, offset, size, data, flags);
-    if (g_internal || FAILED(hr) || !data || !*data) return hr;
+    if (InternalHere() || FAILED(hr) || !data || !*data) return hr;
     if (flags & D3DLOCK_READONLY) return hr;   // the game is reading; nothing new to capture
 
     SnoopGuard guard;   // everything below touches state the render thread also reads
@@ -1999,6 +2992,10 @@ HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size,
         if (di != g_instCache.end()) {
             std::fill(di->second.fresh.begin(), di->second.fresh.end(), 0);
             ++g_instDiscards;
+            // THE SHAPE BAKE
+            ++di->second.writeSeq;
+            ++di->second.discardSeq;
+            if (di->second.isMorph) ++g_morphVbDiscards;
         }
     }
 
@@ -2020,10 +3017,22 @@ HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size,
     // between drains asks for the same lookup twice. The scan is over a list that is a few
     // entries long precisely because of this.
     {
+        // whole-buffer for DISCARD and for size 0 (to the end); otherwise the locked range.
+        // Two ranges on one buffer coalesce to their hull - conservative.
+        const bool whole = (flags & D3DLOCK_DISCARD) != 0 || size == 0;
         bool queued = false;
-        for (IDirect3DVertexBuffer9* q : g_pendingInvalidations)
-            if (q == self) { queued = true; break; }
-        if (!queued) g_pendingInvalidations.push_back(self);
+        for (PendingInvalidation& q : g_pendingInvalidations)
+            if (q.vb == self) {
+                queued = true;
+                if (whole) q.whole = true;
+                else if (!q.whole) {
+                    const UINT end = max(q.offset + q.size, offset + size);
+                    q.offset = min(q.offset, offset);
+                    q.size = end - q.offset;
+                }
+                break;
+            }
+        if (!queued) g_pendingInvalidations.push_back(PendingInvalidation{self, offset, size, whole});
         else ++g_invalidationsCoalesced;
     }
 
@@ -2037,7 +3046,7 @@ HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size,
         if (FAILED(self->GetDesc(&d))) return hr;
         span = (d.Size > offset) ? (d.Size - offset) : 0;
     }
-    g_pendingLock = {self, *data, offset, span};
+    g_pendingLock = {self, *data, offset, span, GetCurrentThreadId()};
     return hr;
 }
 
@@ -2055,13 +3064,26 @@ HRESULT WINAPI Hook_VBUnlock(IDirect3DVertexBuffer9* self) {
     // the game writes elsewhere through the same single global.
     //
     // Locals close it completely - nothing is read from the global after the null test.
+    //
+    // OWNER-THREAD GATED (2026-09-18 audit fix), replacing the September 14 unconditional
+    // consume. That change's stated invariant - "our own internal locks are never on a buffer a
+    // real game lock has pending at the same moment" - is not actually enforced anywhere:
+    // UvBufferFor's RegisterSnoop(g_stream0) turns every DYNAMIC stream-0 buffer into a snooped
+    // instance stream, and roughly a dozen probes (BakeDecal, MeasureShortUVs, OcclMeshFor and
+    // others) read-lock g_stream0 without checking DYNAMIC first. So this DOES mis-fire: the
+    // render thread's own internal read-Unlock can land while a GAME thread's write Lock on the
+    // very same buffer is still open, silently consume THAT pending entry, copy a half-written
+    // buffer into the snoop cache, and clear the slot before the game's own real Unlock ever
+    // runs - whose finished write is then never snooped. Comparing the owner thread fixes that
+    // while keeping the September 14 case working: a main-thread unlock still consumes its own
+    // main-thread entry regardless of the internal flag, because pl.owner names that SAME thread
+    // here - only a DIFFERENT thread's Unlock is now refused the entry.
     SnoopGuard guard;
-    PendingLock pl;
-    if (!g_internal) {
-        pl = g_pendingLock;
-        if (pl.vb == self && pl.ptr) g_pendingLock = {};
-    }
-    if (!g_internal && pl.vb == self && pl.ptr && pl.size) {
+    PendingLock pl = g_pendingLock;
+    const bool sameOwnerThread =
+        !g_settings.vbUnlockOwnerThread || pl.owner == GetCurrentThreadId();
+    if (pl.vb == self && pl.ptr && sameOwnerThread) g_pendingLock = {};
+    if (pl.vb == self && pl.ptr && pl.size && sameOwnerThread) {
         InstanceCache& c = g_instCache[self];
         // Grows to what the game actually writes, which is a fraction of most buffers'
         // declared size. Safe to resize here because nothing outside this lock holds a pointer
@@ -2091,9 +3113,38 @@ HRESULT WINAPI Hook_VBUnlock(IDirect3DVertexBuffer9* self) {
             }
         }
         if (grew && c.data.size() >= end) {
-            memcpy(c.data.data() + pl.offset, pl.ptr, pl.size);
-            std::fill(c.fresh.begin() + pl.offset, c.fresh.begin() + end, 1);
+            // pl.ptr is the same kind of pointer as the atlas snoop's p.bits: captured at Lock,
+            // held across the gap to this Unlock, and dead the instant a foreign thread's
+            // DISCARD or release runs in between. This buffer never had either of the atlas
+            // copy's two defences until now - the 2026-08-28 fix only removed a NULL re-read,
+            // and the STALE NON-NULL case (a pointer that still looks valid but is no longer
+            // this lock's memory) was never addressed. Guarded exactly the same way: validate
+            // the whole range with VirtualQuery (gated on snoopValidateSource, the same switch
+            // the atlas copy uses), then run the copy itself under structured-exception
+            // protection regardless, since a range that just passed validation can still be
+            // unmapped a microsecond later.
+            bool copied = false;
+            const void* failAddr = nullptr;
+            MEMORY_BASIC_INFORMATION failInfo{};
+            const bool rangeOk = !g_settings.snoopValidateSource ||
+                MemoryRangeReadable(pl.ptr, pl.size, &failAddr, &failInfo);
+            if (!rangeOk) {
+                ++g_vbCopyRefused;
+                if (g_vbCopyRefused <= 4)
+                    Log("VB LOCK HOOK: SKIPPED a stale/unmapped source range before copying - "
+                        "vb=%p src=%p size=%u, failing page at %p state=%#lx protect=%#lx "
+                        "allocBase=%p", static_cast<void*>(self), pl.ptr, pl.size, failAddr,
+                        failInfo.State, failInfo.Protect, failInfo.AllocationBase);
+            } else {
+                copied = CopyRangeGuarded(c.data.data() + pl.offset, pl.ptr, pl.size);
+                if (!copied) ++g_vbCopyRefused;
+            }
+            if (copied) std::fill(c.fresh.begin() + pl.offset, c.fresh.begin() + end, 1);
         }
+        // THE SHAPE BAKE: counted here so it fires once per real Unlock-with-pending-write,
+        // whether or not the byte range grew/copied cleanly above.
+        ++c.writeSeq;
+        if (c.isMorph) { ++g_morphVbWrites; g_morphVbBytes += pl.size; }
         c.valid = true;
         c.frame = g_frames;
         ++g_instanceLocks;
@@ -2138,9 +3189,22 @@ bool SnoopCopy(IDirect3DVertexBuffer9* vb, UINT offset, unsigned char* dst, UINT
     if (!c.valid || offset + static_cast<size_t>(len) > c.data.size()) return false;
     memcpy(dst, c.data.data() + offset, len);
     if (allFresh) {
-        *allFresh = true;
-        for (size_t b = offset; b < offset + len; ++b)
-            if (b >= c.fresh.size() || !c.fresh[b]) { *allFresh = false; break; }
+        // Was a manual byte-by-byte scan (up to 1.25 MB/frame measured, ~0.42 ms at one cycle a
+        // byte, held the whole time under g_snoopCs - the same critical section the game's own
+        // streaming thread takes to lock/unlock a buffer). The guard below reproduces the loop's
+        // "b >= c.fresh.size()" arm exactly: any byte in [offset, offset+len) is out of range iff
+        // offset+len > c.fresh.size(), since the range is contiguous and fresh.size() is a single
+        // cutoff. Once the range is known in-bounds, memchr for a zero byte is exactly the loop's
+        // "!c.fresh[b]" test - fresh is std::vector<unsigned char>, one byte per flag, and memchr
+        // finding no zero means every byte in range is non-zero, i.e. every byte is fresh.
+        //
+        // data and fresh are grown together (Hook_VBUnlock) and are normally the same size, but a
+        // bad_alloc from c.fresh.resize can leave fresh smaller than data after c.data.resize has
+        // already succeeded - data.size() alone does not catch that, which is exactly why the
+        // original loop re-checked c.fresh.size() on every byte rather than once before it. The
+        // explicit guard here checks the same thing, once.
+        if (offset + static_cast<size_t>(len) > c.fresh.size()) *allFresh = false;
+        else *allFresh = (memchr(c.fresh.data() + offset, 0, len) == nullptr);
     }
     return true;
 }
@@ -2266,6 +3330,10 @@ void ApplyTransforms(IDirect3DDevice9* dev, const D3DMATRIX& world, const D3DMAT
         g_haveAppliedProj = true;
         ++g_transformWrites;
     }
+    // Kept exact whether or not the write above actually ran: if it did not, the device
+    // already held this value (the invariant this shadow depends on), so either way the
+    // device now holds `proj`.
+    g_curDeviceProj = proj;
 
     // How many DIFFERENT cameras does one frame carry? Every converted draw supplies its own
     // exact view, which is correct per draw but means Remix sees each of them. If the engine
@@ -2683,6 +3751,7 @@ bool BakeDecal(IDirect3DDevice9* dev, UINT dw, UINT dh, const std::vector<unsign
         IDirect3DIndexBuffer9* ib = nullptr;
         const bool wasInt = g_internal;
         g_internal = true;
+        g_internalThread = GetCurrentThreadId();
         if (SUCCEEDED(dev->GetIndices(&ib)) && ib) {
             D3DINDEXBUFFER_DESC ibd{};
             void* im = nullptr;
@@ -3258,6 +4327,7 @@ IDirect3DBaseTexture9* HairAlbedo(IDirect3DDevice9* dev) {
     IDirect3DTexture9* generated = nullptr;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     if (SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
                                      &staging, nullptr)) && staging) {
         D3DLOCKED_RECT dst{};
@@ -3522,6 +4592,7 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
                                 IDirect3DIndexBuffer9* ib = nullptr;
                                 const bool wasInt = g_internal;
                                 g_internal = true;
+                                g_internalThread = GetCurrentThreadId();
                                 if (SUCCEEDED(dev->GetIndices(&ib)) && ib) {
                                     D3DINDEXBUFFER_DESC ibd{};
                                     void* im = nullptr;
@@ -4441,6 +5512,7 @@ IDirect3DBaseTexture9* ClothAlbedoUniform(IDirect3DDevice9* dev, IDirect3DBaseTe
     IDirect3DTexture9* generated = nullptr;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     HRESULT hr = dev->CreateTexture(gw, dh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
                                     &staging, nullptr);
     if (SUCCEEDED(hr) && staging) {
@@ -4660,6 +5732,7 @@ IDirect3DBaseTexture9* ClothAlbedo(IDirect3DDevice9* dev) {
     // conversion a flag it still owns and believes is set.
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     HRESULT hr = dev->CreateTexture(d.Width, d.Height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
                                     &staging, nullptr);
     if (SUCCEEDED(hr) && staging) {
@@ -4850,6 +5923,15 @@ unsigned g_atlasCaptured = 0;      // mip-0 captures completed
 unsigned g_atlasCopyBuilt = 0;     // uploads handed to Remix
 unsigned g_atlasBound = 0;         // draws/frame that bound a snooped copy
 unsigned g_atlasCaptureFailed = 0;
+unsigned g_atlasSrcUnmapped = 0;   // snoopValidateSource: source range failed the
+                                    // VirtualQuery check, copy skipped
+unsigned g_atlasSrcException = 0;  // copy loop raised a structured exception despite
+                                    // passing validation
+// A second LockRect on a surface that already had an unconsumed pending entry queued - see
+// the note in Hook_SurfLockRect. This IS the September 14 defect: non-zero means an unlock
+// was skipped somewhere and its entry would have been orphaned before the overwrite-in-place
+// fix there made that merely wasteful instead of fatal.
+unsigned g_atlasPendingOrphans = 0;
 unsigned g_atlasDumps = 0;
 
 // ---------------------------------------------------------------------------------------------
@@ -4913,10 +5995,17 @@ UpdateTexture_t g_origUpdateTexture = nullptr;
 StretchRect_t g_origStretchRect = nullptr;
 ColorFill_t g_origColorFill = nullptr;
 
+// Defined below, with AtlasSourceRangeReadable and CopyAtlasRowsGuarded (the atlas capture's
+// validated-and-guarded copy) - forward-declared here because Hook_TexUnlockRect, just below,
+// needs to consume a pending atlas entry too, and both unlock paths share exactly the same
+// consume-and-copy logic. See the note above Hook_TexUnlockRect for why a second entry point
+// needs it at all.
+void ConsumeAtlasPendingLock(const PendingSurfLock& p);
+
 HRESULT WINAPI Hook_TexLockRect(IDirect3DTexture9* self, UINT level, D3DLOCKED_RECT* rect,
                                 const RECT* r, DWORD flags) {
     const HRESULT hr = g_origTexLockRect(self, level, rect, r, flags);
-    if (!g_internal && SUCCEEDED(hr) && IsAtlasPtr(self)) {
+    if (!InternalHere() && SUCCEEDED(hr) && IsAtlasPtr(self)) {
         ++g_fillLockRect;
         if (level < 32) g_fillLockLevels |= (1u << level);
         g_fillLockFlags |= flags;
@@ -4931,6 +6020,31 @@ HRESULT WINAPI Hook_TexLockRect(IDirect3DTexture9* self, UINT level, D3DLOCKED_R
 }
 
 HRESULT WINAPI Hook_TexUnlockRect(IDirect3DTexture9* self, UINT level) {
+    // A surface-locked / texture-unlocked pair - LockRect through the SURFACE vtable (which is
+    // what queues the g_pendingSurf entry, see Hook_SurfLockRect) followed by UnlockRect through
+    // the TEXTURE vtable instead of the surface's own - left that entry with nobody to ever
+    // consume it. Before the overwrite-in-place fix in Hook_SurfLockRect that orphan just sat
+    // until the NEXT lock of the same surface silently replaced it; now it is consumed HERE, the
+    // moment we see the texture-side unlock, so the capture this lock actually did is not lost.
+    if (level == 0 && IsAtlasPtr(self)) {
+        IDirect3DSurface9* s = nullptr;
+        if (SUCCEEDED(self->GetSurfaceLevel(0, &s)) && s) {
+            PendingSurfLock p{};
+            if (g_atlasCsReady) {
+                EnterCriticalSection(&g_atlasCs);
+                for (unsigned i = 0; i < kMaxPendingSurf; ++i) {
+                    if (g_pendingSurf[i].surf == s) {
+                        p = g_pendingSurf[i];
+                        g_pendingSurf[i] = PendingSurfLock{};
+                        break;
+                    }
+                }
+                LeaveCriticalSection(&g_atlasCs);
+            }
+            ConsumeAtlasPendingLock(p);
+            s->Release();
+        }
+    }
     return g_origTexUnlockRect(self, level);
 }
 
@@ -4950,7 +6064,7 @@ IDirect3DBaseTexture9* AtlasParent(IDirect3DSurface9* surf) {
 HRESULT WINAPI Hook_SurfLockRect(IDirect3DSurface9* self, D3DLOCKED_RECT* rect, const RECT* r,
                                  DWORD flags) {
     const HRESULT hr = g_origSurfLockRect(self, rect, r, flags);
-    if (g_internal || FAILED(hr) || !rect || !rect->pBits) return hr;
+    if (InternalHere() || FAILED(hr) || !rect || !rect->pBits) return hr;
     IDirect3DBaseTexture9* parent = AtlasParent(self);
     if (!parent) return hr;
 
@@ -4976,31 +6090,129 @@ HRESULT WINAPI Hook_SurfLockRect(IDirect3DSurface9* self, D3DLOCKED_RECT* rect, 
 
     AtlasCsInit();
     EnterCriticalSection(&g_atlasCs);
+    // A second lock of the same surface before the first was ever unlocked means the matching
+    // Hook_SurfUnlockRect never ran - the main-thread unlock that should have consumed the
+    // first entry was skipped (the g_internal race InternalHere fixes), leaving it here with a
+    // bits pointer the real Unlock has already invalidated. Appending a SECOND entry let a
+    // later Hook_SurfUnlockRect find the STALE one FIRST and copy from a dead pointer - the
+    // September 14 crash. Overwriting in place instead means there is only ever one entry per
+    // surface, so there is nothing stale left to find.
+    bool overwroteExisting = false;
     for (unsigned i = 0; i < kMaxPendingSurf; ++i) {
-        if (g_pendingSurf[i].surf == nullptr) {
+        if (g_pendingSurf[i].surf == self) {
             g_pendingSurf[i] = {self, parent, rect->pBits, rect->Pitch, sd.Width, sd.Height};
+            ++g_atlasPendingOrphans;
+            overwroteExisting = true;
             break;
+        }
+    }
+    if (!overwroteExisting) {
+        for (unsigned i = 0; i < kMaxPendingSurf; ++i) {
+            if (g_pendingSurf[i].surf == nullptr) {
+                g_pendingSurf[i] = {self, parent, rect->pBits, rect->Pitch, sd.Width, sd.Height};
+                break;
+            }
         }
     }
     LeaveCriticalSection(&g_atlasCs);
     return hr;
 }
 
-// The write has landed in the game's own mapped memory by now, so this is where it is copied.
-HRESULT WINAPI Hook_SurfUnlockRect(IDirect3DSurface9* self) {
-    PendingSurfLock p{};
-    if (!g_internal && g_atlasCsReady) {
-        EnterCriticalSection(&g_atlasCs);
-        for (unsigned i = 0; i < kMaxPendingSurf; ++i) {
-            if (g_pendingSurf[i].surf == self) {
-                p = g_pendingSurf[i];
-                g_pendingSurf[i] = PendingSurfLock{};
-                break;
-            }
+// snoopValidateSource: p.bits is a raw surface pointer captured back in Hook_SurfLockRect
+// and held in g_pendingSurf across the lock/unlock gap. A crash dump measured 2026-09-14
+// faulted a memmove reading exactly that pointer during world load - the surface had gone
+// unmapped (a DISCARD rename, a lost device, another thread, the surface simply freed)
+// between the lock and this unlock, and the old unconditional copy walked straight into
+// the hole and took the whole process down. This subsystem only re-uploads a DIAGNOSTIC
+// copy of the character atlas; it must never be able to do that. So the ENTIRE range the
+// copy loop is about to read - src through the last byte of the last row - is checked in
+// one pass, with VirtualQuery, before a single byte is touched. onFailAddr and onFailInfo,
+// if given, receive the address and the full MEMORY_BASIC_INFORMATION of the first page that
+// failed, so a false refusal can be told apart from a genuinely unmapped range.
+//
+// Shared with Hook_VBUnlock's vertex-buffer copy (the identical defect, just never guarded at
+// all until then): the VirtualQuery walk itself lives in MemoryRangeReadable below, which
+// knows nothing about rows or pixels, only a flat byte range. This function computes that
+// range from the atlas's width/height/pitch and delegates.
+static bool MemoryRangeReadable(const void* src, size_t len, const void** onFailAddr,
+                                 MEMORY_BASIC_INFORMATION* onFailInfo) {
+    if (len == 0) return true;
+    const unsigned char* cur = static_cast<const unsigned char*>(src);
+    const unsigned char* const rangeEnd = cur + len;
+    while (cur < rangeEnd) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(cur, &mbi, sizeof(mbi)) != sizeof(mbi)) {
+            if (onFailAddr) *onFailAddr = cur;
+            if (onFailInfo) *onFailInfo = MEMORY_BASIC_INFORMATION{};
+            return false;
         }
-        LeaveCriticalSection(&g_atlasCs);
+        // PAGE_NOCACHE (0x200) and PAGE_WRITECOMBINE (0x400) are how driver-mapped lock memory
+        // often comes back, and the old mask (PAGE_GUARD only) made either of them compare
+        // unequal to every protection constant below, so a page that was genuinely readable was
+        // refused. All three are masked off before the compare; none of them changes whether
+        // the page can be READ.
+        const DWORD prot = mbi.Protect &
+            ~static_cast<DWORD>(PAGE_GUARD | PAGE_NOCACHE | PAGE_WRITECOMBINE);
+        const bool readable = mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) &&
+            (prot == PAGE_READONLY || prot == PAGE_READWRITE || prot == PAGE_WRITECOPY ||
+             prot == PAGE_EXECUTE_READ || prot == PAGE_EXECUTE_READWRITE ||
+             prot == PAGE_EXECUTE_WRITECOPY);
+        if (!readable) {
+            if (onFailAddr) *onFailAddr = cur;
+            if (onFailInfo) *onFailInfo = mbi;
+            return false;
+        }
+        cur = static_cast<unsigned char*>(mbi.BaseAddress) + mbi.RegionSize;
     }
-    if (!p.surf || !p.bits || p.pitch <= 0) return g_origSurfUnlockRect(self);
+    return true;
+}
+
+static bool AtlasSourceRangeReadable(const unsigned char* src, UINT w, UINT h, int pitch,
+                                      const void** onFailAddr,
+                                      MEMORY_BASIC_INFORMATION* onFailInfo) {
+    if (w == 0 || h == 0) return true;
+    const size_t len = static_cast<size_t>(h - 1) * static_cast<size_t>(pitch) +
+                       static_cast<size_t>(w) * 4;
+    return MemoryRangeReadable(src, len, onFailAddr, onFailInfo);
+}
+
+// The __try/__except itself, isolated in its own function with plain parameters and no C++
+// objects in scope. MSVC forbids __try in a function that also requires object unwinding
+// (error C2712): Hook_SurfUnlockRect (by way of ConsumeAtlasPendingLock, below) holds a
+// std::vector and a critical-section lock/unlock pair, and Hook_VBUnlock holds an
+// InstanceCache& and more vectors, so the __try cannot live in either of them directly. This
+// is that one guard, SHARED rather than duplicated between the two copies - not a replacement
+// for AtlasSourceRangeReadable/MemoryRangeReadable above: a range that passes that check can
+// still be unmapped a microsecond later, and this catches exactly that race instead of
+// crashing on it.
+static bool CopyRangeGuarded(void* dst, const void* src, size_t len) {
+    __try {
+        memcpy(dst, src, len);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// The atlas copy is not one flat range but h rows of w*4 bytes each, strided by pitch, so this
+// calls the shared guard once per row rather than once for the whole surface.
+static bool CopyAtlasRowsGuarded(unsigned char* dstPixels, const unsigned char* src,
+                                  UINT w, UINT h, int pitch) {
+    for (UINT y = 0; y < h; ++y) {
+        if (!CopyRangeGuarded(dstPixels + static_cast<size_t>(y) * w * 4,
+                              src + static_cast<size_t>(y) * pitch,
+                              static_cast<size_t>(w) * 4))
+            return false;
+    }
+    return true;
+}
+
+// Shared by Hook_SurfUnlockRect and Hook_TexUnlockRect - the game unlocks a mip-0 atlas
+// surface through either vtable, and both need to consume whatever Hook_SurfLockRect queued
+// for it. p is the already-popped entry (zeroed when nothing was pending); this does the
+// actual validated copy into the snoop cache and the diagnostic dumps.
+void ConsumeAtlasPendingLock(const PendingSurfLock& p) {
+    if (!p.surf || !p.bits || p.pitch <= 0) return;
 
     // Copy BEFORE unlocking - after the unlock the pointer is no longer the game's to give.
     try {
@@ -5015,44 +6227,68 @@ HRESULT WINAPI Hook_SurfUnlockRect(IDirect3DSurface9* self) {
             const size_t need = static_cast<size_t>(p.w) * p.h * 4;
             if (e->pixels.size() != need) e->pixels.assign(need, 0);
             const unsigned char* src = static_cast<const unsigned char*>(p.bits);
-            for (UINT y = 0; y < p.h; ++y)
-                memcpy(&e->pixels[static_cast<size_t>(y) * p.w * 4],
-                       src + static_cast<size_t>(y) * p.pitch, static_cast<size_t>(p.w) * 4);
-            // The falsifier: what did the game actually write? A non-zero mean here proves the
-            // pixels exist at this boundary, which every read further down the stack denied.
-            double acc = 0.0; unsigned n = 0;
-            for (UINT y = 0; y < p.h; y += 8)
-                for (UINT x = 0; x < p.w; x += 8) {
-                    const unsigned char* q = &e->pixels[(static_cast<size_t>(y) * p.w + x) * 4];
-                    acc += q[0] + q[1] + q[2]; ++n;
-                }
-            e->mean = n ? acc / (3.0 * n) : 0.0;
-            e->fresh = true;
-            ++g_atlasCaptured;
-            if (g_atlasCaptured <= 4)
-                Log("ATLAS CAPTURED #%u: %ux%u from the game's own write | mean %.1f of 255",
-                    g_atlasCaptured, p.w, p.h, e->mean);
-            // Write the largest capture out so it can be LOOKED AT. The user reports the atlas
-            // has "some stuff in it but the skin part is black", and a mean of 3.8 against a
-            // fully composited 182.7 says the same thing without saying WHICH region is missing.
-            // A picture does. Bounded: the two biggest captures, once each, ~6 MB apiece.
-            // The character atlas is the 2048x1024 one; 1280x768 is the title screen (dumped
-            // and identified 2026-08-31), so require both dimensions to be large.
-            if (p.w >= 2048 && p.h >= 1024) WriteAtlasDdsOnce(p.w, p.h, e->pixels.data());
-            if (p.w >= 1024 && g_atlasDumps < 2) {
-                ++g_atlasDumps;
-                std::vector<unsigned char> rgb;
-                try {
-                    rgb.resize(static_cast<size_t>(p.w) * p.h * 3);
-                    for (size_t i = 0, n = static_cast<size_t>(p.w) * p.h; i < n; ++i) {
-                        rgb[i * 3 + 0] = e->pixels[i * 4 + 2];   // BGRA -> RGB
-                        rgb[i * 3 + 1] = e->pixels[i * 4 + 1];
-                        rgb[i * 3 + 2] = e->pixels[i * 4 + 0];
+            // snoopValidateSource (default on): p.bits can go stale between the matching
+            // lock and this unlock (see AtlasSourceRangeReadable above) - validate the
+            // whole range before trusting it, then guard the copy itself regardless,
+            // since a range that just passed validation can still be unmapped a
+            // microsecond later.
+            bool copied = false;
+            const void* failAddr = nullptr;
+            MEMORY_BASIC_INFORMATION failInfo{};
+            const bool rangeOk = !g_settings.snoopValidateSource ||
+                AtlasSourceRangeReadable(src, p.w, p.h, p.pitch, &failAddr, &failInfo);
+            if (!rangeOk) {
+                ++g_atlasSrcUnmapped;
+                if (g_atlasSrcUnmapped <= 4)
+                    Log("ATLAS SNOOP: SKIPPED a stale/unmapped source range before "
+                        "copying - surf=%p src=%p w=%u h=%u pitch=%d, failing page at %p "
+                        "state=%#lx protect=%#lx allocBase=%p",
+                        static_cast<void*>(p.surf), static_cast<const void*>(src), p.w,
+                        p.h, p.pitch, failAddr, failInfo.State, failInfo.Protect,
+                        failInfo.AllocationBase);
+            } else {
+                copied = CopyAtlasRowsGuarded(e->pixels.data(), src, p.w, p.h, p.pitch);
+                if (!copied) ++g_atlasSrcException;
+            }
+            if (copied) {
+                // The falsifier: what did the game actually write? A non-zero mean here proves
+                // the pixels exist at this boundary, which every read further down the stack
+                // denied.
+                double acc = 0.0; unsigned n = 0;
+                for (UINT y = 0; y < p.h; y += 8)
+                    for (UINT x = 0; x < p.w; x += 8) {
+                        const unsigned char* q = &e->pixels[(static_cast<size_t>(y) * p.w + x) * 4];
+                        acc += q[0] + q[1] + q[2]; ++n;
                     }
-                    char tag[48];
-                    sprintf_s(tag, "atlas%u", g_atlasDumps);
-                    DumpRaw(tag, 0, p.w, p.h, rgb.data());
-                } catch (...) {
+                e->mean = n ? acc / (3.0 * n) : 0.0;
+                e->fresh = true;
+                ++g_atlasCaptured;
+                if (g_atlasCaptured <= 4)
+                    Log("ATLAS CAPTURED #%u: %ux%u from the game's own write | mean %.1f of 255",
+                        g_atlasCaptured, p.w, p.h, e->mean);
+                // Write the largest capture out so it can be LOOKED AT. The user reports the
+                // atlas has "some stuff in it but the skin part is black", and a mean of 3.8
+                // against a fully composited 182.7 says the same thing without saying WHICH
+                // region is missing. A picture does. Bounded: the two biggest captures, once
+                // each, ~6 MB apiece. The character atlas is the 2048x1024 one; 1280x768 is
+                // the title screen (dumped and identified 2026-08-31), so require both
+                // dimensions to be large.
+                if (p.w >= 2048 && p.h >= 1024) WriteAtlasDdsOnce(p.w, p.h, e->pixels.data());
+                if (p.w >= 1024 && g_atlasDumps < 2) {
+                    ++g_atlasDumps;
+                    std::vector<unsigned char> rgb;
+                    try {
+                        rgb.resize(static_cast<size_t>(p.w) * p.h * 3);
+                        for (size_t i = 0, n = static_cast<size_t>(p.w) * p.h; i < n; ++i) {
+                            rgb[i * 3 + 0] = e->pixels[i * 4 + 2];   // BGRA -> RGB
+                            rgb[i * 3 + 1] = e->pixels[i * 4 + 1];
+                            rgb[i * 3 + 2] = e->pixels[i * 4 + 0];
+                        }
+                        char tag[48];
+                        sprintf_s(tag, "atlas%u", g_atlasDumps);
+                        DumpRaw(tag, 0, p.w, p.h, rgb.data());
+                    } catch (...) {
+                    }
                 }
             }
         }
@@ -5061,6 +6297,29 @@ HRESULT WINAPI Hook_SurfUnlockRect(IDirect3DSurface9* self) {
         ++g_atlasCaptureFailed;
         LeaveCriticalSection(&g_atlasCs);
     }
+}
+
+// The write has landed in the game's own mapped memory by now, so this is where it is copied.
+HRESULT WINAPI Hook_SurfUnlockRect(IDirect3DSurface9* self) {
+    PendingSurfLock p{};
+    // The !g_internal guard used to be here too: a main-thread unlock landing while the render
+    // thread held g_internal true (across the whole of BeginFFP) skipped this entirely,
+    // orphaning the entry - see g_internalThread/InternalHere and the note in
+    // Hook_SurfLockRect. Dropped, so a matching entry is ALWAYS consumed: our own internal
+    // unlocks are on OUR OWN staging surfaces, never on one the game itself queued here, so
+    // this cannot mis-fire.
+    if (g_atlasCsReady) {
+        EnterCriticalSection(&g_atlasCs);
+        for (unsigned i = 0; i < kMaxPendingSurf; ++i) {
+            if (g_pendingSurf[i].surf == self) {
+                p = g_pendingSurf[i];
+                g_pendingSurf[i] = PendingSurfLock{};
+                break;
+            }
+        }
+        LeaveCriticalSection(&g_atlasCs);
+    }
+    ConsumeAtlasPendingLock(p);
     return g_origSurfUnlockRect(self);
 }
 
@@ -5106,6 +6365,7 @@ void ProbeRenderTargetContents(IDirect3DDevice9* dev) {
         IDirect3DSurface9* sysSurf = nullptr;
         const bool wasInternal = g_internal;
         g_internal = true;
+        g_internalThread = GetCurrentThreadId();
         // Each step reports its own failure. The previous version counted only SUCCESSFUL reads,
         // so a GetRenderTargetData that refused every surface would have printed "0 reads" -
         // indistinguishable from "the probe never ran", which is exactly the ambiguity that
@@ -5188,6 +6448,7 @@ IDirect3DTexture9* AtlasCopyFor(IDirect3DDevice9* dev, IDirect3DBaseTexture9* te
     IDirect3DTexture9* made = nullptr;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     try {
         if (SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
                                          &staging, nullptr)) && staging) {
@@ -5247,13 +6508,13 @@ void InstallTextureHooks(IDirect3DTexture9* tex) {
 
 HRESULT WINAPI Hook_UpdateSurface(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* sr,
                                   IDirect3DSurface9* dst, const POINT* dp) {
-    if (!g_internal && IsAtlasSurface(dst)) ++g_fillUpdateSurface;
+    if (!InternalHere() && IsAtlasSurface(dst)) ++g_fillUpdateSurface;
     return g_origUpdateSurface(dev, src, sr, dst, dp);
 }
 
 HRESULT WINAPI Hook_UpdateTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* src,
                                   IDirect3DBaseTexture9* dst) {
-    if (!g_internal && IsAtlasPtr(dst)) ++g_fillUpdateTexture;
+    if (!InternalHere() && IsAtlasPtr(dst)) ++g_fillUpdateTexture;
     return g_origUpdateTexture(dev, src, dst);
 }
 
@@ -5261,7 +6522,7 @@ HRESULT WINAPI Hook_StretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* src, c
                                 IDirect3DSurface9* dst, const RECT* dr,
                                 D3DTEXTUREFILTERTYPE filter) {
     const HRESULT hr = g_origStretchRect(dev, src, sr, dst, dr, filter);
-    if (!g_internal && IsAtlasSurface(dst)) {
+    if (!InternalHere() && IsAtlasSurface(dst)) {
         ++g_fillStretchRect;
         if (FAILED(hr)) ++g_fillStretchFailed;
         if (g_fillReports < 8) {
@@ -5283,7 +6544,7 @@ HRESULT WINAPI Hook_StretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* src, c
 
 HRESULT WINAPI Hook_ColorFill(IDirect3DDevice9* dev, IDirect3DSurface9* surf, const RECT* r,
                               D3DCOLOR c) {
-    if (!g_internal && IsAtlasSurface(surf)) ++g_fillColorFill;
+    if (!InternalHere() && IsAtlasSurface(surf)) ++g_fillColorFill;
     return g_origColorFill(dev, surf, r, c);
 }
 
@@ -5325,6 +6586,7 @@ void SelfTestCopyPath(IDirect3DDevice9* dev) {
     IDirect3DSurface9* sysSurf = nullptr;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     double fillMean = -1.0, resolveMean = -1.0, stretchMean = -1.0;
     HRESULT hrStretch = E_FAIL, hrResolve = E_FAIL;
     try {
@@ -5484,6 +6746,7 @@ IDirect3DTexture9* BuildRtAlbedoCopy(IDirect3DDevice9* dev, IDirect3DTexture9* s
     IDirect3DTexture9* made = nullptr;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     try {
         D3DLOCKED_RECT lr{};
         // THE READ GOES THROUGH THE GPU, and it must.
@@ -5678,12 +6941,14 @@ IDirect3DBaseTexture9* RemixReadableAlbedo(IDirect3DDevice9* dev, IDirect3DBaseT
 
 IDirect3DBaseTexture9* EffectiveAlbedo() {
     IDirect3DBaseTexture9* albedo = nullptr;
+    int stage = -1;   // which g_curTexture[] slot `albedo` came from; -1 until one is chosen
 
     // First choice: the sampler the shader itself names as a colour map. This is SR3-specific
     // and stronger than anything geometry can tell us - the CTAB says which map is which.
     if (g_settings.rankAlbedo && g_curPS.albedoRank > 0 && g_curPS.albedoStage >= 0 &&
         g_curPS.albedoStage < 8) {
         albedo = g_curTexture[g_curPS.albedoStage];
+        stage = g_curPS.albedoStage;
         if (albedo && g_curPS.albedoStage != 0) ++g_albedoMoved;
         // The shader NAMES a colour map but nothing is bound where it says. This renders white
         // with no counter anywhere - the "untextured material" report above only covers rank 0,
@@ -5726,6 +6991,8 @@ IDirect3DBaseTexture9* EffectiveAlbedo() {
         // specular map, so show nothing rather than show that - untextured white is wrong, but
         // it is honestly wrong, and it will not masquerade as surface detail.
         ++g_albedoBlanked;
+        g_lastEffectiveAlbedo = nullptr;
+        g_lastEffectiveAlbedoStage = -1;
         return nullptr;
     } else {
         // No usable shader reflection: stage 0 is taken raw, whatever it happens to hold. On a
@@ -5734,6 +7001,7 @@ IDirect3DBaseTexture9* EffectiveAlbedo() {
         // "shoes have normals but they are the wrong colour" report. Counted because until now
         // nothing distinguished this path from a legitimate stage-0 albedo.
         albedo = g_curTexture[0];
+        stage = 0;
         if (!g_curPS.isPixelShader) ++g_albedoStage0Raw;
     }
 
@@ -5743,6 +7011,7 @@ IDirect3DBaseTexture9* EffectiveAlbedo() {
     if (g_settings.excludeRTAlbedo && albedo && g_rtTextures.count(albedo)) {
         IDirect3DBaseTexture9* best = nullptr;
         UINT bestArea = 0;
+        int bestStage = -1;
         for (int s = 0; s < 8; ++s) {
             IDirect3DBaseTexture9* t = g_curTexture[s];
             if (!t || g_rtTextures.count(t)) continue;
@@ -5754,14 +7023,17 @@ IDirect3DBaseTexture9* EffectiveAlbedo() {
             }
             // Largest, not first: the first non-RT bound is often a tiny detail or ramp map,
             // and a featureless albedo makes Remix render the surface as a near-mirror.
-            if (!best || area > bestArea) { best = t; bestArea = area; }
+            if (!best || area > bestArea) { best = t; bestArea = area; bestStage = s; }
         }
         // Honest, but not free: a null here renders white just the same, and until now nothing
         // counted it. If this number is large the RT exclusion is removing real surfaces rather
         // than protecting them.
         if (!best) ++g_albedoNullAfterRT;
         albedo = best;   // may be null, which is the honest answer
+        stage = bestStage;
     }
+    g_lastEffectiveAlbedo = albedo;
+    g_lastEffectiveAlbedoStage = albedo ? stage : -1;
     return albedo;
 }
 
@@ -5848,29 +7120,70 @@ bool ConstantAlbedo(D3DCOLOR& out) {
 // different map is what made roads too dense.
 unsigned g_tilingMatched = 0, g_tilingUnmatched = 0;
 
+// Memoised on the (vertex shader, pixel shader) pair: the answer depends only on
+// g_curVS.tiling/tilingCount and g_curPS.albedoSampler, both fixed properties of whichever
+// shaders are bound (set once by ReflectShader, never touched per draw), and g_lastVS/g_lastPS
+// are exactly what selected g_curVS/g_curPS in the first place (Hook_SetVertexShader and
+// Hook_SetPixelShader set the pair together). So the _stricmp/_strnicmp chain below computed
+// the identical answer every time two shaders already seen together were rebound - measured at
+// part of the ~0.09 ms/frame this audit is recovering. Safe to key on the raw pointers with no
+// pinning of its own: a shader only reaches g_lastVS/g_lastPS after Hook_CreateVertexShader or
+// Hook_CreatePixelShader has already inserted it into g_shaders, which AddRef's it and never
+// erases the entry - so by the time this cache could see a (vs, ps) pair, both pointers are
+// already pinned for the process lifetime, exactly like g_shaders' own keys.
+struct TilingForAlbedoKey {
+    IDirect3DVertexShader9* vs;
+    IDirect3DPixelShader9* ps;
+    bool operator==(const TilingForAlbedoKey& o) const { return vs == o.vs && ps == o.ps; }
+};
+struct TilingForAlbedoKeyHash {
+    size_t operator()(const TilingForAlbedoKey& k) const {
+        size_t h = reinterpret_cast<size_t>(k.vs) * 0x9E3779B1u;
+        h ^= reinterpret_cast<size_t>(k.ps) * 0xC2B2AE35u + 0x7F4A7C15u + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+// matched mirrors the old "best != nullptr" test exactly - u/v can each still be -1 inside a
+// matched pair (a map with only a TilingU constant and no TilingV), so matched is not simply
+// "u >= 0 || v >= 0" and has to be stored in its own right.
+struct TilingForAlbedoResult { int u, v; bool matched; };
+std::unordered_map<TilingForAlbedoKey, TilingForAlbedoResult, TilingForAlbedoKeyHash> g_tilingForAlbedoCache;
+
 void TilingForAlbedo(int& uReg, int& vReg) {
     uReg = vReg = -1;
     if (g_curVS.tilingCount == 0 || !g_curPS.albedoSampler[0]) return;
 
-    // "Diffuse_MapSampler" names the map "Diffuse_Map".
-    char base[28] = {};
-    strncpy_s(base, g_curPS.albedoSampler, sizeof(base) - 1);
-    const size_t len = strlen(base);
-    if (len > 7 && !_stricmp(base + len - 7, "Sampler")) base[len - 7] = 0;
+    const TilingForAlbedoKey key{g_lastVS, g_lastPS};
+    auto it = g_tilingForAlbedoCache.find(key);
+    if (it == g_tilingForAlbedoCache.end()) {
+        // "Diffuse_MapSampler" names the map "Diffuse_Map".
+        char base[28] = {};
+        strncpy_s(base, g_curPS.albedoSampler, sizeof(base) - 1);
+        const size_t len = strlen(base);
+        if (len > 7 && !_stricmp(base + len - 7, "Sampler")) base[len - 7] = 0;
 
-    const ShaderInfo::TilingPair* best = nullptr;
-    for (int t = 0; t < g_curVS.tilingCount; ++t) {
-        const ShaderInfo::TilingPair& p = g_curVS.tiling[t];
-        if (!p.base[0]) continue;
-        if (!_stricmp(p.base, base)) { best = &p; break; }   // exact: Diffuse_Map == Diffuse_Map
-        // A prefix also belongs to this map: "Diffuse_TilingU" against "Diffuse_MapSampler".
-        const size_t pl = strlen(p.base);
-        if (pl && !_strnicmp(base, p.base, pl) && !best) best = &p;
+        const ShaderInfo::TilingPair* best = nullptr;
+        for (int t = 0; t < g_curVS.tilingCount; ++t) {
+            const ShaderInfo::TilingPair& p = g_curVS.tiling[t];
+            if (!p.base[0]) continue;
+            if (!_stricmp(p.base, base)) { best = &p; break; }   // exact: Diffuse_Map == Diffuse_Map
+            // A prefix also belongs to this map: "Diffuse_TilingU" against "Diffuse_MapSampler".
+            const size_t pl = strlen(p.base);
+            if (pl && !_strnicmp(base, p.base, pl) && !best) best = &p;
+        }
+        TilingForAlbedoResult r{-1, -1, best != nullptr};
+        if (best) { r.u = best->uReg; r.v = best->vReg; }
+        try { it = g_tilingForAlbedoCache.emplace(key, r).first; }
+        catch (...) {
+            // Allocation failure: behave exactly as an uncached call would, just do not cache it.
+            if (best) { ++g_tilingMatched; uReg = best->uReg; vReg = best->vReg; } else ++g_tilingUnmatched;
+            return;
+        }
     }
-    if (!best) { ++g_tilingUnmatched; return; }
-    ++g_tilingMatched;
-    uReg = best->uReg;
-    vReg = best->vReg;
+    const TilingForAlbedoResult& r = it->second;
+    if (r.matched) ++g_tilingMatched; else ++g_tilingUnmatched;
+    uReg = r.u;
+    vReg = r.v;
 }
 
 // Everything the clothing texture generator needs to know before it can be written, and two
@@ -6398,7 +7711,49 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
         ++g_tintedAlbedo;
     } else {
         ShadowSetTSS(dev, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-        ShadowSetTSS(dev, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        // Which texture is about to carry colour: the same rule EffectiveAlbedo() applies for
+        // a real texture pick (named colour sampler by rank, else raw stage 0 with no shader
+        // reflection to guide it), duplicated narrowly rather than called, because
+        // EffectiveAlbedo() itself does not run until AFTER this function returns - it needs
+        // the su/sv and transformflags SetupTextureStages is still computing below, published
+        // for ProbeDecalDraw - and calling it here too would double every counter it keeps
+        // (g_albedoMoved, g_albedoNullRanked, g_albedoBlanked, g_albedoStage0Raw). Its
+        // render-target exclusion is not reproduced: that only ever swaps one texture for
+        // another when the FIRST pick IS a render target, and every render target this game
+        // creates is A8R8G8B8 or X8R8G8B8 - never colourless - so skipping that step cannot
+        // change the answer this check needs. Gated on the setting itself so OFF costs
+        // exactly what today's build costs: no lookup, nothing beyond the one flag test.
+        bool tookColourlessTexture = false;
+        if (g_settings.albedoRejectColourlessTexture) {
+            IDirect3DBaseTexture9* prospectiveAlbedo =
+                (g_settings.rankAlbedo && g_curPS.albedoRank > 0 &&
+                 g_curPS.albedoStage >= 0 && g_curPS.albedoStage < 8)
+                    ? g_curTexture[g_curPS.albedoStage]
+                    : (g_curPS.albedoRank == 0 && g_curPS.isPixelShader) ? nullptr
+                                                                          : g_curTexture[0];
+            // fmt=28 (D3DFMT_A8) is alpha-only: no RGB channels exist, so
+            // SELECTARG1/D3DTA_TEXTURE reads back RGB=0 in fixed function and the surface
+            // renders solid BLACK under its own alpha mask. Measured 2026-09-18 on the decal
+            // probe (albedoSampler='Decal_MapSampler', stage=2, a static world decal, not a
+            // particle) - the same shape of defect already recorded for the distfield family,
+            // whose shader does smoothstep on this exact alpha and takes colour from a
+            // constant (Decal_Map_Color) instead. TFACTOR in THIS branch is forced to opaque
+            // white a few lines below regardless of this choice (no shader constant, no tint
+            // fallback), so redirecting COLORARG1 here is not a guess at the real per-family
+            // colour - it is the same white this branch already renders wherever a texture is
+            // missing outright, now applied through the mask instead of ignoring it. Resolving
+            // the real constant per decal family is future work; this only stops a format
+            // with no colour from being read as though it had one.
+            if (prospectiveAlbedo && AlbedoFormatFor(prospectiveAlbedo).channels < 3) {
+                ShadowSetTSS(dev, 0, D3DTSS_COLORARG1, D3DTA_TFACTOR);
+                ++g_albedoColourlessRejected;
+                g_albedoColourlessTextures.insert(prospectiveAlbedo);
+                tookColourlessTexture = true;
+            }
+        }
+        if (!tookColourlessTexture) {
+            ShadowSetTSS(dev, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        }
         // Genuinely white: no colour map AND no constant to stand in for one. This is the only
         // population that actually renders untextured, and it is counted separately because
         // g_skipNoAlbedo counts every rank-0 draw INCLUDING the ones the constant rule rescues.
@@ -6430,6 +7785,24 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
     const bool shaderCutout = g_curPS.isPixelShader && g_curPS.alphaThresholdReg >= 0;
     const bool cutout = (alphaTest && alphaRef > 0) || shaderCutout;
 
+    // FIX B: three decal families do NOT declare Alpha_Threshold and are blended by the game
+    // instead - their pixel shader computes alpha = decal.a * Decal_Map_Opacity * Tint_color.a
+    // and the draw is submitted with real SRCALPHA/INVSRCALPHA factors (the frame dump shows
+    // blend=1(5/6) on them). Under the plain cutout rule above those draws take ALPHAARG1 from
+    // TFACTOR - alpha 1.0 - so the decal covers the surface beneath it as an OPAQUE rectangle
+    // instead of blending onto it.
+    //
+    // trulyBlended reuses, verbatim, the test the decal-offset code already computes elsewhere in
+    // this file: ALPHABLENDENABLE is on and the factor pair is not the ONE/ZERO SR3 leaves set on
+    // its own opaque draws. Recomputed here through the shadow accessor because that code runs in
+    // a different function and its own local goes out of scope before SetupTextureStages is called.
+    const bool trulyBlended = ShadowGetRS(dev, D3DRS_ALPHABLENDENABLE) != 0 &&
+                              !(ShadowGetRS(dev, D3DRS_SRCBLEND) == D3DBLEND_ONE &&
+                                ShadowGetRS(dev, D3DRS_DESTBLEND) == D3DBLEND_ZERO);
+    const bool decalAlphaBlend = g_settings.decalAlphaFromTexture && trulyBlended &&
+                                 g_curPS.isDecalAlbedo;
+    if (decalAlphaBlend) ++g_decalAlphaFromTexture;
+
     // Fixed function has no texkill, so the threshold becomes a real alpha test - which is also
     // the signal Remix needs to treat the surface as a cutout rather than as glass. The previous
     // values are saved and put back in EndFFP: EndFFP restores textures and shaders but NOT
@@ -6456,7 +7829,7 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
     // colour path making every constant-coloured surface translucent.
     if (!useConstant && !tintFallback) ShadowSetRS(dev, D3DRS_TEXTUREFACTOR, 0xFFFFFFFF);
     ShadowSetTSS(dev, 0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-    ShadowSetTSS(dev, 0, D3DTSS_ALPHAARG1, cutout ? D3DTA_TEXTURE : D3DTA_TFACTOR);
+    ShadowSetTSS(dev, 0, D3DTSS_ALPHAARG1, (cutout || decalAlphaBlend) ? D3DTA_TEXTURE : D3DTA_TFACTOR);
     ShadowSetTSS(dev, 0, D3DTSS_TEXCOORDINDEX, 0);
 
     // SAMPLER state for stage 0. Nothing set this before, so a converted draw sampled with
@@ -6492,6 +7865,31 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
             g_curPS.firstSampler[0] ? g_curPS.firstSampler : "(none)");
     }
 
+    // The population above measured WRONG on 2026-09-18: all six reports read addressU=1
+    // addressV=1 (WRAP) - which says sampler state was never the problem - but all six were
+    // ps='Diffuse_MapSampler', ordinary wall materials, and none were a decal. That is the
+    // wrong population to answer the CLAMP-versus-WRAP question from: a decal's measured UVs
+    // run from -0.95 to +1.24 (see ProbeDecalDraw), well outside 0..1, so it is the one family
+    // that would actually look different under the two modes. This second, separate set of
+    // slots is gated on the CHOSEN albedo sampler naming a Decal map - the same test
+    // ProbeDecalDraw uses - so the next run reports the inherited address mode for THAT
+    // population specifically, without disturbing the diffuse slots above.
+    if (g_samplerProbeDecalReports < 6 && g_curPS.albedoSampler[0] &&
+        StrStrIA(g_curPS.albedoSampler, "Decal")) {
+        ++g_samplerProbeDecalReports;
+        DWORD dau = 0, dav = 0, dmip = 0, dmag = 0;
+        dev->GetSamplerState(0, D3DSAMP_ADDRESSU, &dau);
+        dev->GetSamplerState(0, D3DSAMP_ADDRESSV, &dav);
+        dev->GetSamplerState(0, D3DSAMP_MIPFILTER, &dmip);
+        dev->GetSamplerState(0, D3DSAMP_MAGFILTER, &dmag);
+        Log("INHERITED sampler0 before conversion, DECAL #%u: addressU=%lu addressV=%lu "
+            "mipfilter=%lu magfilter=%lu (1=WRAP 2=MIRROR 3=CLAMP | filter 0=NONE 1=POINT "
+            "2=LINEAR) | albedoSampler='%s'",
+            g_samplerProbeDecalReports, static_cast<unsigned long>(dau),
+            static_cast<unsigned long>(dav), static_cast<unsigned long>(dmip),
+            static_cast<unsigned long>(dmag), g_curPS.albedoSampler);
+    }
+
     ShadowSetSS(dev, 0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
     ShadowSetSS(dev, 0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
     ShadowSetSS(dev, 0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
@@ -6503,11 +7901,36 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
     // integers); the per-material tiling applies whatever the storage format, because the
     // shader multiplies by it either way.
     float su = 1.0f, sv = 1.0f;
-    if (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2) su = sv = CurrentShortUVScale();
+    // 2026-09-18 AUDIT FIX: the scale must come from the SET the conversion actually used, not
+    // always set 0. FIX A (DecalUvSourceSet) sources this draw's uv from TEXCOORD1 when the
+    // vertex shader declares no usage-index-0 input at all - exactly the decalonly/fauxinterior
+    // families - and UvBufferFor then writes the RAW short values widened to float, deliberately
+    // unscaled, on the understanding that THIS texture matrix supplies the missing 1/1024.
+    // g_curLayout.texcoordType names set 0 only, which ParseDeclaration leaves at -1 for these
+    // declarations (no stream-0 TEXCOORD0 exists to set it), so su/sv silently fell back to 1.0
+    // and the D3DTTFF_DISABLE branch below let 1024 raw units reach the sampler as 1024 UV -
+    // about a thousand texture repeats, which is the fine stripe pattern standing in for
+    // ir_sr3fauxinterior's (fake window interior) windows in the user's screenshot.
+    const int uvSrcType = (g_settings.decalUvScaleFromSet && DecalUvSourceSet() == 1)
+                              ? g_curLayout.texcoord1Type : g_curLayout.texcoordType;
+    if (uvSrcType == D3DDECLTYPE_SHORT2) su = sv = CurrentShortUVScale();
+    // Measured apart from the FIX A uv-stream counters near UvBufferFor: how often taking the
+    // set-1 type actually changes the SHORT2 verdict a plain texcoordType test would have given -
+    // whether this population exists at all, printed beside those counters on the SHORT2 report
+    // line.
+    if (g_settings.decalUvScaleFromSet &&
+        (uvSrcType == D3DDECLTYPE_SHORT2) != (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2))
+        ++g_decalUvScaleFixChanged;
     int tilingU = -1, tilingV = -1;
     TilingForAlbedo(tilingU, tilingV);
     if (tilingU >= 0 && tilingU < static_cast<int>(kMaxVsConst)) su *= g_vsConst[tilingU][0];
     if (tilingV >= 0 && tilingV < static_cast<int>(kMaxVsConst)) sv *= g_vsConst[tilingV][0];
+
+    // Published for ProbeDecalDraw: the su/sv THIS draw's texture matrix is about to be set
+    // to, and (below) whether the transform ends up COUNT2 or DISABLE. Read-only elsewhere -
+    // nothing here changes what su/sv or the transform flag actually get set to.
+    g_decalProbeSu = su;
+    g_decalProbeSv = sv;
 
     if (su != 1.0f || sv != 1.0f) {
         // U and V tile independently, so a wrong pair skews the texture rather than merely
@@ -6522,8 +7945,10 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
             ++g_uvMatrixWrites;
         }
         ShadowSetTSS(dev, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+        g_decalProbeCount2 = true;
     } else {
         ShadowSetTSS(dev, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+        g_decalProbeCount2 = false;
     }
 
     // The game binds shadow maps, lookup tables and normal maps on higher stages for its pixel
@@ -7029,6 +8454,15 @@ unsigned g_remixCamUnavailable = 0;
 
 void RemixApiCameraTick() {
     if (!g_remixReady) return;
+    // All three consumers gate together here, BEFORE the derivation below (a 4x4 Invert plus a
+    // Multiply inside DeriveProjection) runs for every one of ~3,000 draws/frame. remixApiCamera
+    // reads the result to call SetupCamera further down; remixApiTestCube and remixApiCharacter
+    // do not touch this function directly, but RemixApiTestTick (their own tick, once/frame from
+    // Present) reads g_remixLastView/g_remixLastViewValid, which this function records
+    // unconditionally below regardless of remixApiCamera. With all three off there is no
+    // consumer left for this work at all - added 2026-09-17.
+    if (!g_settings.remixApiCamera && !g_settings.remixApiTestCube && !g_settings.remixApiCharacter)
+        return;
     D3DMATRIX view = FromRegisters(&g_vsConst[kRegWorld2View][0], 3);
     const D3DMATRIX viewProj = FromRegisters(&g_vsConst[kRegProjTM][0], 4);
     D3DMATRIX proj{};
@@ -7552,11 +8986,13 @@ void ApplyCameraOnly(IDirect3DDevice9* dev) {
     g_camOnlyHave = true;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     // WORLD is identity: with vertex capture Remix reconstructs already-transformed vertices, so
     // the object matrix is baked in before it ever sees them.
     g_origSetTransform(dev, D3DTS_WORLD, &kIdentity);
     g_origSetTransform(dev, D3DTS_VIEW, &view);
     g_origSetTransform(dev, D3DTS_PROJECTION, &proj);
+    g_curDeviceProj = proj;   // see g_curDeviceProj's own comment - kept exact everywhere
     g_internal = wasInternal;
     ++g_camOnlySets;
 }
@@ -7816,6 +9252,38 @@ Disp Classify(IDirect3DDevice9* dev) {
         ApplyCameraOnly(dev);
         return Because("cameraOnly: camera handed to Remix, draw left untouched",
                        Disp::PassThrough);
+    }
+
+    // ---------------------------------------------------------------- the rasterized-frame invariant
+    //
+    // Ahead of every rule below that can Convert, Hide or Mark a draw, so nothing downstream can
+    // hand Remix a draw this test would have refused - see CompositesEngineOutputToScreen, above,
+    // for the invariant itself and why it exists. What happens when it fires is the trap this
+    // project has hit before: a draw whose GetVertexShader is NULL is already fixed function and
+    // Remix accepts it whatever rtx.useVertexCapture says, so passing it through untouched would
+    // still paint it - it must not reach the device at all. A draw that still carries a vertex
+    // shader is safe to pass through exactly as it is: Remix declines a shader draw with vertex
+    // capture off, which is the whole reason g_lastVS-bound draws are safe to forward everywhere
+    // else in this file. g_lastVS is read rather than a fresh GetVertexShader() bridge call
+    // because Hook_SetVertexShader keeps it in sync with the device's real binding for exactly
+    // this reason - SyncBridgeVS trusts the same shadow for every PassThrough draw already.
+    if (g_settings.blockEngineOutputToScreen) {
+        int rtStage = -1;
+        UINT rtW = 0, rtH = 0;
+        if (CompositesEngineOutputToScreen(dev, &rtStage, &rtW, &rtH)) {
+            const bool hasVS = g_lastVS != nullptr;
+            LogRtInvariantBlock(g_curDrawIndexed ? "Classify(indexed)" : "Classify(non-indexed)",
+                               rtStage, rtW, rtH, g_curDrawPrimCount, hasVS);
+            if (hasVS) {
+                if (g_curDrawIndexed) ++g_rtInvariantIndexedPass; else ++g_rtInvariantDrawPass;
+                return Because("BLOCKED: samples a render target and writes the screen - vertex "
+                               "shader is bound, passed through untouched so Remix (capture off) "
+                               "declines it", Disp::PassThrough);
+            }
+            if (g_curDrawIndexed) ++g_rtInvariantIndexedSkip; else ++g_rtInvariantDrawSkip;
+            return Because("BLOCKED: samples a render target and writes the screen - already "
+                           "fixed function, skipped so it never reaches the device", Disp::Skip);
+        }
     }
 
     // THE SKY IS NOT SCREEN SPACE, even though it looks like it from here.
@@ -8301,6 +9769,112 @@ Disp Classify(IDirect3DDevice9* dev) {
     // specular mask. And characters have a material-pass copy of the same geometry, while the
     // terrain's only converted copy is this one - the frame dump caught the unconditional rule
     // passing through `v=17601 Diffuse_MapSampler` terrain and every large instanced mesh.
+    // CHANGE 1, 2026-09-18: THE STRETCHED POLYGON - VFX mask materials render as solid
+    // slabs. A multi-agent investigation, verified independently against the frame dump
+    // (Saints Row 3\sr3-rtx-frame-1.log:5637), found a four-vertex quad 46 units wide and
+    // 785 units tall, ps='Alpha_MaskSampler', blend=1(5/2) (SRCALPHA/ONE, additive) - a
+    // searchlight beam or light shaft, not a decal, whose entire SHAPE lives in
+    // Alpha_MaskSampler at sampler register 3 (re\shader_constants.csv:
+    // ir_vfxmask_bs.fxo_pc,5,ps_3_0,Alpha_MaskSampler,sampler,3,1, alongside
+    // Alpha_Falloff_Amount/Power and Soft_Fade_Alpha).
+    //
+    // The failure chain, all verified in code: AlbedoRank scores Diffuse* 100 and Alpha_Mask
+    // 0, so stage 0 gets the Diffuse map; SetupTextureStages then disables stages 1-7, so
+    // Alpha_MaskSampler - the ONLY sampler that carries this material's actual shape - is
+    // never bound at all. These shaders declare no Alpha_Threshold, so shaderCutout is
+    // false; the chosen albedo is not Decal-named, so decalAlphaBlend is false too; ALPHAARG1
+    // therefore falls back to D3DTA_TFACTOR, and TFACTOR is pinned to 0xFFFFFFFF. Alpha stuck
+    // at 1.0 under additive blending hands Remix the FULL diffuse texture, so a soft cone of
+    // light becomes an opaque slab covering about 168% of screen height.
+    //
+    // Checked for over-matching before this shipped: grepping re\shader_constants.csv for
+    // every shader that names a sampler containing "Alpha_Mask" turns up exactly four files -
+    // ir_vfxmask_bs.fxo_pc, ir_vfxmask_s.fxo_pc, ir_vfxmasktod_bs.fxo_pc,
+    // ir_vfxmasktod_s.fxo_pc - all one family, the VFX mask material itself. Nothing that
+    // names a character, a vehicle or a wall shader ever names Alpha_Mask, so this test
+    // cannot reach them.
+    //
+    // The test is a real pixel shader, genuinely blended by its FACTORS rather than merely
+    // having the ALPHABLENDENABLE flag set (SR3 leaves that on for ordinary opaque draws
+    // too - trulyBlended below is decalAlphaBlend's own test, reproduced here because
+    // Classify runs before SetupTextureStages computes its copy and that local has gone out
+    // of scope by the time this function is reached), that names an Alpha_Mask sampler
+    // somewhere OTHER than the stage AlbedoRank actually chose as albedo. Excluding the
+    // chosen stage is what keeps this from ever firing on a shader that names Alpha_Mask AS
+    // its own albedo (none currently do, but the exclusion costs nothing and removes the
+    // possibility outright).
+    //
+    // Routed through HiddenDisp rather than a bare Disp::Skip, so the mode switch governs
+    // this exactly like every other hidden pass and the disposition is whatever that policy
+    // resolves to, never a second policy disagreeing with the first. Under the deployed
+    // hiddenPassMode=2, HiddenDisp unconditionally returns Disp::Skip regardless of the
+    // markSafe argument (mode 2's switch case never looks at it) - the draw never reaches
+    // the device. That is safe here specifically because the shape it would otherwise
+    // contribute is already the wrong one (a solid slab standing in for a light shaft), so
+    // removing it cannot punch a hole in geometry that was ever correct - unlike the geometry
+    // prepass, whose skip broke GPU occlusion culling because the ENGINE reads that pass's
+    // own result back.
+    if (g_settings.skipMaskOnlyVfx && g_curPS.isPixelShader) {
+        const bool trulyBlended = ShadowGetRS(dev, D3DRS_ALPHABLENDENABLE) != 0 &&
+                                  !(ShadowGetRS(dev, D3DRS_SRCBLEND) == D3DBLEND_ONE &&
+                                    ShadowGetRS(dev, D3DRS_DESTBLEND) == D3DBLEND_ZERO);
+        if (trulyBlended) {
+            bool namesAlphaMaskElsewhere = false;
+            for (int st = 0; st < 8; ++st) {
+                if (st == g_curPS.albedoStage) continue;
+                if (g_curPS.samplerName[st][0] && StrStrIA(g_curPS.samplerName[st], "Alpha_Mask")) {
+                    namesAlphaMaskElsewhere = true;
+                    break;
+                }
+            }
+            if (namesAlphaMaskElsewhere) {
+                ++g_vfxMaskHidden;
+                if (g_lastPS) g_vfxMaskShaders.insert(g_lastPS);
+                return Because("VFX mask material: its opacity lives in a sampler fixed function cannot bind",
+                               HiddenDisp(true));
+            }
+        }
+    }
+
+    // RESTORED 2026-09-19. This rule was silently DELETED on 2026-09-18 when the VFX mask rule
+    // above was patched in: the exact-match anchor used for that insertion spanned this whole
+    // block plus the return below, and the replacement text omitted it. The anchor matched once,
+    // the script reported success and the build compiled clean, so nothing caught it until the
+    // user reported NPC heads z-fighting and white underwear - which are ONE fault, this one:
+    // the character G-buffer copy converted with Blend_Map, a specular mask, as its albedo, on
+    // top of the correct material copy. A specular mask read as colour is mostly white.
+    // The lesson: when an anchor spans code you mean to KEEP, the replacement must repeat it
+    // verbatim, and a counter that reads 0.0/frame is worth as much attention as one that spikes.
+    // SR3's deferred G-BUFFER pass: a pixel shader that writes more than one render target.
+    // Disassembled 2026-08-28, ir_sr3npcskinfull_mc shader[6] - the head: oC0.xy is the normal,
+    // oC1/oC2 are data, and its one colour-ranked sampler (Blend_Map) contributes a single scalar
+    // to a fresnel term. No colour anywhere. The albedo ranker scored that mask 70 and handed it
+    // to Remix as the head's base colour, on top of the correct material copy - the wrong texture
+    // and the z-fighting, one cause.
+    //
+    // PASS-THROUGH, and this placement is the whole point. The first version returned
+    // HiddenDisp() from the TOP of Classify and hid 693 draws a frame: with hiddenPassMode=2 that
+    // is SKIP, the G-buffer never reached the device, and the material pass reads it back through
+    // IR_GBuffer_DSF_DataSampler and IR_LBufferSampler - so the world rendered black except where
+    // nothing deferred was on screen. **A draw whose RESULT the engine reads can never be
+    // skipped, only hidden.** That rule is written above hiddenPassMode in this file and I broke
+    // it anyway.
+    //
+    // Here, at the end, every earlier rule has already had its say: draws those rules skip are
+    // still skipped, and only the handful that would otherwise have been CONVERTED land here.
+    // Pass-through submits them to the device exactly as before, so the engine's own buffers are
+    // untouched, and with vertex capture off Remix never sees them.
+    // ...but ONLY for SKINNED draws. Corrected 2026-08-28 after the unconditional version turned
+    // the world black a second time.
+    //
+    // Terrain's G-buffer shader (ir_bbterrain1_s[5]) is structurally identical to the head's -
+    // writes normals to oC0.xy, data to oC1/oC2, and its Blend_Map sample is dead. So "this pass
+    // produces no colour" is true of BOTH and does not separate them. What separates them is what
+    // the game BINDS: on a world draw the texture at that stage is the object's real colour map,
+    // which is why converting terrain from this pass looks right; on a character draw it is a
+    // specular mask. And characters have a material-pass copy of the same geometry, while the
+    // terrain's only converted copy is this one - the frame dump caught the unconditional rule
+    // passing through `v=17601 Diffuse_MapSampler` terrain and every large instanced mesh.
     if (g_settings.skipDeferredGBuffer && g_curPS.isPixelShader && g_curPS.rtCount > 1 &&
         g_curLayout.skinned) {
         ++g_gbufferHidden;
@@ -8349,7 +9923,9 @@ Disp Classify(IDirect3DDevice9* dev) {
 bool BeginUIDemote(IDirect3DDevice9* dev, bool hide) {
     if (!hide) return false;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     g_origSetTransform(dev, D3DTS_PROJECTION, &kIdentity);
+    g_curDeviceProj = kIdentity;   // see g_curDeviceProj's own comment - kept exact everywhere
     g_internal = false;
     ++g_demotedToUI;
     return true;
@@ -8358,13 +9934,453 @@ bool BeginUIDemote(IDirect3DDevice9* dev, bool hide) {
 void EndUIDemote(IDirect3DDevice9* dev, bool active) {
     if (!active) return;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     if (g_haveAppliedProj) {
         g_origSetTransform(dev, D3DTS_PROJECTION, &g_appliedProj);
+        g_curDeviceProj = g_appliedProj;   // see g_curDeviceProj's own comment
     } else {
         // Nothing known to restore yet; make sure the next converted draw writes its own.
+        // The device is left at the identity BeginUIDemote set, which is exactly what
+        // g_curDeviceProj already holds, so it needs no update in this branch.
         g_haveAppliedProj = false;
     }
     g_internal = false;
+}
+
+// ---------------------------------------------------------------- injectProbe / injectControl
+//
+// THE PERMANENT FIX, grounded in Remix's own source (tag remix-1.5.2) rather than in the guess
+// blockEngineOutputToScreen above was built on. Remix composites its path-traced image in
+// RtxContext::injectRTX, which has two callers: D3D9Rtx::triggerInjectRTX, fired from
+// internalPrepareDraw when a draw classifies as UI (d3d9_rtx.cpp:507-512), and a Present-time
+// fallback that is a no-op once injection has already happened this frame. The decisive line, at
+// the top of internalPrepareDraw, is what makes the ORDER of one frame's draws matter: before the
+// trigger a draw carrying a vertex shader is genuinely invisible (captured, not rasterised);
+// after it, EVERY draw in the frame - shader or not - is rasterised raw into whatever render
+// target is bound, until EndFrame. So if a SHIM-ISSUED fixed-function draw satisfies Remix's own
+// UI test before the game's real final composite has run, that composite (and everything after
+// it) paints straight onto the screen over the path-traced image. That is "the rasterized frame
+// replaces the scene", camera-angle dependent because it depends on which of the shim's own
+// draws happens to meet the test first, which depends on what is visible.
+//
+// PART 1, injectProbe: watches every fixed-function draw the shim itself issues - converted
+// world draws (BeginFFP, Disp::Convert), marker draws (BeginMark, Disp::Mark), UI demotions
+// (BeginUIDemote, Disp::Hide), the rebuilt HUD (DrawHudFixedFunction) and the character atlas
+// composite (DrawCompositeFixedFunction) - against EvaluateInjectTrigger, below, and reports
+// which one (if any) is first to satisfy it each frame, against where the game's own final
+// composite and first HUD draw land. Read-only: it changes no render state and no pixel by
+// itself.
+//
+// PART 2, injectControl: (a) for a PRETRANSFORMED (RHW) shim draw that would satisfy the trigger
+// before the composite has run, forces its projection off-identity for just that one draw - RHW
+// vertices ignore the transform pipeline for rendering (D3D9 skips it entirely), so this changes
+// nothing visible; Remix's own makeDrawCallType then falls through past the UI test to the
+// POSITIONT branch, which is Rasterized with NO trigger either way - the SAME visual outcome as
+// the UI-classified path, so breaking the UI test costs nothing and stops the accidental
+// trigger. A non-RHW draw that satisfies the predicate is left alone and only reported: its
+// transform places real geometry, and retargeting it blindly would move or distort it. (b) issues
+// the GTA4-RTX-mod's own deliberate, invisible trigger quad
+// (gta4-rtx/src/gta4/modules/renderer.cpp:3141-3196, manually_trigger_remix_injection) once per
+// frame, immediately after the game's final composite and before the first HUD draw, so the
+// trigger fires at the RIGHT moment on every frame by construction rather than by camera-angle
+// accident.
+enum class InjectSite { ConvertedWorld, MarkerDraw, UIDemote, HudRebuild, AtlasComposite };
+inline const char* InjectSiteName(InjectSite s) {
+    switch (s) {
+        case InjectSite::ConvertedWorld: return "ConvertedWorld";
+        case InjectSite::MarkerDraw:     return "MarkerDraw";
+        case InjectSite::UIDemote:       return "UIDemote";
+        case InjectSite::HudRebuild:     return "HudRebuild";
+        case InjectSite::AtlasComposite: return "AtlasComposite";
+        default:                         return "?";
+    }
+}
+
+struct InjectResult { bool trigger; const char* reason; };
+
+// Per-frame state: the FIRST shim draw (any site) that satisfied the predicate, the game's final
+// composite, and the first HUD draw - reset in TallyAndResetInjectFrame, called from Hook_Present
+// at the same point g_drawIndexThisFrame itself resets, so "this frame" means exactly what it
+// means everywhere else in this file.
+bool g_frameShimTriggerSeen = false;
+unsigned g_frameShimTriggerIndex = 0;
+InjectSite g_frameShimTriggerSite = InjectSite::ConvertedWorld;
+const char* g_frameShimTriggerReason = "";
+bool g_frameShimTriggerRHW = false;
+UINT g_frameShimTriggerRTW = 0, g_frameShimTriggerRTH = 0;
+char g_frameShimTriggerSamplers[256] = {};
+
+bool g_frameCompositeSeen = false;
+unsigned g_frameCompositeIndex = 0;
+
+bool g_frameFirstHudSeen = false;
+unsigned g_frameFirstHudIndex = 0;
+
+bool g_frameDeliberateQuadIssued = false;
+
+// The per-frame counter line PART 1 asks for: frames where the first shim trigger preceded the
+// final composite (the bug), frames where it followed (correct - either a natural later trigger
+// or PART 2(b)'s own deliberate one), frames with no shim trigger at all this frame (Remix's own
+// Present-time fallback is what injects those).
+unsigned long long g_injectFramesTotal = 0;
+unsigned long long g_injectFramesTriggerBeforeComposite = 0;
+unsigned long long g_injectFramesTriggerAfterComposite = 0;
+unsigned long long g_injectFramesNoShimTrigger = 0;
+
+// Capped at 12, re-armed by the capture key exactly like ProbeDecalDraw/LogRtInvariantBlock -
+// see RearmCaptures. Only frames where the trigger preceded the composite are named: that is the
+// population that proves the diagnosis.
+unsigned g_injectProbeReports = 0;
+// PART 2(a)'s own second population - satisfied the predicate, was NOT pretransformed, left
+// unaltered. Same cap, same rearm.
+unsigned g_injectNonRhwReports = 0;
+
+unsigned long long g_injectSuppressedRHW = 0;    // PART 2(a): forced off-identity, safe (RHW)
+unsigned long long g_injectReportedNonRHW = 0;   // PART 2(a): satisfied the predicate, NOT RHW
+
+unsigned long long g_deliberateQuadsIssued = 0, g_deliberateQuadsFailed = 0;
+HRESULT g_deliberateQuadLastFail = 0;
+
+// Remix's OWN trigger predicate for RtxContext::injectRTX (remix-1.5.2, d3d9_rtx.cpp), read off
+// the source rather than guessed - makeDrawCallType's ordered checks (403-533) and
+// isRenderingUI (555-568), walked in the SAME order here against the state THIS shim's own
+// fixed-function draws actually carry at the moment they reach the device:
+//
+//   1. a programmable vertex shader bound -> Ignored, can never trigger (425-427). Exact: hasVS,
+//      the caller's own read of g_lastVS (or, for the two RHW-only draws below, the fact that
+//      they null it themselves) at the moment of its draw.
+//   2. primitive count 0 -> never a trigger. Exact.
+//   3. unsupported topology -> APPROXIMATED AWAY. Every draw this shim itself issues is a
+//      TRIANGLELIST or TRIANGLESTRIP, both supported, so this check can never fire on the
+//      population injectProbe watches.
+//   4. no colour render target -> approximated as g_rt0Width/Height both nonzero, this file's own
+//      standing assumption everywhere else a render target is read (BeginFFP,
+//      CompositesEngineOutputToScreen).
+//   5. RGB colour-write mask off -> exact, off D3DRS_COLORWRITEENABLE's shadow.
+//   6. the shadow-mask heuristic -> APPROXIMATED AWAY. This project has no shadow render path of
+//      its own to test against, and stating that plainly is safer than guessing Remix's internal
+//      test.
+//   7. render target not the size of the back buffer -> exact (g_rt0Width/Height vs
+//      g_backBufferW/H) - the SAME gate CompositesEngineOutputToScreen uses above, and why the
+//      atlas composite (writes 2048x1024 or 1024x512, never the screen) can never reach the UI
+//      test below no matter what its projection holds.
+//   8. stencil-shadow state -> APPROXIMATED AWAY, same reasoning as 6.
+//   9. isRenderingUI(): !UseProgrammableVS() && orthographicIsUI() && transforms[PROJECTION]
+//      [3][3] == 1.0f && !ZWRITEENABLE. Condition 1 is already known true by this point (hasVS
+//      false, or step 1 above already returned). orthographicIsUI() is folded into the explicit
+//      _44 check: this project's OWN UI-demotion mechanism (BeginUIDemote, above) already treats
+//      swapping in an identity projection as satisfying Remix's orthographic test - "Remix 1.5.2
+//      has orthographicIsUI: a draw whose PROJECTION is orthographic is classified as UI", read
+//      off g_curDeviceProj (see its own comment) rather than a fresh bridge call. ZWRITEENABLE is
+//      exact, off its shadow.
+//  10. POSITIONT (pretransformed) -> exact: `rhw`, the caller's own knowledge of the vertex
+//      format it just built or forwarded.
+InjectResult EvaluateInjectTrigger(IDirect3DDevice9* dev, bool hasVS, UINT primCount, bool rhw) {
+    if (hasVS)
+        return {false, "has a vertex shader bound - Remix Ignores it with capture off, can never trigger"};
+    if (primCount == 0)
+        return {false, "primCount 0"};
+    if (!g_rt0Width || !g_rt0Height)
+        return {false, "no render target 0 bound"};
+    const DWORD cw = ShadowGetRS(dev, D3DRS_COLORWRITEENABLE);
+    if ((cw & 0x7u) == 0)
+        return {false, "RGB colour-write mask off"};
+    if (!g_backBufferW || !g_backBufferH || g_rt0Width != g_backBufferW || g_rt0Height != g_backBufferH)
+        return {false, "render target not the back buffer's size - Rasterized, no trigger (497-503)"};
+    const bool zwrite = ShadowGetRS(dev, D3DRS_ZWRITEENABLE) != 0;
+    const bool orthoIdentity = (g_curDeviceProj._44 == 1.0f);
+    if (orthoIdentity && !zwrite)
+        return {true, "UI TEST SATISFIED: identity projection (orthographicIsUI), ZWRITEENABLE off, no vertex shader - this is the trigger"};
+    if (rhw)
+        return {false, "POSITIONT (pretransformed) - Rasterized, no trigger (512-517)"};
+    return {false, "neither the UI test nor POSITIONT - ordinary rasterized geometry, no trigger"};
+}
+
+// Only needed where the caller does not already know its own vertex format for certain (the
+// HUD's RAW forward path in Hook_DrawPrimitiveUP - a user-pointer draw where the game may bind
+// either a declaration or a plain FVF, see that function's own "what IS a HUD vertex?" comment).
+// Every other call site below knows its format by construction and passes rhw directly with no
+// bridge call: ConvertedWorld is never RHW (BeginFFP builds a real world*view*proj), HudRebuild
+// and AtlasComposite are always RHW (they set D3DFVF_XYZRHW themselves), MarkerDraw and UIDemote
+// read g_curLayout, already parsed by Classify for a declaration-based draw.
+bool CurrentDrawIsRHW(IDirect3DDevice9* dev) {
+    if (g_curLayout.parsed) return g_curLayout.hasPositionT;
+    DWORD fvf = 0;
+    return SUCCEEDED(dev->GetFVF(&fvf)) && (fvf & D3DFVF_XYZRHW) != 0;
+}
+
+// "The game's final composite" - the SAME recognition the rasterized-frame invariant uses
+// (CompositesEngineOutputToScreen, above): a screen-space draw (no vertex-shader projTM) that
+// writes render target 0 at EXACTLY the back buffer's own size while sampling a render target on
+// some bound stage. Kept as its own small function rather than a call to
+// CompositesEngineOutputToScreen so this identification works whether or not
+// blockEngineOutputToScreen is enabled - injectProbe/injectControl must find the composite on
+// their own. The D3DUSAGE_RENDERTARGET fallback CompositesEngineOutputToScreen falls back to for
+// a render target it never saw created is left out here to add no bridge call to the ~1,700
+// draws/frame that reach this check and are not it; g_rtTextures alone has caught the composite
+// in every capture this project has measured.
+bool IsGameFinalComposite(IDirect3DDevice9* dev) {
+    (void)dev;
+    if (g_curVS.usesProjTM) return false;
+    if (!g_backBufferW || !g_backBufferH || !g_rt0Width || !g_rt0Height) return false;
+    if (g_rt0Width != g_backBufferW || g_rt0Height != g_backBufferH) return false;
+    const bool haveReflection = g_curPS.isPixelShader && g_curPS.anySampler;
+    for (int st = 0; st < 8; ++st) {
+        IDirect3DBaseTexture9* const t = g_curTexture[st];
+        if (!t) continue;
+        if (haveReflection && !g_curPS.samplerName[st][0]) continue;
+        if (g_rtTextures.count(t)) return true;
+    }
+    return false;
+}
+
+// Called at the ENTRY of all four draw hooks, before Classify has even run - g_curVS/g_curPS/
+// g_curTexture/g_rt0Width are shadows already valid by then, the same ones
+// CompositesEngineOutputToScreen reads from inside Classify. Only the FIRST composite of the
+// frame is recorded; SR3 draws exactly one per frame in every capture this project has measured,
+// and the first is what "before/after" needs.
+void NoteIfFinalComposite(IDirect3DDevice9* dev) {
+    if (!g_settings.injectProbe && !g_settings.injectControl) return;
+    if (g_frameCompositeSeen) return;
+    if (!IsGameFinalComposite(dev)) return;
+    g_frameCompositeSeen = true;
+    g_frameCompositeIndex = g_drawIndexThisFrame;
+}
+
+// PART 2(a) and PART 1's own recording, together: called once per candidate draw, ahead of the
+// real draw call, so a suppression can still change what reaches the device. Returns whether it
+// suppressed the trigger (and what to restore afterward, via AfterShimDrawSite) so the caller can
+// put the projection back once its own draw call has gone out.
+struct InjectSuppression { bool active = false; D3DMATRIX savedProj{}; };
+
+InjectSuppression BeforeShimDrawSite(IDirect3DDevice9* dev, InjectSite site, bool hasVS,
+                                     UINT primCount, bool rhw) {
+    InjectSuppression sup;
+    if (!g_settings.injectProbe && !g_settings.injectControl) return sup;
+    const InjectResult r = EvaluateInjectTrigger(dev, hasVS, primCount, rhw);
+    if (!r.trigger) return sup;
+
+    bool recordAsTrigger = true;
+    if (g_settings.injectControl && !g_frameCompositeSeen) {
+        if (rhw) {
+            // Safe exactly because Remix rasterises an RHW draw the same way whichever branch
+            // classifies it - see this section's own top comment. _44 = 0.0f matches the value a
+            // real perspective projection already carries in this codebase (FromRegisters), so
+            // it is not a value Remix's test has any special-case reason to treat differently.
+            sup.savedProj = g_curDeviceProj;
+            D3DMATRIX m = g_curDeviceProj;
+            m._44 = 0.0f;
+            const bool wasInternal = g_internal;
+            g_internal = true;
+            g_internalThread = GetCurrentThreadId();
+            g_origSetTransform(dev, D3DTS_PROJECTION, &m);
+            g_internal = wasInternal;
+            g_curDeviceProj = m;
+            sup.active = true;
+            ++g_injectSuppressedRHW;
+            recordAsTrigger = false;   // it no longer will, by construction
+        } else {
+            ++g_injectReportedNonRHW;
+            if (g_injectNonRhwReports < 12) {
+                ++g_injectNonRhwReports;
+                Log("INJECT CONTROL #%u: %s draw satisfies the trigger predicate and is NOT "
+                    "pretransformed - left UNALTERED rather than retargeted blindly (its own "
+                    "transform places real geometry). reason=%s prims=%u target=%ux%u",
+                    g_injectNonRhwReports, InjectSiteName(site), r.reason, primCount, g_rt0Width,
+                    g_rt0Height);
+            }
+        }
+    }
+
+    if (recordAsTrigger && !g_frameShimTriggerSeen) {
+        g_frameShimTriggerSeen = true;
+        g_frameShimTriggerIndex = g_drawIndexThisFrame;
+        g_frameShimTriggerSite = site;
+        g_frameShimTriggerReason = r.reason;
+        g_frameShimTriggerRHW = rhw;
+        g_frameShimTriggerRTW = g_rt0Width;
+        g_frameShimTriggerRTH = g_rt0Height;
+        int p = 0;
+        g_frameShimTriggerSamplers[0] = 0;
+        for (int st = 0; st < 8; ++st) {
+            if (!g_curTexture[st]) continue;
+            const char* name = g_curPS.samplerName[st][0] ? g_curPS.samplerName[st] : "(unreflected)";
+            p += _snprintf_s(g_frameShimTriggerSamplers + p, sizeof(g_frameShimTriggerSamplers) - p,
+                             _TRUNCATE, "%s%d:%s", p ? " " : "", st, name);
+        }
+    }
+    return sup;
+}
+
+void AfterShimDrawSite(IDirect3DDevice9* dev, const InjectSuppression& sup) {
+    if (!sup.active) return;
+    const bool wasInternal = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    g_origSetTransform(dev, D3DTS_PROJECTION, &sup.savedProj);
+    g_internal = wasInternal;
+    g_curDeviceProj = sup.savedProj;
+}
+
+// Thin wrapper for Hook_DrawPrimitive/Hook_DrawIndexedPrimitive: the three dispositions that are
+// a shim-issued fixed-function draw through THIS call site (see the switch). PassThrough and
+// Skip are the game's own draw, forwarded untouched or dropped - not something the shim itself
+// built or retargeted, so PART 1 does not watch them here: PassThrough still carries the game's
+// real vertex shader (or EvaluateInjectTrigger's own step 1 would already exclude it), and Skip
+// never reaches the device at all.
+InjectSuppression BeforeShimDraw(IDirect3DDevice9* dev, Disp d, UINT primCount) {
+    InjectSite site;
+    bool hasVS, rhw;
+    switch (d) {
+        case Disp::Convert:
+            site = InjectSite::ConvertedWorld; hasVS = false; rhw = false; break;
+        case Disp::Mark:
+            site = InjectSite::MarkerDraw; hasVS = (g_lastVS != nullptr);
+            rhw = g_curLayout.parsed && g_curLayout.hasPositionT; break;
+        case Disp::Hide:
+            site = InjectSite::UIDemote; hasVS = (g_lastVS != nullptr);
+            rhw = g_curLayout.parsed && g_curLayout.hasPositionT; break;
+        default:
+            return InjectSuppression{};
+    }
+    return BeforeShimDrawSite(dev, site, hasVS, primCount, rhw);
+}
+
+// PART 2(b). The GTA4-RTX-mod recipe (gta4-rtx/src/gta4/modules/renderer.cpp:3141-3196,
+// manually_trigger_remix_injection), adapted to this shim's own save/restore conventions (see
+// DrawCompositeFixedFunction and the shader-bake function, both above and below this one, for the
+// same pattern). Four D3DFVF_XYZRHW|D3DFVF_DIFFUSE vertices, alpha 0, spanning about 0.01 pixel
+// at (-0.5,-0.5) - invisible on its own terms (sub-pixel, so it is not expected to cover a single
+// sample) with no pixel shader bound to do anything with it besides. FOGENABLE off, both shaders
+// null, ZWRITEENABLE off, matching the recipe exactly. D3DTS_PROJECTION is force-set to identity
+// here, which the recipe's own source does not need (RHW vertices ignore it for POSITIONING) but
+// this shim does: Remix's classifier reads whatever the CURRENT projection transform is,
+// regardless of the draw's own vertex format, and this shim's leftover value could be anything a
+// previous converted draw left behind. Every piece of state touched is saved first and restored
+// after, including the render target, which is forced to the real back buffer for the duration
+// of the draw and then put back.
+void IssueDeliberateInjectQuad(IDirect3DDevice9* dev) {
+    IDirect3DVertexShader9* oldVS = nullptr;
+    IDirect3DPixelShader9* oldPS = nullptr;
+    IDirect3DVertexDeclaration9* oldDecl = nullptr;
+    IDirect3DSurface9* oldRT0 = nullptr;
+    IDirect3DSurface9* backBuffer = nullptr;
+    DWORD oldFVF = 0;
+    dev->GetVertexShader(&oldVS);
+    dev->GetPixelShader(&oldPS);
+    dev->GetVertexDeclaration(&oldDecl);
+    dev->GetFVF(&oldFVF);
+    dev->GetRenderTarget(0, &oldRT0);
+    const DWORD oldZW = ShadowGetRS(dev, D3DRS_ZWRITEENABLE);
+    const DWORD oldFog = ShadowGetRS(dev, D3DRS_FOGENABLE);
+    const D3DMATRIX oldProj = g_curDeviceProj;   // exact, no bridge call - see its own comment
+
+    HRESULT hr = dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
+
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    if (SUCCEEDED(hr) && backBuffer) dev->SetRenderTarget(0, backBuffer);
+    g_origSetTransform(dev, D3DTS_PROJECTION, &kIdentity);
+    g_curDeviceProj = kIdentity;
+    SyncBridgeVS(dev, nullptr);
+    g_origSetPixelShader(dev, nullptr);
+    dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, FALSE);
+    g_origSetRenderState(dev, D3DRS_FOGENABLE, FALSE);
+
+    struct QuadVertex { float x, y, z, rhw; DWORD color; };
+    const DWORD invisible = 0x00000000u;   // alpha 0, on top of being sub-pixel
+    const QuadVertex quad[4] = {
+        {-0.50f, -0.50f, 0.0f, 1.0f, invisible},
+        {-0.49f, -0.50f, 0.0f, 1.0f, invisible},
+        {-0.50f, -0.49f, 0.0f, 1.0f, invisible},
+        {-0.49f, -0.49f, 0.0f, 1.0f, invisible},
+    };
+    hr = g_origDrawPrimitiveUP(dev, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(QuadVertex));
+
+    g_origSetRenderState(dev, D3DRS_FOGENABLE, oldFog);
+    g_origSetRenderState(dev, D3DRS_ZWRITEENABLE, oldZW);
+    dev->SetFVF(oldFVF);
+    g_origSetVertexDeclaration(dev, oldDecl);
+    g_origSetTransform(dev, D3DTS_PROJECTION, &oldProj);
+    g_curDeviceProj = oldProj;
+    SyncBridgeVS(dev, oldVS);
+    g_origSetPixelShader(dev, oldPS);
+    if (oldRT0) { dev->SetRenderTarget(0, oldRT0); oldRT0->Release(); }
+    g_internal = false;
+
+    if (backBuffer) backBuffer->Release();
+    if (oldVS) oldVS->Release();
+    if (oldPS) oldPS->Release();
+    if (oldDecl) oldDecl->Release();
+
+    if (SUCCEEDED(hr)) ++g_deliberateQuadsIssued;
+    else { ++g_deliberateQuadsFailed; g_deliberateQuadLastFail = hr; }
+}
+
+// Called from Hook_DrawPrimitiveUP once it knows `hud` (see that function's own "THE HUD"
+// comment) - the established chronological population, "ALL of them into the BACK BUFFER, after
+// the frame's final composite". The first HUD draw of the frame is recorded here, and if PART
+// 2(b) is on, the composite has already been seen this frame, and the quad has not gone out yet,
+// it goes out NOW: between the last draw that actually ran (the composite, or whatever the game
+// drew right after it) and this HUD draw, which is what makes "immediately after the composite
+// and before the first HUD draw" literal rather than approximate. If the frame never shows a
+// final composite, nothing here ever fires and Remix's own Present-time fallback is what injects
+// that frame - deliberately: PART 2(b) only acts once it knows where "after the composite" is.
+void NoteFirstHudAndMaybeInject(IDirect3DDevice9* dev, bool isHudDraw) {
+    if (!isHudDraw) return;
+    if (!g_frameFirstHudSeen) {
+        g_frameFirstHudSeen = true;
+        g_frameFirstHudIndex = g_drawIndexThisFrame;
+    }
+    if (g_settings.injectControl && g_frameCompositeSeen && !g_frameDeliberateQuadIssued) {
+        g_frameDeliberateQuadIssued = true;
+        IssueDeliberateInjectQuad(dev);
+    }
+}
+
+// Called once per frame, from Hook_Present at the SAME point g_drawIndexThisFrame itself resets -
+// after every draw of the frame has been seen, so the comparison between the first shim trigger
+// and the final composite is settled for good before anything is printed or the state is
+// dropped for the next frame.
+void TallyAndResetInjectFrame() {
+    if (g_settings.injectProbe || g_settings.injectControl) {
+        ++g_injectFramesTotal;
+        if (!g_frameShimTriggerSeen) {
+            ++g_injectFramesNoShimTrigger;
+        } else if (g_frameCompositeSeen && g_frameShimTriggerIndex < g_frameCompositeIndex) {
+            ++g_injectFramesTriggerBeforeComposite;
+            if (g_injectProbeReports < 12) {
+                ++g_injectProbeReports;
+                char hudMsg[32];
+                if (g_frameFirstHudSeen) _snprintf_s(hudMsg, _TRUNCATE, "%u", g_frameFirstHudIndex);
+                else strcpy_s(hudMsg, "none this frame");
+                Log("INJECT PROBE #%u: first shim trigger at draw %u (site=%s, %s) PRECEDED the "
+                    "final composite at draw %u - the bug. RHW=%d target=%ux%u samplers: %s | "
+                    "first HUD draw at %s",
+                    g_injectProbeReports, g_frameShimTriggerIndex,
+                    InjectSiteName(g_frameShimTriggerSite), g_frameShimTriggerReason,
+                    g_frameCompositeIndex, g_frameShimTriggerRHW ? 1 : 0, g_frameShimTriggerRTW,
+                    g_frameShimTriggerRTH,
+                    g_frameShimTriggerSamplers[0] ? g_frameShimTriggerSamplers : "(none bound)",
+                    hudMsg);
+            }
+        } else {
+            ++g_injectFramesTriggerAfterComposite;
+        }
+    }
+    g_frameCompositeSeen = false;
+    g_frameCompositeIndex = 0;
+    g_frameFirstHudSeen = false;
+    g_frameFirstHudIndex = 0;
+    g_frameDeliberateQuadIssued = false;
+    g_frameShimTriggerSeen = false;
+    g_frameShimTriggerIndex = 0;
+    g_frameShimTriggerReason = "";
+    g_frameShimTriggerRHW = false;
+    g_frameShimTriggerRTW = 0;
+    g_frameShimTriggerRTH = 0;
+    g_frameShimTriggerSamplers[0] = 0;
 }
 
 // ---------------------------------------------------------------- the marker texture
@@ -8441,6 +10457,7 @@ unsigned BeginMark(IDirect3DDevice9* dev, bool clearAllStages) {
     if (!g_marker) return 0;
     unsigned touched = 0;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     if (g_curTexture[0] != g_marker) { g_origSetTexture(dev, 0, g_marker); touched |= 1u; }
     if (clearAllStages) {
         for (DWORD stage = 1; stage < 8; ++stage)
@@ -8460,6 +10477,7 @@ unsigned BeginMark(IDirect3DDevice9* dev, bool clearAllStages) {
 void EndMark(IDirect3DDevice9* dev, unsigned touched) {
     if (!touched) return;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     for (DWORD stage = 0; stage < 8; ++stage)
         if (touched & (1u << stage)) {
             g_origSetTexture(dev, stage, g_curTexture[stage]);
@@ -8486,6 +10504,20 @@ IDirect3DVertexDeclaration9* FloatUVDeclaration(IDirect3DDevice9* dev,
 IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev);
 extern DWORD g_uvStream;
 extern unsigned g_uvStreamDraws;
+extern unsigned g_uvSet1Draws, g_uvSet1Unavailable, g_uvSet1WrongStream;
+
+// FIX A: which vertex texcoord usage index THIS draw's albedo should be sampled from, per the
+// bound vertex shader's own input declarations (ShaderInfo::declaresTexcoord0 /
+// lowestDeclaredTexcoord, filled in ReflectShader from its dcl stream). The decalonly/
+// diffcol_normal_decal/decalonly_cuberef/fauxinterior families declare a TEXCOORD1 input and NO
+// TEXCOORD0 at all, and build their decal coordinate from it - the shim always sampled index 0
+// regardless, which left those draws textured from whatever garbage sits there, or nothing.
+// Gated: with the switch off this always answers 0, exactly today's behaviour.
+inline int DecalUvSourceSet() {
+    if (!g_settings.decalUvFromDeclaredSet) return 0;
+    if (!g_curVS.declaresTexcoord0 && g_curVS.lowestDeclaredTexcoord == 1) return 1;
+    return 0;
+}
 
 
 // Swap TEXCOORD0 from SHORT2 to an equivalent FLOAT2 stream.
@@ -8499,14 +10531,38 @@ extern unsigned g_uvStreamDraws;
 // SHORT2 declaration delivers exactly those raw values to a shader. The game's vertex shader
 // therefore reads identical numbers either way: a change of representation, not of the render.
 bool InstallFloatUV(IDirect3DDevice9* dev, FFPScope& scope, bool deinstance) {
-    if (!g_settings.remixShortUV || g_curLayout.skinned ||
-        g_curLayout.texcoordType != D3DDECLTYPE_SHORT2 || !g_curDecl)
+    if (!g_settings.remixShortUV || g_curLayout.skinned || !g_curDecl) return false;
+    // FIX A: which vertex texcoord usage index this draw's albedo actually needs - see
+    // DecalUvSourceSet. Testing the CHOSEN set's own type here, rather than always
+    // texcoordType, is what lets a decalonly/fauxinterior draw (set 1, NO usage-index-0 input
+    // at all) be recognised and converted instead of being judged against set 0's fields.
+    const int uvSet = DecalUvSourceSet();
+    const int srcType = (uvSet == 1) ? g_curLayout.texcoord1Type : g_curLayout.texcoordType;
+    if (srcType != D3DDECLTYPE_SHORT2) {
+        // set 1: this draw's own vertex shader wants TEXCOORD1 and the bound declaration does
+        // not carry a usable one. Previously (before FIX A existed) a draw like this fell
+        // through the OLD set-0-only test and returned false right here with NOTHING counted -
+        // the exact silent failure the background for FIX A describes. Counted now, so
+        // "failures: 0 convert" can never again hide this class.
+        if (uvSet == 1) ++g_uvSet1Unavailable;
         return false;
+    }
+    // set 1 ONLY, crash fix 2026-09-14: these decal draws are INSTANCED, so their vertex
+    // shader's own declaration legitimately places texcoord1 in stream 1, not stream 0 - but
+    // UvBufferFor only ever reads STREAM 0's vertex data (at texcoord1Offset, using stream 0's
+    // stride). Taking the set-1 path for a stream-1 (or otherwise unresolved) element reads
+    // stream-1-shaped offsets out of stream 0's bytes - exactly the access violation that
+    // crashed world load: 0xC0000005 reading near 0x59ADF000. Refuse it here, before
+    // UvBufferFor ever runs, the same way the type check just above refuses an unusable type.
+    if (uvSet == 1 && (g_curLayout.texcoord1Stream != 0 || g_curLayout.texcoord1Offset < 0)) {
+        ++g_uvSet1WrongStream;
+        return false;
+    }
     IDirect3DVertexBuffer9* uvBuf = UvBufferFor(dev);
     IDirect3DVertexDeclaration9* alt = uvBuf ? FloatUVDeclaration(dev, g_curDecl) : nullptr;
     if (!uvBuf || !alt) return false;
     g_origSetVertexDeclaration(dev, alt);
-    g_origSetStreamSource(dev, g_uvStream, uvBuf, 0, kUvBytesPerVertex);
+    g_origSetStreamSource(dev, g_uvStream, uvBuf, g_uvBindOffset, kUvBytesPerVertex);
     // Our entries are indexed per vertex exactly as stream 0 is, so under instancing the two need
     // the same frequency. The default would read one uv per INSTANCE instead of one per vertex.
     if (g_instancedDraw && !deinstance) {
@@ -8516,12 +10572,46 @@ bool InstallFloatUV(IDirect3DDevice9* dev, FFPScope& scope, bool deinstance) {
     scope.decl = g_curDecl;
     scope.uvStream = true;
     ++g_uvStreamDraws;
+    if (uvSet == 1) ++g_uvSet1Draws;
     return true;
 }
 
+// ---------------------------------------------------------------- where the shim's own time goes
+// The frame report measures the shim at 12.65 ms a frame in the city - 36% of the frame, before a
+// single bridge call. Guessing which stage was responsible is what this project keeps recording
+// as the wrong move, so each stage of the indexed draw path is timed and printed per frame.
+enum Phase { PH_ENTRY, PH_CLASSIFY, PH_TRANSFORMS, PH_UV, PH_APPLY, PH_STAGES, PH_ALBEDO,
+             PH_BIND, PH_DEDUP, PH_SKIN, PH_PROBES, PH_DRAW,
+             PH_SKIN_PRE, PH_SKIN_LOOP, PH_SKIN_POST, PH_ENTRY_CMD, PH_ENTRY_LIGHT, PH_ENTRY_DRAIN, PH_ENTRY_SKY,
+             PH_TIGHTEN, PH_COUNT };
+double g_phaseMs[PH_COUNT] = {};
+unsigned long long g_decalOffsetDraws = 0, g_stippleColourDraws = 0, g_depthBiasDraws = 0, g_layerDraws = 0, g_biasOffsetDraws = 0,
+                   g_decalNamedDraws = 0, g_blendedOffsetDraws = 0, g_pulledDraws = 0,
+                   g_decalLowestRegDraws = 0, g_decalFirstAlphaDraws = 0;
+unsigned g_curPullWhy = 0;   // 1 layer, 2 decal-named, 4 no depth write / ZFUNC=EQUAL, 8 blended, 16 bias
+std::unordered_map<unsigned long long, unsigned> g_frameWindowSeen;   // vertex window + placement -> converted count this frame
+// albedoChurnProbe: the effective-albedo texture bound to each draw identity, this frame and
+// last. Same identity shape as g_frameWindowSeen above (stream 0 pointer, offset, stride, vertex
+// window, index range, world translation to the cm) - built separately in BeginFFP because this
+// one remembers WHAT was bound rather than counting repeats.
+std::unordered_map<unsigned long long, IDirect3DBaseTexture9*> g_albedoIdentityThisFrame, g_albedoIdentityLastFrame;
+unsigned g_curLayer = 0;
+D3DMATRIX g_lastWorld = kIdentity, g_lastViewProj = kIdentity;   // stashed by BeginFFP per draw, read by the occlusion culler
+double g_phaseMsPrev[PH_COUNT] = {};
+unsigned g_phaseFramesPrev = 0;
+inline void PhaseAdd(int ph, LONGLONG& t) { g_phaseMs[ph] += MsSince(t); t = Now(); }
+
+// Defined far below, after TextureToBgra (its optional texture dump needs that). Fires for
+// the first 8 converted draws whose chosen albedo sampler names a Decal map: measures which
+// texture is actually bound and what UV range is sampled - read-only, it changes no render
+// state and no pixel.
+void ProbeDecalDraw();
+
 Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     g_clothRemap = nullptr;
+    LONGLONG tB = Now();
     const Disp d = Classify(dev);
+    PhaseAdd(PH_CLASSIFY, tB);
     if (d != Disp::Convert) {
         // cameraOnly touches nothing EXCEPT this, and this is value-identical to what the
         // game's own shader would have read. Without it Remix discards the texcoords and the
@@ -8533,8 +10623,25 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
         // The dominant cost is Remix building geometry for every unfiltered draw, but this is
         // ours and it is not obviously needed: no "Unsupported texcoord buffer format (80)"
         // warning appeared in that run at all.
-        if (g_settings.cameraOnly && g_settings.cameraOnlyFloatUV)
+        if (g_settings.cameraOnly && g_settings.cameraOnlyFloatUV) {
+            // 2026-09-18 AUDIT FIX: scope.active was never set on this path, so EndFFP's own
+            // `if (!scope.active) return;` skipped every restore below and the declaration/uv
+            // stream InstallFloatUV is about to bind stayed bound for every draw after this one.
+            // Latent while cameraOnly is off (the default); this is the one experiment built to
+            // answer whether our own geometry conversion reaches the path tracer at all, so it
+            // must not silently corrupt itself the one time it runs.
+            //
+            // scope.vs/scope.ps are set here too, NOT left null. EndFFP restores them
+            // unconditionally once active - SyncBridgeVS(dev, scope.vs) when the vs-bind diet is
+            // off, and g_origSetPixelShader(dev, scope.ps) always - and this branch is a
+            // PASS-THROUGH draw whose own pixel shader was never touched in the first place. A
+            // null scope.ps would have cleared the game's own shader out from under it instead of
+            // restoring what was already bound.
+            scope.vs = g_lastVS;
+            scope.ps = g_lastPS;
+            scope.active = true;
             InstallFloatUV(dev, scope, false);
+        }
         return d;
     }
 
@@ -8581,6 +10688,36 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
             const bool placed = Invert(view, invView) &&
                                 (invView._41 * invView._41 + invView._42 * invView._42 +
                                  invView._43 * invView._43) > 1.0f;
+            // THE LOST CAMERA, 2026-09-21. This latch used to adopt the FIRST convertible draw's
+            // camera as the frame's main one, and at some angles every early draw of the scene pass
+            // is multi-instance or a prepass, so nothing qualified until the 512x288 WATER
+            // REFLECTION pass: also 16:9, so the aspect test passed, but with the camera MIRRORED
+            // below the water line. It was latched as main; its own draws then died on handedness
+            // and every draw from the real camera died as "auxiliary camera". The 60-frame record
+            // at the bad angle reads 0 CONVERT on every frame (83 mirrored + 165 auxiliary), so no
+            // fixed-function draw reached Remix, its Main camera was never updated that frame,
+            // RtCamera::isValid() was false, and injectRTX path traced nothing. That is the user's
+            // "the path tracing stops" and the game's raster frame left on screen.
+            //
+            // So a draw may only become the main camera if it draws INTO the screen-sized target
+            // and its view is NOT mirrored: the same two discriminators IsMainSceneCamera already
+            // uses for cameraOnly. Before the baseline handedness has been measured, a
+            // non-positive determinant counts as mirrored (the baseline measured positive, the
+            // reflection camera -1.000).
+            if (g_settings.mainCameraScreenSizedOnly) {
+                const bool screenSized = g_backBufferW && g_rt0Width == g_backBufferW &&
+                                         g_rt0Height == g_backBufferH;
+                const float latchDet = RotationDeterminant(view);
+                const bool mirrored = g_haveBaseHandedness ? ((latchDet > 0.0f) != g_baseHandedness)
+                                                           : (latchDet <= 0.0f);
+                if (!screenSized || mirrored) {
+                    ++g_skipOtherCamera;
+                    g_dispReason = !screenSized
+                        ? "camera not yet latched: render target is not the screen's size"
+                        : "camera not yet latched: mirrored view (reflection pass)";
+                    return HiddenDisp(false);
+                }
+            }
             if (!placed || (g_backAspect > 0.0f && std::fabs(aspect - g_backAspect) > 0.1f)) {
                 ++g_skipOtherCamera;
                 g_dispReason = "camera not yet latched, aspect/origin mismatch";
@@ -8654,12 +10791,16 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
         return HiddenDisp(false);
     }
 
+    PhaseAdd(PH_TRANSFORMS, tB);
+    g_lastWorld = world;
+    g_lastViewProj = FromRegisters(&g_vsConst[kRegProjTM][0], 4);
     scope.vs = g_lastVS;
     scope.ps = g_lastPS;
     scope.active = true;
 
     g_internal = true;
-    g_origSetVertexShader(dev, nullptr);
+    g_internalThread = GetCurrentThreadId();
+    SyncBridgeVS(dev, nullptr);
     g_origSetPixelShader(dev, nullptr);
     g_ffpActive = true;
 
@@ -8694,14 +10835,145 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
 
     InstallFloatUV(dev, scope, deinstance);
 
+    PhaseAdd(PH_UV, tB);
+    // Layers, decals and biased draws are all "a surface in another surface's plane"; in a
+    // path tracer they shimmer. Each is pulled toward the eye by a fraction of its distance -
+    // scale about the eye: p' = eye + k (p - eye) - so a poster leaves its wall and a second
+    // material pass sits 1/1000 nearer than the first. Not for skinned draws (our own ring).
+    g_curLayer = 0;
+    g_curPullWhy = 0;
+    int pullPermille = 0;
+    if (!g_curLayout.skinned) {
+        // layer: the same vertex window at the same placement, converted already this frame
+        if (g_settings.layerOffset && g_stream0) {
+            unsigned long long k = static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(g_stream0)) * 0x9E3779B97F4A7C15ull;
+            k ^= (static_cast<unsigned long long>(g_stream0Offset) << 32) ^ g_curDrawMinIndex;
+            k *= 0x100000001B3ull;
+            k ^= (static_cast<unsigned long long>(g_curDrawVertexCount) << 32) ^ g_stream0Stride;
+            k *= 0x100000001B3ull;
+            // the INDEX range too: material groups of one building share a vertex window with
+            // different triangles, and are not layers - only the same triangles drawn again are
+            k ^= (static_cast<unsigned long long>(g_curDrawStartIndex) << 32) ^ g_curDrawPrimCount;
+            k *= 0x100000001B3ull;
+            const float t[3] = {world._41, world._42, world._43};   // placement, instance stream included
+            for (int i = 0; i < 3; ++i) {
+                const long long q = static_cast<long long>(std::floor(t[i] * 100.0f));
+                k ^= static_cast<unsigned long long>(q) * 0x9E3779B1ull;
+                k *= 0x100000001B3ull;
+            }
+            try { g_curLayer = g_frameWindowSeen[k]++; } catch (...) { g_curLayer = 0; }
+            if (g_curLayer) { ++g_layerDraws; g_curPullWhy |= 1; pullPermille += static_cast<int>(g_curLayer) * g_settings.layerOffsetPermille; }
+        }
+        // The four overlay signatures, MEASURED on the 2026-09-11 capture at the shimmering
+        // spot: the signs and building logos are `Decal_MapSampler` draws that WRITE depth
+        // (zw=1), carry NO bias, test LESSEQUAL and are not repeats of other triangles - so the
+        // first three rules could not fire on a single one of them. The rasteriser let them win
+        // by draw order under LESSEQUAL; a path tracer has no draw order, and the tie is the
+        // shimmer. Whichever signature matches, the draw is pulled ONCE.
+        const bool biased = g_rsShadow[D3DRS_DEPTHBIAS] != 0 || g_rsShadow[D3DRS_SLOPESCALEDEPTHBIAS] != 0;
+        if (biased) ++g_depthBiasDraws;
+        const bool noWrite = g_rsShadow[D3DRS_ZENABLE] != 0 &&
+                             (g_rsShadow[D3DRS_ZWRITEENABLE] == 0 || g_rsShadow[D3DRS_ZFUNC] == D3DCMP_EQUAL);
+        // decalByLowestReg is the CORRECT test: the sampler at the shader's lowest register.
+        // decalByFirstAlpha is the OLD test: whichever sampler name sorts alphabetically first
+        // in the CTAB - not necessarily the same sampler at all (see lowestSampler's comment).
+        // Both are counted every converted draw regardless of the ini switch, so a capture shows
+        // exactly how often the old test was wrong.
+        const bool decalByLowestReg = g_curPS.isDecalLowest;
+        const bool decalByFirstAlpha = g_curPS.isDecalFirst;
+        if (decalByLowestReg) ++g_decalLowestRegDraws;
+        if (decalByFirstAlpha) ++g_decalFirstAlphaDraws;
+        const bool decalNamed = g_settings.decalByLowestSampler ? decalByLowestReg : decalByFirstAlpha;
+        const bool trulyBlended = g_rsShadow[D3DRS_ALPHABLENDENABLE] != 0 &&
+                                  !(g_rsShadow[D3DRS_SRCBLEND] == D3DBLEND_ONE &&
+                                    g_rsShadow[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
+        if (g_settings.decalOffsetPermille > 0) {
+            bool pull = false;
+            if (noWrite) { ++g_decalOffsetDraws; g_curPullWhy |= 4; pull = true; }
+            if (decalNamed && g_settings.decalPrimaryOffset) { ++g_decalNamedDraws; g_curPullWhy |= 2; pull = true; }
+            if (trulyBlended && g_settings.blendedOffset) { ++g_blendedOffsetDraws; g_curPullWhy |= 8; pull = true; }
+            if (biased && g_settings.biasOffset) { ++g_biasOffsetDraws; g_curPullWhy |= 16; pull = true; }
+            if (pull) { ++g_pulledDraws; pullPermille += g_settings.decalOffsetPermille; }
+        }
+    }
+    if (pullPermille > 0) {
+        D3DMATRIX invView;
+        if (Invert(view, invView)) {
+            const float k = 1.0f - static_cast<float>(pullPermille) / 1000.0f;
+            const float ex = invView._41, ey = invView._42, ez = invView._43;
+            D3DMATRIX pull = kIdentity;
+            pull._11 = k; pull._22 = k; pull._33 = k;
+            pull._41 = ex * (1.0f - k); pull._42 = ey * (1.0f - k); pull._43 = ez * (1.0f - k);
+            world = Multiply(world, pull);
+        }
+    }
+    if (g_curPS.hasStipple) ++g_stippleColourDraws;
     ApplyTransforms(dev, world, view, proj);
+    PhaseAdd(PH_APPLY, tB);
     SetupTextureStages(dev);
+    PhaseAdd(PH_STAGES, tB);
     if (!g_lightingSetUp) { SetupLighting(dev); g_lightingSetUp = true; }
 
     // Only stages we actually change need restoring afterwards. Restoring all eight
     // unconditionally cost eight SetTexture calls per converted draw - at ~1,500 draws a frame
     // that is 12,000 bridge round-trips the state shadow never gets to see.
     IDirect3DBaseTexture9* albedo = EffectiveAlbedo();
+
+    // DIAGNOSTIC ONLY: reads g_lastEffectiveAlbedo/g_curPS and the vertex/index buffers and
+    // writes a Log block for a qualifying decal draw. Sets no render state.
+    ProbeDecalDraw();
+
+    // albedoChurnProbe: has EffectiveAlbedo() picked a DIFFERENT texture for this exact draw
+    // than it picked the last time this same draw appeared? The identity deliberately excludes
+    // the texture - it is the same shape of key as the layer-offset one above (stream 0 pointer,
+    // offset, stride, vertex window, index range, world translation to the nearest cm) - so a
+    // hit means the SAME triangles at the SAME place picked a different albedo between frames.
+    // That is exactly what the comment above EffectiveAlbedo's render-target exclusion names:
+    // "what makes surfaces flicker through unrelated images as the frame's targets are rewritten".
+    if (g_settings.albedoChurnProbe && g_stream0) {
+        // Which texcoord set the CHOSEN albedo sampler reads, for this converted draw. See the
+        // g_albedoUv* counters' declaration above for what the three buckets mean.
+        if (g_lastEffectiveAlbedoStage >= 0 && g_lastEffectiveAlbedoStage < 8) {
+            const int albUv = g_curPS.samplerUv[g_lastEffectiveAlbedoStage];
+            if (albUv < 0) ++g_albedoUvUnknownDraws;
+            else if (albUv == 0) ++g_albedoUvSet0Draws;
+            else ++g_albedoUvNonZeroDraws;
+        }
+        unsigned long long ck = static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(g_stream0)) * 0x9E3779B97F4A7C15ull;
+        ck ^= (static_cast<unsigned long long>(g_stream0Offset) << 32) ^ g_curDrawMinIndex;
+        ck *= 0x100000001B3ull;
+        ck ^= (static_cast<unsigned long long>(g_curDrawVertexCount) << 32) ^ g_stream0Stride;
+        ck *= 0x100000001B3ull;
+        ck ^= (static_cast<unsigned long long>(g_curDrawStartIndex) << 32) ^ g_curDrawPrimCount;
+        ck *= 0x100000001B3ull;
+        const float wt[3] = {g_lastWorld._41, g_lastWorld._42, g_lastWorld._43};
+        for (int i = 0; i < 3; ++i) {
+            const long long q = static_cast<long long>(std::floor(wt[i] * 100.0f));
+            ck ^= static_cast<unsigned long long>(q) * 0x9E3779B1ull;
+            ck *= 0x100000001B3ull;
+        }
+        try {
+            const auto churnIt = g_albedoIdentityLastFrame.find(ck);
+            if (churnIt != g_albedoIdentityLastFrame.end() && churnIt->second != g_lastEffectiveAlbedo) {
+                ++g_albedoChurnDraws;
+                if (g_albedoChurnReports < 10) {
+                    ++g_albedoChurnReports;
+                    Log("ALBEDO CHURN #%u: ps first='%s' lowest='%s'@%d rank=%d stage=%d | "
+                        "prev=%p%s -> new=%p%s | v=%u p=%u at(%.1f %.1f %.1f)",
+                        g_albedoChurnReports, g_curPS.firstSampler, g_curPS.lowestSampler,
+                        g_curPS.lowestSamplerReg, g_curPS.albedoRank, g_lastEffectiveAlbedoStage,
+                        static_cast<void*>(churnIt->second),
+                        churnIt->second && g_rtTextures.count(churnIt->second) ? "(RT)" : "",
+                        static_cast<void*>(g_lastEffectiveAlbedo),
+                        g_lastEffectiveAlbedo && g_rtTextures.count(g_lastEffectiveAlbedo) ? "(RT)" : "",
+                        g_curDrawVertexCount, g_curDrawPrimCount,
+                        g_lastWorld._41, g_lastWorld._42, g_lastWorld._43);
+                }
+            }
+            g_albedoIdentityThisFrame[ck] = g_lastEffectiveAlbedo;
+        } catch (...) {}
+    }
+
     // SR3's character atlas is a RENDER TARGET, and Remix hashes only what the game
     // uploads - so it receives an all-zero texture and the character renders black.
     // Re-uploaded here through UpdateTexture, which is the path Remix does hash.
@@ -8749,6 +11021,7 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
                 if (!lay.ib && !lay.listIdx.empty()) {
                     const bool wasInt = g_internal;
                     g_internal = true;
+                    g_internalThread = GetCurrentThreadId();
                     IDirect3DIndexBuffer9* nib = nullptr;
                     if (SUCCEEDED(dev->CreateIndexBuffer(static_cast<UINT>(lay.listIdx.size() * 4),
                                                          D3DUSAGE_WRITEONLY, D3DFMT_INDEX32,
@@ -8789,6 +11062,7 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     // DIRECTIONAL data rather than colour - binding it is what made hair render as a mask.
     else if (IDirect3DBaseTexture9* hair = HairAlbedo(dev)) albedo = hair;
 
+    PhaseAdd(PH_ALBEDO, tB);
     g_lastAlbedoFromCache = false;
     if (g_settings.cacheMeshAlbedo && g_stream0 && !g_curLayout.skinned) {
         // The pixel shader is part of the key. Without it, one mesh drawn with several
@@ -8876,6 +11150,7 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     g_internal = false;
 
     ++g_ffpConverted;
+    PhaseAdd(PH_BIND, tB);
     return Disp::Convert;
 }
 
@@ -8883,6 +11158,7 @@ void EndFFP(IDirect3DDevice9* dev, const FFPScope& scope) {
     g_clothRemap = nullptr;
     if (!scope.active) return;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     // Put the alpha test back exactly as the engine had it. This function restores textures and
     // shaders and nothing else, so a render state left changed here would follow the engine into
     // its own draws - and alpha test decides which of its pixels survive.
@@ -8901,7 +11177,8 @@ void EndFFP(IDirect3DDevice9* dev, const FFPScope& scope) {
     }
     if (scope.uvStream) g_origSetStreamSource(dev, g_uvStream, nullptr, 0, 0);
     if (scope.decl) g_origSetVertexDeclaration(dev, scope.decl);
-    g_origSetVertexShader(dev, scope.vs);
+    // With the diet the bridge keeps null here; the next forwarded draw syncs what it needs.
+    if (!g_settings.dietVsBinds) SyncBridgeVS(dev, scope.vs);
     g_origSetPixelShader(dev, scope.ps);
     g_ffpActive = false;
     g_internal = false;
@@ -8991,6 +11268,7 @@ void EmitLight(IDirect3DDevice9* dev) {
     // to the overflow: the first N lights keep stable identities and everything beyond the
     // device limit is at least visible, which is strictly better than either extreme.
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     bool lit = false;
     if (g_lightSlot < g_maxLightSlots &&
         SUCCEEDED(g_origSetLight(dev, g_lightSlot, &light)) &&
@@ -9011,6 +11289,7 @@ void EmitLight(IDirect3DDevice9* dev) {
 void DisableUnusedLightSlots(IDirect3DDevice9* dev) {
     if (!g_settings.injectLights) return;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     for (unsigned i = g_lightSlot; i < g_lightSlotsUsedLastFrame; ++i)
         g_origLightEnable(dev, i, FALSE);
     g_internal = false;
@@ -9022,7 +11301,13 @@ void DisableUnusedLightSlots(IDirect3DDevice9* dev) {
 
 HRESULT WINAPI Hook_SetVertexShaderConstantF(IDirect3DDevice9* dev, UINT start,
                                              const float* data, UINT count) {
-    const HRESULT hr = g_origSetVSConstF(dev, start, data, count);
+    ++g_callVsConst;
+    g_callVsConstRegs += count;
+    // No programmable vertex shader runs on the bridge with capture off, so these never need to
+    // cross it; the shadow below is the only reader.
+    HRESULT hr = D3D_OK;
+    if (g_settings.dietVsConstants && !InternalHere()) ++g_dietVsConstDropped;
+    else hr = g_origSetVSConstF(dev, start, data, count);
     if (!data || !count || start + count > kMaxVsConst) return hr;
 
     memcpy(&g_vsConst[start][0], data, count * 4 * sizeof(float));
@@ -9087,8 +11372,11 @@ HRESULT WINAPI Hook_SetVertexShaderConstantF(IDirect3DDevice9* dev, UINT start,
             // bone 0 belongs to whoever wrote last.
             g_boneWrittenUploadBones[b] = g_lastBoneUploadBones;
             g_boneWrittenObjGen[b] = g_objGeneration;
-        g_paletteSetupId = g_setupId;
         }
+        // 2026-09-18 AUDIT FIX: moved out of the loop above, where the misindentation put it -
+        // it ran once per BONE instead of once per UPLOAD, and was skipped entirely on an
+        // upload whose range left the loop body unentered.
+        g_paletteSetupId = g_setupId;
     }
     if (start <= kRegObjTM && end >= kRegObjTM + 3) {
         // Compared by VALUE, not merely by "a write happened": the game re-uploads an identical
@@ -9110,6 +11398,8 @@ HRESULT WINAPI Hook_SetVertexShaderConstantF(IDirect3DDevice9* dev, UINT start,
 
 HRESULT WINAPI Hook_SetPixelShaderConstantF(IDirect3DDevice9* dev, UINT start,
                                             const float* data, UINT count) {
+    ++g_callPsConst;
+    g_callPsConstRegs += count;
     if (data)
         for (UINT i = 0; i < count && start + i < kMaxPsConst; ++i)
             memcpy(g_psConst[start + i], data + i * 4, sizeof(float) * 4);
@@ -9129,14 +11419,18 @@ HRESULT WINAPI Hook_CreateVertexShader(IDirect3DDevice9* dev, const DWORD* funct
 }
 
 HRESULT WINAPI Hook_SetVertexShader(IDirect3DDevice9* dev, IDirect3DVertexShader9* shader) {
-    if (!g_internal) {
+    ++g_callSetVS;
+    if (!InternalHere()) {
         const auto it = g_shaders.find(shader);
         g_curVS = (it != g_shaders.end()) ? it->second : ShaderInfo{};
         g_lastVS = shader;
         Trace(g_curVS.usesObjTM ? 'V' : 'v');
         // NOTE: g_worldWritten is deliberately NOT cleared here. See ComputeTransforms.
+        // Shadowed only. The bridge is synced right before any draw that is forwarded.
+        if (g_settings.dietVsBinds) { ++g_dietVsBindDropped; return D3D_OK; }
     }
-    return g_origSetVertexShader(dev, shader);
+    SyncBridgeVS(dev, shader);
+    return D3D_OK;
 }
 
 HRESULT WINAPI Hook_CreatePixelShader(IDirect3DDevice9* dev, const DWORD* function,
@@ -9160,7 +11454,8 @@ HRESULT WINAPI Hook_CreatePixelShader(IDirect3DDevice9* dev, const DWORD* functi
 }
 
 HRESULT WINAPI Hook_SetPixelShader(IDirect3DDevice9* dev, IDirect3DPixelShader9* shader) {
-    if (!g_internal) {
+    ++g_callSetPS;
+    if (!InternalHere()) {
         const auto it = g_shaders.find(shader);
         g_curPS = (it != g_shaders.end()) ? it->second : ShaderInfo{};
         g_lastPS = shader;
@@ -9170,7 +11465,8 @@ HRESULT WINAPI Hook_SetPixelShader(IDirect3DDevice9* dev, IDirect3DPixelShader9*
 
 HRESULT WINAPI Hook_SetTexture(IDirect3DDevice9* dev, DWORD stage,
                                IDirect3DBaseTexture9* texture) {
-    if (!g_internal && stage < 8) g_curTexture[stage] = texture;
+    ++g_callSetTex;
+    if (!InternalHere() && stage < 8) g_curTexture[stage] = texture;
     return g_origSetTexture(dev, stage, texture);
 }
 
@@ -9246,13 +11542,15 @@ HRESULT WINAPI Hook_CreateTexture(IDirect3DDevice9* dev, UINT w, UINT h, UINT le
 }
 
 HRESULT WINAPI Hook_SetRenderState(IDirect3DDevice9* dev, D3DRENDERSTATETYPE state, DWORD value) {
-    if (!g_internal && state < kRsMax) { g_rsShadow[state] = value; g_rsKnown[state] = true; }
+    ++g_callRS;
+    if (!InternalHere() && state < kRsMax) { g_rsShadow[state] = value; g_rsKnown[state] = true; }
     return g_origSetRenderState(dev, state, value);
 }
 
 HRESULT WINAPI Hook_SetTextureStageState(IDirect3DDevice9* dev, DWORD stage,
                                          D3DTEXTURESTAGESTATETYPE type, DWORD value) {
-    if (!g_internal && stage < 8 && type < kTssMax) {
+    ++g_callTSS;
+    if (!InternalHere() && stage < 8 && type < kTssMax) {
         g_tssShadow[stage][type] = value;
         g_tssKnown[stage][type] = true;
     }
@@ -9261,7 +11559,8 @@ HRESULT WINAPI Hook_SetTextureStageState(IDirect3DDevice9* dev, DWORD stage,
 
 HRESULT WINAPI Hook_SetSamplerState(IDirect3DDevice9* dev, DWORD sampler,
                                     D3DSAMPLERSTATETYPE type, DWORD value) {
-    if (!g_internal && sampler < 16 && type < kSsMax) {
+    ++g_callSS;
+    if (!InternalHere() && sampler < 16 && type < kSsMax) {
         g_ssShadow[sampler][type] = value;
         g_ssKnown[sampler][type] = true;
     }
@@ -9272,10 +11571,16 @@ HRESULT WINAPI Hook_SetSamplerState(IDirect3DDevice9* dev, DWORD sampler,
 // transforms, so anything arriving here that is not ours would invalidate our cache.
 HRESULT WINAPI Hook_SetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE state,
                                  const D3DMATRIX* matrix) {
-    if (!g_internal) {
+    ++g_callTransform;
+    if (!InternalHere()) {
         if (state == D3DTS_WORLD) g_haveAppliedWorld = false;
         else if (state == D3DTS_VIEW) g_haveAppliedView = false;
         else if (state == D3DTS_PROJECTION) g_haveAppliedProj = false;
+        // 2026-09-18 AUDIT FIX: g_appliedU/g_appliedV (SetupTextureStages' texture-matrix elision
+        // cache) were never invalidated by anything - not here, not the per-frame reset below.
+        // 0.0f is the same sentinel their own initialisers use, and su/sv are always positive in
+        // every case this shim builds them from, so it can never collide with a real scale.
+        else if (state == D3DTS_TEXTURE0) { g_appliedU = 0.0f; g_appliedV = 0.0f; }
     }
     return g_origSetTransform(dev, state, matrix);
 }
@@ -9312,6 +11617,17 @@ VertexLayout ParseDeclaration(IDirect3DVertexDeclaration9* decl) {
             out.instStream = e.Stream;
             out.instRowOffset[e.UsageIndex - 2] = e.Offset;
         }
+        // 2026-09-18 AUDIT FIX: recorded BEFORE the stream-0 filter below, unlike texcoord1Type/
+        // texcoord1Offset just below it, so a genuinely stream-1 TEXCOORD1 (normal for the
+        // INSTANCED decal draws FIX A targets) is actually SEEN instead of leaving
+        // texcoord1Stream indistinguishable from "no texcoord1 at all" - both used to read -1.
+        // InstallFloatUV's `texcoord1Stream != 0` refusal test was dead for want of this.
+        if (e.Usage == D3DDECLUSAGE_TEXCOORD && e.UsageIndex == 1) out.texcoord1Stream = e.Stream;
+        // CHANGE 3, 2026-09-18: same fix, extended to usage-index 0. Recorded here, before
+        // the stream-0 filter below, so a TEXCOORD0 declared on any stream other than 0 is
+        // still seen instead of leaving texcoordStream indistinguishable from "no TEXCOORD0
+        // at all" - both used to fall through to the sentinel -1.
+        if (e.Usage == D3DDECLUSAGE_TEXCOORD && e.UsageIndex == 0) out.texcoordStream = e.Stream;
         if (e.Stream != 0) continue;
         switch (e.Usage) {
             case D3DDECLUSAGE_POSITIONT: out.hasPositionT = true; break;
@@ -9338,7 +11654,8 @@ VertexLayout ParseDeclaration(IDirect3DVertexDeclaration9* decl) {
                 } else if (e.UsageIndex == 1) {
                     out.texcoord1Type = e.Type;
                     out.texcoord1Offset = e.Offset;
-                    out.texcoord1Stream = e.Stream;
+                    // texcoord1Stream is set above, before the stream-0 filter - always 0 here
+                    // (that filter guarantees it), so re-assigning it would be a no-op.
                 }
                 break;
             default: break;
@@ -9404,8 +11721,32 @@ struct UvBuffer {
     IDirect3DVertexBuffer9* uv = nullptr;
     UINT vertexCount = 0;
     UINT bytes = 0;
+    bool ring = false;       // uv points into the shared dynamic ring: never Release it
+    UINT offset = 0;         // stream offset to bind the ring at, for this entry
 };
 std::unordered_map<unsigned long long, UvBuffer> g_uvBuffers;
+// Keys per source buffer, so an invalidation touches only that buffer's entries. The scan of
+// the whole map per invalidated buffer, ~60 times a frame, was most of the "drain" phase.
+std::unordered_map<IDirect3DVertexBuffer9*, std::vector<unsigned long long>> g_uvByVB;
+inline void UvIndexAdd(IDirect3DVertexBuffer9* vb, unsigned long long key) {
+    try { g_uvByVB[vb].push_back(key); } catch (...) {}
+}
+void UvIndexRebuild() {
+    g_uvByVB.clear();
+    for (const auto& kv : g_uvBuffers) UvIndexAdd(kv.second.src, kv.first);
+}
+// THE UV RING. A DYNAMIC source buffer is rewritten by the game every frame, which invalidated
+// its converted copy every frame - measured 103,687 conversions with 100,980 invalidations in
+// one run, each a CreateVertexBuffer + Lock + Unlock + Release across the bridge: the whole
+// 14 ms "uv" phase. Converted ranges from dynamic sources now go into one persistent ring
+// with NOOVERWRITE appends (DISCARD on wrap, which also empties every ring entry from the
+// cache), bound at an offset - the same scheme the skinning ring uses. Static sources keep
+// their own buffers as before.
+IDirect3DVertexBuffer9* g_uvRing = nullptr;
+bool g_uvRingTried = false;
+constexpr UINT kUvRingBytes = 8u * 1024u * 1024u;
+UINT g_uvRingPos = 0;
+unsigned g_uvRingWraps = 0, g_uvRingAppends = 0, g_uvRingFail = 0;
 size_t g_uvBytesHeld = 0;
 unsigned g_uvBuffersMade = 0;
 unsigned g_uvConvertFailures = 0;
@@ -9419,6 +11760,23 @@ unsigned g_uvDynWaiting = 0;     // DYNAMIC source registered, snoop not filled 
 unsigned g_uvBufferFlushes = 0;
 unsigned g_uvInvalidations = 0;
 unsigned g_uvStreamDraws = 0;
+// FIX A: draws whose vertex shader declares texcoord1 but not texcoord0 (see DecalUvSourceSet),
+// served from that set instead of the always-sampled set 0; and draws that wanted it but the
+// bound vertex declaration had no usable (SHORT2) texcoord1 to convert.
+unsigned g_uvSet1Draws = 0;
+unsigned g_uvSet1Unavailable = 0;
+// Crash fix 2026-09-14: set-1 draws refused not for TYPE (g_uvSet1Unavailable, above) but
+// because texcoord1 lives outside stream 0 - a non-zero stream (normal for these INSTANCED
+// decal draws) or an unresolved offset. Reading stream-1-shaped offsets out of stream 0's bytes
+// is the access violation that crashed world load (0xC0000005 reading near 0x59ADF000). Counted
+// separately so a wrong-stream refusal is distinguishable from a wrong-type one in the report.
+unsigned g_uvSet1WrongStream = 0;
+// FIX 3 diagnostics (uvHonourStreamOffset): how often a UV conversion is even asked to run with
+// stream 0 bound at a non-zero offset - measured whether or not the switch is on, split static
+// (the whole-buffer decode) from dynamic (the snooped range/ring), and by phase (offset % stride
+// != 0, i.e. not simply a whole-vertex shift the old base-blind math could not fix either way).
+unsigned g_uvNonZeroOffsetStatic = 0, g_uvNonZeroOffsetDynamic = 0, g_uvNonZeroOffsetPhase = 0;
+unsigned g_uvNonZeroOffsetDecalAlbedo = 0;
 
 // The range is part of the key for DYNAMIC sources only. A dynamic buffer is a RING: the game
 // refills one slice of it per draw, so two draws in the same frame legitimately read different
@@ -9426,36 +11784,69 @@ unsigned g_uvStreamDraws = 0;
 // draw's coordinates - the identical defect the bind-pose cache had ("each character had the
 // wrong head"), whose key had to become {vb, offset, stride, minIndex, count} for the same
 // reason. Static buffers pass 0/0 and keep their old whole-buffer key.
-unsigned long long UvKey(void* vb, UINT stride, int texOffset, UINT first, UINT count) {
+// FIX A: `set` is folded in as its own hash term, not merely implied by texOffset differing -
+// a buffer converted for the decal family's texcoord1 must never be handed back to a draw that
+// wanted texcoord0, even in the coincidence that the two offsets happened to match.
+// FIX 3: `phase` is a further hash term - for a static source it is offset % stride (so a pooled
+// buffer bound at two different phases never shares one decoded entry, see UvBufferFor's own
+// comment); for a dynamic source it is the full g_stream0Offset (a dynamic entry is already keyed
+// per draw range, so there is no base/phase split to make - see the dynamic branch's own comment).
+unsigned long long UvKey(void* vb, UINT stride, int texOffset, UINT first, UINT count, int set,
+                         unsigned long long phase) {
     unsigned long long h = 1469598103934665603ull;
-    const unsigned long long parts[5] = {
+    const unsigned long long parts[7] = {
         reinterpret_cast<unsigned long long>(vb), stride,
-        static_cast<unsigned long long>(texOffset), first, count};
-    for (int i = 0; i < 5; ++i) { h ^= parts[i]; h *= 1099511628211ull; }
+        static_cast<unsigned long long>(texOffset), first, count,
+        static_cast<unsigned long long>(set), phase};
+    for (int i = 0; i < 7; ++i) { h ^= parts[i]; h *= 1099511628211ull; }
     return h;
 }
 
 void ReleaseUvBuffers() {
     for (auto& kv : g_uvBuffers) {
         if (kv.second.src) kv.second.src->Release();
-        if (kv.second.uv) kv.second.uv->Release();
+        if (kv.second.uv && !kv.second.ring) kv.second.uv->Release();
     }
     g_uvBuffers.clear();
+    g_uvByVB.clear();
     g_uvBytesHeld = 0;
 }
 
 // The converted buffer for the currently bound stream 0, or null if it cannot be built.
 IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
     const UINT stride = g_stream0Stride;
-    const int texOffset = g_curLayout.texcoordOffset;
+    // FIX A: InstallFloatUV has already picked which texcoord set this draw needs and confirmed
+    // it is SHORT2; read the matching offset rather than always set 0's.
+    const int uvSet = DecalUvSourceSet();
+    const int texOffset = (uvSet == 1) ? g_curLayout.texcoord1Offset : g_curLayout.texcoordOffset;
     if (!g_stream0 || stride == 0 || texOffset < 0 || texOffset + 4 > static_cast<int>(stride)) {
         ++g_uvFailLayout;
         ++g_uvConvertFailures;
         return nullptr;
     }
 
+    // FIX 3 (uvHonourStreamOffset): D3D9 addresses stream 0 at g_stream0Offset + n*stride for
+    // vertex n. The STATIC branch below decodes ONE buffer for the WHOLE source range, entry i
+    // from byte i*stride - which only equals vertex i's bytes when g_stream0Offset is 0. Split it
+    // the same way SkinFFBufferFor splits its own side stream: uvPhase = offset % stride folds
+    // into the static decode and the cache key; uvBase = offset / stride only shifts where the
+    // draw BINDS the result (added to g_uvBindOffset below), since it does not change which bytes
+    // get decoded. The DYNAMIC (snooped/ring) branches read a per-draw-range slice instead of a
+    // whole buffer, so they use the full offset directly rather than this split - see their own
+    // comments, further down. Off: uvPhase = uvBase = 0, byte-identical to the pre-fix addressing.
+    const UINT uvPhase = g_settings.uvHonourStreamOffset ? (g_stream0Offset % stride) : 0;
+    const UINT uvBase = g_settings.uvHonourStreamOffset ? (g_stream0Offset / stride) : 0;
+    const UINT uvOffsetForRead = g_settings.uvHonourStreamOffset ? g_stream0Offset : 0;   // dynamic branches only
+
     D3DVERTEXBUFFER_DESC desc{};
-    if (FAILED(g_stream0->GetDesc(&desc))) { ++g_uvFailDesc; ++g_uvConvertFailures; return nullptr; }
+    {
+        const auto dit = g_vbDescCache.find(g_stream0);
+        if (dit != g_vbDescCache.end()) desc = dit->second;
+        else {
+            if (FAILED(g_stream0->GetDesc(&desc))) { ++g_uvFailDesc; ++g_uvConvertFailures; return nullptr; }
+            try { g_vbDescCache[g_stream0] = desc; } catch (...) {}
+        }
+    }
     // DYNAMIC source. This used to refuse outright, on two objections that are both real and
     // both already answered elsewhere in this file:
     //
@@ -9489,7 +11880,21 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
         RegisterSnoop(g_stream0);
     }
 
-    const UINT vertexCount = desc.Size / stride;
+    // FIX 3 diagnostics: measured whether or not the switch is on - see the counters' own comment,
+    // above g_uvSet1WrongStream.
+    if (g_stream0Offset != 0) {
+        if (dynamicSrc) ++g_uvNonZeroOffsetDynamic; else ++g_uvNonZeroOffsetStatic;
+        if ((g_stream0Offset % stride) != 0) ++g_uvNonZeroOffsetPhase;
+        if (g_curPS.isPixelShader && g_curPS.albedoSampler[0] &&
+            StrStrIA(g_curPS.albedoSampler, "Decal") != nullptr)
+            ++g_uvNonZeroOffsetDecalAlbedo;
+    }
+
+    // FIX 3: the whole-buffer STATIC decode covers [uvPhase, uvPhase + vertexCount*stride) rather
+    // than [0, desc.Size) - see uvPhase's own comment, above. The DYNAMIC count is unaffected: its
+    // branches read a per-draw-range slice, not this whole-buffer decode.
+    const UINT vertexCount = dynamicSrc ? (desc.Size / stride)
+                                        : ((desc.Size > uvPhase) ? (desc.Size - uvPhase) / stride : 0);
     if (vertexCount == 0) { ++g_uvFailDesc; ++g_uvConvertFailures; return nullptr; }
     const UINT bytes = vertexCount * kUvBytesPerVertex;
 
@@ -9500,7 +11905,14 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
     if (dynamicSrc) {
         rangeFirst = g_curDrawFirstVertex;
         rangeCount = g_curDrawVertexCount;
-        if (rangeCount == 0 || rangeFirst + rangeCount > vertexCount) {
+        // FIX 3: honouring the offset means the true bound bytes are checked, not just a vertex
+        // count that silently assumed g_stream0Offset was 0 - VertexRangeFits is the same helper
+        // GetBaseMesh uses for the identical arithmetic. Off keeps the exact old, offset-blind
+        // check for a byte-identical A/B.
+        const bool rangeOk = g_settings.uvHonourStreamOffset
+            ? (rangeCount != 0 && VertexRangeFits(g_stream0, g_stream0Offset, rangeFirst, rangeCount, stride))
+            : (rangeCount != 0 && rangeFirst + rangeCount <= vertexCount);
+        if (!rangeOk) {
             ++g_uvFailLayout;
             ++g_uvConvertFailures;
             return nullptr;
@@ -9509,9 +11921,119 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
 
     const unsigned long long key = UvKey(g_stream0, stride, texOffset,
                                          dynamicSrc ? rangeFirst : 0,
-                                         dynamicSrc ? rangeCount : 0);
+                                         dynamicSrc ? rangeCount : 0, uvSet,
+                                         dynamicSrc ? static_cast<unsigned long long>(uvOffsetForRead)
+                                                    : static_cast<unsigned long long>(uvPhase));
     const auto it = g_uvBuffers.find(key);
-    if (it != g_uvBuffers.end()) return it->second.uv;
+    if (it != g_uvBuffers.end()) {
+        // FIX 3: a static entry's own offset field is always 0 (there is no ring position for a
+        // whole-buffer decode) - uvBase is what shifts the bind for THIS call, recomputed from
+        // THIS draw's live g_stream0Offset rather than stored in the entry, because the cache key
+        // only folds in phase (offset % stride): two draws at different offsets but the same
+        // phase correctly share one decoded entry and differ only in where they bind it.
+        g_uvBindOffset = it->second.offset + (dynamicSrc ? 0u : uvBase * kUvBytesPerVertex);
+        return it->second.uv;
+    }
+    g_uvBindOffset = 0;
+
+    // ---- dynamic source: append the converted range to the ring
+    if (dynamicSrc) {
+        if (!g_uvRing && !g_uvRingTried) {
+            g_uvRingTried = true;
+            const bool wasInt = g_internal;
+            g_internal = true;
+            g_internalThread = GetCurrentThreadId();
+            if (FAILED(dev->CreateVertexBuffer(kUvRingBytes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0,
+                                               D3DPOOL_DEFAULT, &g_uvRing, nullptr)))
+                g_uvRing = nullptr;
+            g_internal = wasInt;
+            Log("uv ring: %s (%u MB)", g_uvRing ? "created" : "CREATE FAILED - dynamic sources fall back",
+                kUvRingBytes >> 20);
+        }
+        if (g_uvRing) {
+            // Crash fix 2026-09-14: belt-and-suspenders for the dynamic/snooped (ring) read
+            // below, which indexes stream 0's bytes at texOffset using stream 0's stride.
+            // InstallFloatUV already refuses a stream-1 or unresolved texcoord1 before this
+            // function is ever called (see the crash-fix guard there), but this is the actual
+            // read site: refuse here too, before touching the ring, rather than walking past
+            // the mapped vertex range - the access violation that crashed world load
+            // (0xC0000005 reading near 0x59ADF000).
+            //
+            // 2026-09-18 audit: this specific re-check is provably dead code, not merely belt-
+            // and-suspenders. texOffset and stride are both const, set once at function entry
+            // (above) from the same g_curLayout/g_stream0Stride this uvSet==1 branch already
+            // uses, and the entry-point guard a few lines up (texOffset < 0 || texOffset + 4 >
+            // stride) already refused anything that would make this condition true - nothing
+            // between there and here can change either value. Removed rather than left to
+            // increment a counter (g_uvSet1WrongStream) that can never actually be reached by
+            // this path, which is its own kind of misleading zero.
+            const UINT need = rangeCount * kUvBytesPerVertex;
+            const UINT base = rangeFirst * kUvBytesPerVertex;
+            // the draw addresses vertex i at offset + i*8, so the block must sit at or past base
+            if (g_uvRingPos < base) g_uvRingPos = base;
+            bool discard = false;
+            if (g_uvRingPos + need > kUvRingBytes) {
+                if (base + need > kUvRingBytes) { ++g_uvRingFail; ++g_uvConvertFailures; return nullptr; }
+                g_uvRingPos = base;
+                discard = true;
+                ++g_uvRingWraps;
+                // every ring entry's data is gone with the discard
+                for (auto e = g_uvBuffers.begin(); e != g_uvBuffers.end();) {
+                    if (e->second.ring) { if (e->second.src) e->second.src->Release(); e = g_uvBuffers.erase(e); }
+                    else ++e;
+                }
+                UvIndexRebuild();
+            }
+            std::vector<unsigned char> staging;
+            bool fresh = false;
+            // FIX 3: the snoop slice must start at the vertex's TRUE byte address
+            // (g_stream0Offset + rangeFirst*stride), not rangeFirst*stride alone - see
+            // uvOffsetForRead's own comment, above. The ring's own bind-offset math needs no
+            // change for this: entry.offset (= g_uvRingPos - base, below) already places vertex
+            // (rangeFirst+n) at ring byte g_uvRingPos+n*8 regardless of where its SOURCE bytes
+            // came from, so fixing only the read (this line) is sufficient - confirmed by
+            // substitution: D3D reads this stream at bindOffset + v*8 for vertex v = rangeFirst+n,
+            // i.e. (g_uvRingPos - rangeFirst*8) + (rangeFirst+n)*8 = g_uvRingPos + n*8, exactly
+            // where entry n's data was written below, independent of g_stream0Offset.
+            const UINT sliceOff = uvOffsetForRead + rangeFirst * stride, sliceLen = rangeCount * stride;
+            try { staging.resize(sliceLen); } catch (...) { ++g_uvRingFail; return nullptr; }
+            if (!SnoopCopy(g_stream0, sliceOff, staging.data(), sliceLen, &fresh) || !fresh) {
+                ++g_uvDynWaiting;
+                return nullptr;
+            }
+            void* dstData = nullptr;
+            const bool wasInt = g_internal;
+            g_internal = true;
+            g_internalThread = GetCurrentThreadId();
+            const HRESULT lh = discard ? g_uvRing->Lock(0, 0, &dstData, D3DLOCK_DISCARD)
+                                       : g_uvRing->Lock(g_uvRingPos, need, &dstData, D3DLOCK_NOOVERWRITE);
+            if (FAILED(lh) || !dstData) { g_internal = wasInt; ++g_uvRingFail; ++g_uvConvertFailures; return nullptr; }
+            float* dst = static_cast<float*>(dstData);
+            if (discard) dst = reinterpret_cast<float*>(static_cast<unsigned char*>(dstData) + g_uvRingPos);
+            for (UINT n = 0; n < rangeCount; ++n) {
+                const short* t = reinterpret_cast<const short*>(staging.data() + n * stride + texOffset);
+                dst[n * 2 + 0] = static_cast<float>(t[0]);
+                dst[n * 2 + 1] = static_cast<float>(t[1]);
+            }
+            g_uvRing->Unlock();
+            g_internal = wasInt;
+            UvBuffer entry;
+            entry.src = g_stream0;
+            entry.src->AddRef();
+            entry.uv = g_uvRing;
+            entry.ring = true;
+            entry.offset = g_uvRingPos - base;
+            entry.vertexCount = vertexCount;
+            entry.bytes = 0;
+            g_uvRingPos += need;
+            ++g_uvRingAppends;
+            ++g_uvDynConverted;
+            g_uvBuffers[key] = entry;
+            UvIndexAdd(entry.src, key);
+            g_uvBindOffset = entry.offset;
+            return g_uvRing;
+        }
+    }
 
     // A cap WITH A FLUSH, not a cap that stops accepting. Two caches here have already had the
     // "stop growing" cliff, where the world progressively loses whatever the cache protects as
@@ -9522,6 +12044,19 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
         Log("uv buffer arena flushed at %u MB (flush #%u)",
             static_cast<unsigned>(kMaxUvBufferBytes >> 20), g_uvBufferFlushes);
     }
+
+    // Crash fix 2026-09-14: belt-and-suspenders for the read loop below (the static path, and
+    // the non-ring dynamic/snooped fallback), which both index stream 0's bytes at texOffset
+    // using stream 0's stride. InstallFloatUV already refuses a stream-1 or unresolved
+    // texcoord1 before this function is ever called, but this is the actual read site: refuse
+    // here too, before allocating or locking anything, rather than walking past the mapped
+    // vertex range - the access violation that crashed world load (0xC0000005 reading near
+    // 0x59ADF000).
+    //
+    // 2026-09-18 audit: provably dead for the same reason as the ring path's identical check
+    // above - texOffset/stride are const from function entry and already validated there, so
+    // this can never be true. Removed rather than left to increment a counter that can never
+    // fire.
 
     UvBuffer entry;
     entry.vertexCount = vertexCount;
@@ -9547,8 +12082,11 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
         // request fails the `offset + len > c.data.size()` bound outright; and D3DLOCK_DISCARD
         // clears every fresh bit, so after a partial refill most of the buffer is legitimately
         // stale. Result: 0 converted, 24,772 waiting, with the report's own warning firing.
+        // FIX 3: this is the SAME ring-unavailable fallback and needs the SAME fix as the ring's
+        // own sliceOff, above - the true byte address is g_stream0Offset + rangeFirst*stride, not
+        // rangeFirst*stride alone.
         bool fresh = false;
-        const UINT sliceOff = rangeFirst * stride;
+        const UINT sliceOff = uvOffsetForRead + rangeFirst * stride;
         const UINT sliceLen = rangeCount * stride;
         staging.resize(sliceLen);
         if (!SnoopCopy(g_stream0, sliceOff, staging.data(), sliceLen, &fresh) || !fresh) {
@@ -9585,15 +12123,23 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
     if (dynamicSrc && rangeCount != vertexCount) memset(dst, 0, bytes);
     for (UINT n = 0; n < rangeCount; ++n) {
         const UINT i = rangeFirst + n;
-        // src8 is the slice for a dynamic source and the whole buffer for a static one.
+        // src8 is the slice for a dynamic source and the whole buffer for a static one. FIX 3:
+        // a dynamic slice already starts at the true byte address (sliceOff, above), so its own
+        // vertices need no further shift; a static source is read from byte 0 of the WHOLE
+        // buffer, so its decode still needs uvPhase added, exactly like SkinFFBufferFor's own.
         const UINT srcVertex = dynamicSrc ? n : i;
-        const short* t = reinterpret_cast<const short*>(src8 + srcVertex * stride + texOffset);
+        const UINT srcPhase = dynamicSrc ? 0u : uvPhase;
+        const short* t = reinterpret_cast<const short*>(src8 + srcPhase + srcVertex * stride + texOffset);
         dst[i * 2 + 0] = static_cast<float>(t[0]);
         dst[i * 2 + 1] = static_cast<float>(t[1]);
     }
     entry.uv->Unlock();
     if (!dynamicSrc) g_stream0->Unlock();
     if (dynamicSrc) ++g_uvDynConverted;
+    // FIX 3: only the static (whole-buffer) path needs uvBase folded into the bind offset - see
+    // the cache-hit branch's identical comment, above. A dynamic entry's offset (always 0 here,
+    // the ring-unavailable fallback) is unaffected.
+    if (!dynamicSrc) g_uvBindOffset = entry.offset + uvBase * kUvBytesPerVertex;
 
     // Referenced, because the key is its address. A freed buffer whose address is recycled would
     // otherwise hand a later mesh this one's coordinates - the defect already found in three
@@ -9603,16 +12149,33 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
     g_uvBytesHeld += bytes;
     ++g_uvBuffersMade;
     g_uvBuffers[key] = entry;
+    UvIndexAdd(entry.src, key);
     return entry.uv;
 }
 
 // The game refilled a buffer we have converted: our coordinates describe its old contents.
 void InvalidateUvBuffers(IDirect3DVertexBuffer9* vb) {
+    g_vbDescCache.erase(vb);
+    if (g_settings.indexedInvalidation) {
+        const auto list = g_uvByVB.find(vb);
+        if (list == g_uvByVB.end()) return;
+        for (const unsigned long long key : list->second) {
+            const auto it = g_uvBuffers.find(key);
+            if (it == g_uvBuffers.end() || it->second.src != vb) continue;
+            g_uvBytesHeld -= it->second.bytes;
+            it->second.src->Release();
+            if (it->second.uv && !it->second.ring) it->second.uv->Release();
+            g_uvBuffers.erase(it);
+            ++g_uvInvalidations;
+        }
+        g_uvByVB.erase(list);
+        return;
+    }
     for (auto it = g_uvBuffers.begin(); it != g_uvBuffers.end();) {
         if (it->second.src == vb) {
             g_uvBytesHeld -= it->second.bytes;
             it->second.src->Release();
-            if (it->second.uv) it->second.uv->Release();
+            if (it->second.uv && !it->second.ring) it->second.uv->Release();
             it = g_uvBuffers.erase(it);
             ++g_uvInvalidations;
         } else {
@@ -9624,44 +12187,99 @@ void InvalidateUvBuffers(IDirect3DVertexBuffer9* vb) {
 // A clone of the game's declaration with TEXCOORD0 moved onto our float2 stream. Position, normal
 // and the other texcoord sets still come from the game's own buffers, so the geometry itself is
 // untouched and only the coordinates change.
-std::unordered_map<IDirect3DVertexDeclaration9*, IDirect3DVertexDeclaration9*> g_uvDecls;
+// FIX A: split by SET (index 0 or 1, from DecalUvSourceSet), not just by source declaration.
+// The same vertex declaration can serve both an ordinary shader (set 0) and one of FIX A's
+// decal-only shaders (set 1) over the same shared mesh format, and each needs a DIFFERENT
+// element replaced - caching on `src` alone would hand one shader's clone to the other.
+std::unordered_map<IDirect3DVertexDeclaration9*, IDirect3DVertexDeclaration9*> g_uvDecls[2];
 unsigned g_uvDeclsMade = 0;
 unsigned g_uvDeclFailures = 0;
+// Set 1 only: a declaration that ALSO carries a genuine TEXCOORD0 element alongside the
+// TEXCOORD1 element FIX A retargets. That TEXCOORD0 element has to be moved off usage-index 0
+// before the retarget happens, or CreateVertexDeclaration sees two elements both claiming
+// TEXCOORD usage-index 0 and rejects the whole declaration. See FloatUVDeclaration below.
+unsigned g_uvDeclTexcoord0Displaced = 0;
 
 IDirect3DVertexDeclaration9* FloatUVDeclaration(IDirect3DDevice9* dev,
                                                 IDirect3DVertexDeclaration9* src) {
     if (!src) return nullptr;
-    const auto it = g_uvDecls.find(src);
-    if (it != g_uvDecls.end()) return it->second;
+    const int uvSet = DecalUvSourceSet();
+    auto& cache = g_uvDecls[uvSet];
+    const auto it = cache.find(src);
+    if (it != cache.end()) return it->second;
 
     D3DVERTEXELEMENT9 elems[64]{};
     UINT count = 0;
     IDirect3DVertexDeclaration9* clone = nullptr;
     if (SUCCEEDED(src->GetDeclaration(elems, &count)) && count > 0) {
         bool changed = false;
-        for (UINT i = 0; i < count; ++i) {
+        bool abandon = false;
+        if (uvSet == 1) {
+            // Which draw takes the set-1 path is decided by the VERTEX SHADER, independent of
+            // what this declaration carries. If the declaration happens to have both a real
+            // TEXCOORD0 element and the TEXCOORD1 element the loop below retargets, the retarget
+            // would leave two elements both claiming TEXCOORD usage-index 0 - not a valid D3D9
+            // declaration, and CreateVertexDeclaration would (correctly) refuse it, which would
+            // silently fall back to the game's own broken declaration. Move the TEXCOORD0
+            // element onto whatever TEXCOORD usage index is actually free instead. This is safe:
+            // nothing in the fixed-function path reads any texcoord set other than index 0,
+            // because D3DTSS_TEXCOORDINDEX is 0 for stage 0 and stages 1-7 are disabled, so the
+            // displaced element's data is still there for anything that might look, just under
+            // an index nothing samples - it is relabelled, not lost.
+            bool usedIndex[8] = {};
+            int zeroIdx = -1;
+            for (UINT i = 0; i < count; ++i) {
+                if (elems[i].Stream == 0xFF) break;
+                if (elems[i].Usage == D3DDECLUSAGE_TEXCOORD && elems[i].UsageIndex < 8) {
+                    usedIndex[elems[i].UsageIndex] = true;
+                    if (elems[i].UsageIndex == 0) zeroIdx = static_cast<int>(i);
+                }
+            }
+            if (zeroIdx >= 0) {
+                int freeIndex = -1;
+                for (int j = 1; j < 8; ++j) {
+                    if (!usedIndex[j]) { freeIndex = j; break; }
+                }
+                if (freeIndex < 0) {
+                    abandon = true;   // no room to displace it - fall back, like any other failure
+                } else {
+                    elems[zeroIdx].UsageIndex = static_cast<BYTE>(freeIndex);
+                    ++g_uvDeclTexcoord0Displaced;
+                }
+            }
+        }
+        for (UINT i = 0; !abandon && i < count; ++i) {
             if (elems[i].Stream == 0xFF) break;
-            // Only TEXCOORD0 - the set fixed function samples, since D3DTSS_TEXCOORDINDEX is 0.
-            if (elems[i].Usage == D3DDECLUSAGE_TEXCOORD && elems[i].UsageIndex == 0 &&
-                elems[i].Type == D3DDECLTYPE_SHORT2) {
+            // Set 0: only TEXCOORD0 - the set fixed function samples, since
+            // D3DTSS_TEXCOORDINDEX is 0. Set 1 (FIX A): the decalonly/fauxinterior families
+            // declare NO usage-index-0 input at all, so the element to replace is TEXCOORD1 -
+            // and it must come out the other side relabelled AS usage-index 0, because the
+            // fixed-function stage still only ever samples index 0, whatever the source data's
+            // own index was.
+            const bool isTarget = elems[i].Usage == D3DDECLUSAGE_TEXCOORD &&
+                                  elems[i].Type == D3DDECLTYPE_SHORT2 &&
+                                  elems[i].UsageIndex == (uvSet == 1 ? 1 : 0);
+            if (isTarget) {
                 elems[i].Stream = static_cast<WORD>(g_uvStream);
                 elems[i].Offset = 0;
                 elems[i].Type = D3DDECLTYPE_FLOAT2;
+                elems[i].UsageIndex = 0;   // set 0: already 0. set 1: the whole point of FIX A.
                 changed = true;
             }
         }
-        if (changed && FAILED(dev->CreateVertexDeclaration(elems, &clone))) clone = nullptr;
+        if (!abandon && changed && FAILED(dev->CreateVertexDeclaration(elems, &clone))) clone = nullptr;
     }
     if (!clone) ++g_uvDeclFailures; else ++g_uvDeclsMade;
 
     src->AddRef();
-    g_uvDecls[src] = clone;   // null is cached too, so a failure is not retried every draw
+    cache[src] = clone;   // null is cached too, so a failure is not retried every draw
     return clone;
 }
 
 HRESULT WINAPI Hook_SetVertexDeclaration(IDirect3DDevice9* dev,
                                          IDirect3DVertexDeclaration9* decl) {
-    if (!g_internal) g_curDecl = decl;
+    ++g_callDecl;
+    if (!InternalHere()) g_curDecl = decl;
     const auto it = g_layouts.find(decl);
     if (it != g_layouts.end()) {
         g_curLayout = it->second;
@@ -9705,7 +12323,8 @@ HRESULT WINAPI Hook_SetVertexDeclaration(IDirect3DDevice9* dev,
 
 HRESULT WINAPI Hook_SetStreamSource(IDirect3DDevice9* dev, UINT stream,
                                     IDirect3DVertexBuffer9* buffer, UINT offset, UINT stride) {
-    if (!g_internal) {
+    ++g_callStream;
+    if (!InternalHere()) {
         if (stream == 0) {
             g_stream0 = buffer;
             g_stream0Offset = offset;
@@ -9734,7 +12353,7 @@ HRESULT WINAPI Hook_SetStreamSource(IDirect3DDevice9* dev, UINT stream,
 // it at all is unknown, so this both measures and guards.
 unsigned g_freqReports = 0;
 HRESULT WINAPI Hook_SetStreamSourceFreq(IDirect3DDevice9* dev, UINT stream, UINT setting) {
-    if (!g_internal) {
+    if (!InternalHere()) {
         if (stream == 0) {
             // D3DSTREAMSOURCE_INDEXEDDATA (0x40000000) | instanceCount marks the geometry
             // stream of an instanced draw; a plain 1 resets it.
@@ -9856,10 +12475,897 @@ bool DrawCompositeFixedFunction(IDirect3DDevice9* dev);
 
 void ClearBackBufferOnce(IDirect3DDevice9* dev);   // defined below, with its rationale
 
+// Inside an occlusion query (between Issue(BEGIN) and Issue(END) on a D3DQUERYTYPE_OCCLUSION).
+// Cleared at frame end as well, so a query the engine never closes cannot pin it.
+bool g_inOcclusionQuery = false;
+unsigned long long g_occlDrawsSeen = 0, g_occlDrawsSmall = 0, g_occlDrawsLarge = 0,
+                   g_occlDrawsSkipped = 0, g_occlIssueSkipped = 0, g_declinedPassSkipped = 0,
+                   g_passForwarded = 0;
+unsigned g_occlDrawReports = 0;
+// THE OCCLUSION PLAN - what the culler will need, measured before it is written.
+// The proxy drawn inside each query is that object's bounding box; whether it arrives as a unit
+// cube placed by objTM or as world-space corners decides how the culler reads it. The query
+// pointer ties the box to the GetData the engine will read for it.
+
+// ================================================================== CPU occlusion culling
+// See the settings comment. Everything below runs on the main thread except OcclWorker, which
+// only ever reads the copies handed to it and writes the result map under g_occlMu.
+struct OcclMesh {
+    std::vector<float> pos;        // object space, xyz per vertex
+    std::vector<unsigned> idx;     // triangle list
+    float bmin[3] = {0, 0, 0}, bmax[3] = {0, 0, 0};
+    IDirect3DVertexBuffer9* vb = nullptr;
+    UINT byteBegin = 0, byteEnd = 0;   // the slice of vb this mesh was read from
+    bool bad = false;
+    unsigned lastUsed = 0;         // frame; the cache evicts what the city has streamed away
+};
+struct OcclMeshKey {
+    IDirect3DVertexBuffer9* vb; IDirect3DIndexBuffer9* ib; UINT first, count, start, prims; int type;
+    bool operator==(const OcclMeshKey& o) const {
+        return vb == o.vb && ib == o.ib && first == o.first && count == o.count && start == o.start &&
+               prims == o.prims && type == o.type;
+    }
+};
+struct OcclMeshKeyHash {
+    size_t operator()(const OcclMeshKey& k) const {
+        size_t h = reinterpret_cast<size_t>(k.vb) * 0x9E3779B1u;
+        h ^= reinterpret_cast<size_t>(k.ib) + 0x7F4A7C15u + (h << 6) + (h >> 2);
+        h ^= (k.first * 0x85EBCA6Bu) + (k.count * 0xC2B2AE35u) + (k.start * 0x27D4EB2Fu) + (k.prims * 0x165667B1u) + k.type;
+        return h;
+    }
+};
+std::unordered_map<OcclMeshKey, std::shared_ptr<OcclMesh>, OcclMeshKeyHash> g_occlMeshes;
+std::unordered_map<IDirect3DVertexBuffer9*, std::vector<OcclMeshKey>> g_occlMeshByVB;   // for invalidation
+void OcclMeshIndexRebuild() {
+    g_occlMeshByVB.clear();
+    for (const auto& kv : g_occlMeshes) { try { g_occlMeshByVB[kv.first.vb].push_back(kv.first); } catch (...) {} }
+}
+struct OcclOccluder {
+    std::shared_ptr<OcclMesh> mesh; D3DMATRIX toClip; float area;
+    D3DMATRIX world;         // object -> world, for the containment check against its box
+    float t[3];              // world translation, to tie the geometry to the box it belongs to
+    unsigned long long ident;   // mesh + translation: is this the same occluder as last job
+    DWORD cull;              // D3DRS_CULLMODE at the draw: a face the game culls cannot occlude
+    bool mirrored;           // negative-determinant world: the winding flips
+    unsigned short id;       // object id, assigned per job from the quantised translation
+};
+struct OcclBox { IDirect3DQuery9* query; float c[8][3]; float t[3]; float size[3]; unsigned long long objKey; };
+// Translation quantised to half a unit: every part of one object, and its box, share a key.
+inline unsigned long long OcclKeyOf(const float* t) {
+    const long long qx = static_cast<long long>(std::floor(t[0] * 2.0f)) & 0x1FFFFF;
+    const long long qy = static_cast<long long>(std::floor(t[1] * 2.0f)) & 0x1FFFFF;
+    const long long qz = static_cast<long long>(std::floor(t[2] * 2.0f)) & 0x1FFFFF;
+    return (static_cast<unsigned long long>(qx) << 42) | (static_cast<unsigned long long>(qy) << 21) | static_cast<unsigned long long>(qz);
+}
+// The object a query is about: translation plus box size, so two boxes at one origin differ.
+inline unsigned long long OcclObjKey(const float* t, const float* size) {
+    unsigned long long k = OcclKeyOf(t) * 0x9E3779B97F4A7C15ull;
+    for (int i = 0; i < 3; ++i) {
+        const unsigned long long q = static_cast<unsigned long long>(static_cast<long long>(std::floor(size[i] * 4.0f)) & 0xFFFF);
+        k = (k ^ q) * 0x100000001B3ull;
+    }
+    return k;
+}
+struct OcclFrame {
+    std::vector<OcclOccluder> occluders;
+    std::vector<OcclBox> boxes;
+    D3DMATRIX viewProj = {};
+    bool haveViewProj = false;
+    unsigned frame = 0;
+};
+struct OcclResult { bool occluded; unsigned frame; unsigned streak; };
+OcclFrame g_occlBuilding;                 // this frame's, main thread only
+std::mutex g_occlMu;
+std::condition_variable g_occlCv;
+OcclFrame g_occlJob;
+bool g_occlJobReady = false, g_occlWorkerBusy = false, g_occlWorkerStarted = false;
+std::unordered_map<unsigned long long, OcclResult> g_occlResults;   // under g_occlMu; keyed by object, or by query pointer
+unsigned g_occlMeshBudgetUsed = 0, g_occlMeshBudgetFrame = 0;
+unsigned long long g_occlSkippedBudget = 0, g_occlNearDistVisible = 0;
+unsigned g_occlJobReports = 0;
+unsigned long long g_occlRecOffered = 0, g_occlRecNoMesh = 0, g_occlRecOffscreen = 0, g_occlRecTaken = 0,
+                   g_occlJobOccluders = 0;
+unsigned long long g_occlBoxes = 0, g_occlOccluders = 0, g_occlTrisRaster = 0, g_occlTested = 0,
+                   g_occlCulled = 0, g_occlAnswered0 = 0, g_occlJobsRun = 0, g_occlJobsDropped = 0,
+                   g_occlMeshBad = 0, g_occlNearVisible = 0, g_occlOffscreenVisible = 0;
+double g_occlWorkerMs = 0.0;
+// The object each query was last issued for (render thread only, like RecordProxyBox), and how
+// often a query pointer changed object - the measurement behind occlusionKeyByObject.
+std::unordered_map<IDirect3DQuery9*, unsigned long long> g_occlQueryObj;
+unsigned long long g_occlQueryRemaps = 0;
+float g_occlRenderOffsetMax = 0.0f;
+// Flicker instrumentation (worker, under g_occlMu when written): verdict flips while the camera
+// is still, attributed by what the failing pixel held; pool churn; self-id hits; containment.
+unsigned long long g_occlStillJobs = 0, g_occlFlipVis = 0, g_occlFlipCull = 0, g_occlFlipSelf = 0,
+                   g_occlFlipUnwritten = 0, g_occlFlipMargin = 0, g_occlFlipFarther = 0,
+                   g_occlChurnUsedAdd = 0, g_occlChurnUsedRem = 0, g_occlChurnOffAdd = 0, g_occlChurnOffRem = 0,
+                   g_occlSelfFound = 0, g_occlPokeBoxes = 0;
+double g_occlPokeMax = 0.0;
+unsigned g_occlFlipExplained = 0, g_occlPokeExplained = 0;
+unsigned long long g_occlCapSkipped = 0, g_occlStickyKept = 0,
+                   g_occlFlipNotOffered = 0, g_occlFlipNotUsed = 0, g_occlFlipUsedNotCov = 0;
+
+inline void OcclTransform(const float* p, const D3DMATRIX& m, float* out4) {
+    out4[0] = p[0] * m._11 + p[1] * m._21 + p[2] * m._31 + m._41;
+    out4[1] = p[0] * m._12 + p[1] * m._22 + p[2] * m._32 + m._42;
+    out4[2] = p[0] * m._13 + p[1] * m._23 + p[2] * m._33 + m._43;
+    out4[3] = p[0] * m._14 + p[1] * m._24 + p[2] * m._34 + m._44;
+}
+
+unsigned long long g_occlMeshInvWhole = 0, g_occlMeshInvRange = 0, g_occlMeshInvSpared = 0;
+void InvalidateOccluders(IDirect3DVertexBuffer9* vb, UINT offset, UINT size) {
+    const bool whole = (size == 0) || !g_settings.occlusionRangeInvalidation;
+    auto hit = [&](const OcclMesh& m) { return whole || (m.byteBegin < offset + size && offset < m.byteEnd); };
+    if (g_settings.indexedInvalidation) {
+        const auto list = g_occlMeshByVB.find(vb);
+        if (list == g_occlMeshByVB.end()) return;
+        if (whole) {
+            for (const OcclMeshKey& k : list->second) g_occlMeshes.erase(k);
+            g_occlMeshInvWhole += list->second.size();
+            g_occlMeshByVB.erase(list);
+            return;
+        }
+        std::vector<OcclMeshKey> kept;
+        for (const OcclMeshKey& k : list->second) {
+            const auto it = g_occlMeshes.find(k);
+            if (it == g_occlMeshes.end()) continue;
+            if (hit(*it->second)) { g_occlMeshes.erase(it); ++g_occlMeshInvRange; }
+            else { try { kept.push_back(k); } catch (...) {} ++g_occlMeshInvSpared; }
+        }
+        if (kept.empty()) g_occlMeshByVB.erase(list); else list->second.swap(kept);
+        return;
+    }
+    for (auto it = g_occlMeshes.begin(); it != g_occlMeshes.end();)
+        if (it->first.vb == vb && hit(*it->second)) it = g_occlMeshes.erase(it); else ++it;
+}
+
+// Reads a rigid draw's geometry once. Two bridge locks per mesh, budgeted per frame.
+std::shared_ptr<OcclMesh> OcclMeshFor(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex,
+                                      UINT minIndex, UINT numVertices, UINT startIndex, UINT prims) {
+    if (!g_stream0 || !g_curIB || !g_stream0Stride || numVertices < 3 || !prims) return nullptr;
+    if (type != D3DPT_TRIANGLELIST && type != D3DPT_TRIANGLESTRIP) return nullptr;
+    const UINT first = static_cast<UINT>(max(0, baseVertex + static_cast<INT>(minIndex)));
+    OcclMeshKey key{g_stream0, g_curIB, first, numVertices, startIndex, prims, static_cast<int>(type)};
+    const auto it = g_occlMeshes.find(key);
+    if (it != g_occlMeshes.end()) { it->second->lastUsed = g_frames; return it->second->bad ? nullptr : it->second; }
+    if (g_occlMeshBudgetFrame != g_frames) { g_occlMeshBudgetFrame = g_frames; g_occlMeshBudgetUsed = 0; }
+    if (g_occlMeshBudgetUsed >= static_cast<unsigned>(g_settings.occlusionMeshBudget)) return nullptr;
+    // The cache filled at 6000 in the last run and stayed full, so no new mesh could enter and
+    // every new block was invisible to the culler. Evicted by age now (KickOcclusionJob).
+    if (g_occlMeshes.size() > 20000) return nullptr;
+    ++g_occlMeshBudgetUsed;
+    auto mesh = std::make_shared<OcclMesh>();
+    mesh->vb = g_stream0;
+    mesh->bad = true;
+    mesh->lastUsed = g_frames;
+    mesh->byteBegin = g_stream0Offset + first * g_stream0Stride;
+    mesh->byteEnd = mesh->byteBegin + numVertices * g_stream0Stride;
+    g_occlMeshes[key] = mesh;      // recorded even when bad, so it is not retried every frame
+    try { g_occlMeshByVB[g_stream0].push_back(key); } catch (...) {}
+    if (g_curLayout.posOffset < 0 ||
+        (g_curLayout.posType != D3DDECLTYPE_FLOAT3 && g_curLayout.posType != D3DDECLTYPE_FLOAT4) ||
+        !VertexRangeFits(g_stream0, g_stream0Offset, first, numVertices, g_stream0Stride)) {
+        ++g_occlMeshBad;
+        return nullptr;
+    }
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    // positions
+    void* m = nullptr;
+    if (SUCCEEDED(g_stream0->Lock(g_stream0Offset + first * g_stream0Stride, numVertices * g_stream0Stride,
+                                  &m, D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) && m) {
+        try {
+            mesh->pos.resize(static_cast<size_t>(numVertices) * 3);
+            const unsigned char* b = static_cast<const unsigned char*>(m);
+            float mn[3] = {1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f, -1e30f, -1e30f};
+            for (UINT i = 0; i < numVertices; ++i) {
+                const float* p = reinterpret_cast<const float*>(b + i * g_stream0Stride + g_curLayout.posOffset);
+                for (int k = 0; k < 3; ++k) {
+                    mesh->pos[static_cast<size_t>(i) * 3 + k] = p[k];
+                    if (p[k] < mn[k]) mn[k] = p[k];
+                    if (p[k] > mx[k]) mx[k] = p[k];
+                }
+            }
+            memcpy(mesh->bmin, mn, sizeof(mn));
+            memcpy(mesh->bmax, mx, sizeof(mx));
+        } catch (...) { mesh->pos.clear(); }
+        g_stream0->Unlock();
+    }
+    // indices
+    if (!mesh->pos.empty()) {
+        const UINT nIdx = (type == D3DPT_TRIANGLESTRIP) ? prims + 2 : prims * 3;
+        D3DINDEXBUFFER_DESC ibd{};
+        void* im = nullptr;
+        if (SUCCEEDED(g_curIB->GetDesc(&ibd)) && ibd.Size) {
+            const UINT isz = (ibd.Format == D3DFMT_INDEX32) ? 4 : 2;
+            if (startIndex * isz + nIdx * isz <= ibd.Size &&
+                SUCCEEDED(g_curIB->Lock(startIndex * isz, nIdx * isz, &im, D3DLOCK_READONLY)) && im) {
+                try {
+                    std::vector<unsigned> raw(nIdx);
+                    for (UINT i = 0; i < nIdx; ++i)
+                        raw[i] = (isz == 4) ? static_cast<const unsigned*>(im)[i]
+                                            : static_cast<const unsigned short*>(im)[i];
+                    const UINT tris = (type == D3DPT_TRIANGLESTRIP) ? (nIdx >= 2 ? nIdx - 2 : 0) : nIdx / 3;
+                    mesh->idx.reserve(static_cast<size_t>(tris) * 3);
+                    for (UINT t = 0; t < tris; ++t) {
+                        unsigned a, b2, c;
+                        if (type == D3DPT_TRIANGLESTRIP) { a = raw[t]; b2 = raw[t + 1]; c = raw[t + 2]; if (t & 1) { const unsigned tmp = b2; b2 = c; c = tmp; } }
+                        else { a = raw[t * 3]; b2 = raw[t * 3 + 1]; c = raw[t * 3 + 2]; }
+                        // ring-relative: index + baseVertex - first
+                        const long long ra = static_cast<long long>(baseVertex) + a - first;
+                        const long long rb = static_cast<long long>(baseVertex) + b2 - first;
+                        const long long rc = static_cast<long long>(baseVertex) + c - first;
+                        if (ra < 0 || rb < 0 || rc < 0 || ra >= numVertices || rb >= numVertices || rc >= numVertices) continue;
+                        if (ra == rb || rb == rc || ra == rc) continue;
+                        mesh->idx.push_back(static_cast<unsigned>(ra));
+                        mesh->idx.push_back(static_cast<unsigned>(rb));
+                        mesh->idx.push_back(static_cast<unsigned>(rc));
+                    }
+                } catch (...) { mesh->idx.clear(); }
+                g_curIB->Unlock();
+            }
+        }
+    }
+    g_internal = wasInt;
+    if (mesh->pos.empty() || mesh->idx.empty()) { ++g_occlMeshBad; return nullptr; }
+    mesh->bad = false;
+    return mesh;
+}
+
+// A rigid opaque converted draw this frame: an occluder candidate, ranked by screen size.
+void RecordOccluder(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex, UINT minIndex,
+                    UINT numVertices, UINT startIndex, UINT prims) {
+    if (!g_settings.occlusionCull) return;
+    ++g_occlRecOffered;
+    auto mesh = OcclMeshFor(dev, type, baseVertex, minIndex, numVertices, startIndex, prims);
+    if (!mesh) { ++g_occlRecNoMesh; return; }
+    OcclOccluder o;
+    o.mesh = mesh;
+    o.toClip = Multiply(g_lastWorld, g_lastViewProj);
+    o.world = g_lastWorld;
+    o.t[0] = g_lastWorld._41; o.t[1] = g_lastWorld._42; o.t[2] = g_lastWorld._43;
+    o.ident = (static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(mesh.get())) * 0x9E3779B97F4A7C15ull) ^ OcclKeyOf(o.t);
+    o.cull = g_rsShadow[D3DRS_CULLMODE];
+    {
+        const D3DMATRIX& w = g_lastWorld;
+        const float det = w._11 * (w._22 * w._33 - w._23 * w._32) - w._12 * (w._21 * w._33 - w._23 * w._31) +
+                          w._13 * (w._21 * w._32 - w._22 * w._31);
+        o.mirrored = det < 0.0f;
+    }
+    o.id = 0xFFFF;
+    // screen-space size of the object-space box, for ranking; a box that touches the near
+    // plane counts as huge
+    float minx = 1e30f, maxx = -1e30f, miny = 1e30f, maxy = -1e30f;
+    bool nearHit = false;
+    for (int i = 0; i < 8; ++i) {
+        const float p[3] = {(i & 1) ? mesh->bmax[0] : mesh->bmin[0], (i & 2) ? mesh->bmax[1] : mesh->bmin[1],
+                            (i & 4) ? mesh->bmax[2] : mesh->bmin[2]};
+        float c4[4];
+        OcclTransform(p, o.toClip, c4);
+        if (c4[3] <= 1e-3f) { nearHit = true; break; }
+        const float x = c4[0] / c4[3], y = c4[1] / c4[3];
+        if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+    }
+    o.area = nearHit ? 1e9f : (maxx - minx) * (maxy - miny);
+    if (!nearHit && (maxx < -1.0f || minx > 1.0f || maxy < -1.0f || miny > 1.0f)) { ++g_occlRecOffscreen; return; }
+    ++g_occlRecTaken;
+    if (!g_occlBuilding.haveViewProj) { g_occlBuilding.viewProj = g_lastViewProj; g_occlBuilding.haveViewProj = true; }
+    try { g_occlBuilding.occluders.push_back(o); } catch (...) {}
+}
+
+// The proxy inside a query: the object's box, camera-relative, from the proxy shader's constants.
+void RecordProxyBox(IDirect3DQuery9* query) {
+    if (!g_settings.occlusionCull || !query) return;
+    const float* sc = &g_vsConst[0][0];    // Scale
+    const float* of = &g_vsConst[1][0];    // Offset
+    const float* f = &g_vsConst[5][0];     // World_xform: m00 m10 m20 m01 m11 m21 m02 m12 m22 tx ty tz
+    const float* ro = &g_vsConst[38][0];   // Render_offset
+    D3DMATRIX W = kIdentity;
+    W._11 = f[0]; W._12 = f[1]; W._13 = f[2];
+    W._21 = f[3]; W._22 = f[4]; W._23 = f[5];
+    W._31 = f[6]; W._32 = f[7]; W._33 = f[8];
+    W._41 = f[9] - ro[0]; W._42 = f[10] - ro[1]; W._43 = f[11] - ro[2];
+    OcclBox b;
+    b.query = query;
+    b.t[0] = W._41; b.t[1] = W._42; b.t[2] = W._43;
+    b.size[0] = std::fabs(sc[0]); b.size[1] = std::fabs(sc[1]); b.size[2] = std::fabs(sc[2]);
+    b.objKey = OcclObjKey(b.t, b.size);
+    for (int i = 0; i < 3; ++i) if (std::fabs(ro[i]) > g_occlRenderOffsetMax) g_occlRenderOffsetMax = std::fabs(ro[i]);
+    {
+        const auto qi = g_occlQueryObj.find(query);
+        if (qi == g_occlQueryObj.end()) { try { g_occlQueryObj[query] = b.objKey; } catch (...) {} }
+        else { if (qi->second != b.objKey) ++g_occlQueryRemaps; qi->second = b.objKey; }
+    }
+    for (int i = 0; i < 8; ++i) {
+        const float v[3] = {((i & 1) ? 0.5f : -0.5f) * sc[0] + of[0], ((i & 2) ? 0.5f : -0.5f) * sc[1] + of[1],
+                            ((i & 4) ? 0.5f : -0.5f) * sc[2] + of[2]};
+        float w4[4];
+        OcclTransform(v, W, w4);
+        b.c[i][0] = w4[0]; b.c[i][1] = w4[1]; b.c[i][2] = w4[2];
+    }
+    if (!g_occlBuilding.haveViewProj) {
+        g_occlBuilding.viewProj = FromRegisters(&g_vsConst[kRegProjTM][0], 4);
+        g_occlBuilding.haveViewProj = true;
+    }
+    try { g_occlBuilding.boxes.push_back(b); } catch (...) {}
+}
+
+void OcclWorker() {
+    std::vector<float> depth;
+    // last job's state, for the flicker attribution
+    D3DMATRIX prevViewProj = {};
+    bool prevHave = false;
+    std::vector<unsigned short> prevOwner, prevOwnerIdx;
+    std::vector<float> prevIdT;
+    // last job's occluders (sorted order, as ownerIdx indexes them) and its culled boxes
+    struct OcclPrevInfo { unsigned long long ident; float t[3]; unsigned tris; float amin[3], amax[3]; bool used; };
+    std::vector<OcclPrevInfo> prevOccl;
+    struct OcclCulledBox { float mn[3], mx[3], t[3], size[3]; };
+    std::vector<OcclCulledBox> prevCulledBoxes;
+    std::unordered_map<unsigned long long, bool> prevCulled;     // objKey -> culled after hysteresis
+    std::unordered_set<unsigned long long> prevCulledT;          // OcclKeyOf(t) of culled boxes
+    std::unordered_set<unsigned long long> prevUsed, prevOffered;
+    for (;;) {
+        OcclFrame job;
+        {
+            std::unique_lock<std::mutex> lk(g_occlMu);
+            g_occlCv.wait(lk, [] { return g_occlJobReady; });
+            job = std::move(g_occlJob);
+            g_occlJobReady = false;
+            g_occlWorkerBusy = true;
+        }
+        const LONGLONG t0 = Now();
+        const int W = g_settings.occlusionWidth > 64 ? g_settings.occlusionWidth : 320;
+        const int H = (g_backBufferW && g_backBufferH) ? static_cast<int>(static_cast<long long>(W) * g_backBufferH / g_backBufferW) : W * 9 / 16;
+        // depth is LINEAR view depth (clip w), so a margin can be stated in game units; owner is
+        // the object that wrote the nearest surface at that pixel, so a box is never judged by
+        // its own geometry - the self-occlusion that made objects flicker in and out.
+        std::vector<unsigned short> owner, ownerIdx;
+        try {
+            depth.assign(static_cast<size_t>(W) * H, 1e30f);
+            owner.assign(static_cast<size_t>(W) * H, 0xFFFF);
+            ownerIdx.assign(static_cast<size_t>(W) * H, 0xFFFF);
+        } catch (...) { continue; }
+        // object ids from the translation, quantised to half a unit: every part of one object
+        // (and its box) shares one
+        std::unordered_map<unsigned long long, unsigned short> ids;
+        auto keyOf = OcclKeyOf;
+        std::vector<float> idT;          // id -> translation of the first occluder that got it
+        std::unordered_set<unsigned long long> usedNow, offeredNow;
+        const bool still = prevHave && job.haveViewProj && !job.boxes.empty() &&
+                           memcmp(&job.viewProj, &prevViewProj, sizeof(D3DMATRIX)) == 0;
+        for (OcclOccluder& o : job.occluders) {
+            const unsigned long long k = keyOf(o.t);
+            auto f = ids.find(k);
+            if (f == ids.end()) {
+                const unsigned short nid = static_cast<unsigned short>(ids.size() < 0xFFFE ? ids.size() : 0xFFFE);
+                ids[k] = nid; o.id = nid;
+                if (static_cast<size_t>(nid) * 3 + 3 > idT.size()) idT.resize(static_cast<size_t>(nid) * 3 + 3, 0.0f);
+                idT[nid * 3] = o.t[0]; idT[nid * 3 + 1] = o.t[1]; idT[nid * 3 + 2] = o.t[2];
+            }
+            else o.id = f->second;
+            offeredNow.insert(o.ident);
+        }
+        const unsigned idCount = static_cast<unsigned>(idT.size() / 3);
+        // occluders, largest first, within the triangle budget
+        std::sort(job.occluders.begin(), job.occluders.end(),
+                  [](const OcclOccluder& a, const OcclOccluder& b) { return a.area > b.area; });
+        unsigned long long tris = 0;
+        unsigned used = 0, skippedBudget = 0;
+        const bool explain = (g_occlJobReports < 2) && !job.occluders.empty();
+        if (explain) {
+            ++g_occlJobReports;
+            Log("OCCLUSION JOB #%u: %u occluders offered, %u boxes, buffer %dx%d, budget %d occluders / %d tris. "
+                "Ranked candidates (area in NDC^2, tris):",
+                g_occlJobReports, static_cast<unsigned>(job.occluders.size()),
+                static_cast<unsigned>(job.boxes.size()), W, H, g_settings.occlusionMaxOccluders,
+                g_settings.occlusionMaxTris);
+        }
+        unsigned explained = 0;
+        unsigned capSkipped = 0, stickyKept = 0;
+        for (const OcclOccluder& o : job.occluders) {
+            // An occluder used last job stays in past the cap (sticky): the boundary at rank
+            // <cap> otherwise moves as the offered set churns, and every pixel it uncovers is a
+            // verdict flip on whatever sat behind it.
+            const bool sticky = g_settings.occlusionStickyOccluders && prevUsed.count(o.ident) != 0;
+            if (used >= static_cast<unsigned>(g_settings.occlusionMaxOccluders)) {
+                if (!sticky) { ++capSkipped; continue; }
+                ++stickyKept;
+            }
+            const unsigned long long mtris = o.mesh->idx.size() / 3;
+            if (tris + mtris > static_cast<unsigned long long>(g_settings.occlusionMaxTris)) {
+                ++skippedBudget;
+                if (explain && explained < 60) { ++explained; Log("    skip (budget): area %.3g, %llu tris, %llu rasterised so far", o.area, mtris, tris); }
+                continue;
+            }
+            ++used;
+            usedNow.insert(o.ident);
+            const size_t oiRaw = static_cast<size_t>(&o - job.occluders.data());
+            const unsigned short oi = static_cast<unsigned short>(oiRaw < 0xFFFE ? oiRaw : 0xFFFE);
+            if (explain && explained < 60) {
+                ++explained;
+                float bx0 = 1e30f, bx1 = -1e30f, by0 = 1e30f, by1 = -1e30f; bool nh = false;
+                for (int i = 0; i < 8; ++i) {
+                    const float p[3] = {(i & 1) ? o.mesh->bmax[0] : o.mesh->bmin[0], (i & 2) ? o.mesh->bmax[1] : o.mesh->bmin[1], (i & 4) ? o.mesh->bmax[2] : o.mesh->bmin[2]};
+                    float c4[4]; OcclTransform(p, o.toClip, c4);
+                    if (c4[3] <= 1e-3f) { nh = true; break; }
+                    const float x = (c4[0] / c4[3] * 0.5f + 0.5f) * W, y = (0.5f - c4[1] / c4[3] * 0.5f) * H;
+                    if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+                }
+                Log("    use #%u: area %.3g, %llu tris, %u verts, screen rect %s x %.0f..%.0f y %.0f..%.0f",
+                    used, o.area, mtris, static_cast<unsigned>(o.mesh->pos.size() / 3),
+                    nh ? "(touches near plane)" : "", bx0, bx1, by0, by1);
+            }
+            const OcclMesh& mesh = *o.mesh;
+            const size_t nv = mesh.pos.size() / 3;
+            std::vector<float> sv(nv * 3);      // screen x, y, depth (w<=near -> depth = -1)
+            for (size_t i = 0; i < nv; ++i) {
+                float c4[4];
+                OcclTransform(&mesh.pos[i * 3], o.toClip, c4);
+                if (c4[3] <= 1e-3f) { sv[i * 3 + 2] = -1.0f; continue; }
+                sv[i * 3 + 0] = (c4[0] / c4[3] * 0.5f + 0.5f) * W;
+                sv[i * 3 + 1] = (0.5f - c4[1] / c4[3] * 0.5f) * H;
+                sv[i * 3 + 2] = c4[3];               // linear view depth
+            }
+            for (size_t t = 0; t + 2 < mesh.idx.size(); t += 3) {
+                const float* A = &sv[static_cast<size_t>(mesh.idx[t]) * 3];
+                const float* B = &sv[static_cast<size_t>(mesh.idx[t + 1]) * 3];
+                const float* C = &sv[static_cast<size_t>(mesh.idx[t + 2]) * 3];
+                if (A[2] < 0.0f || B[2] < 0.0f || C[2] < 0.0f) continue;   // crosses the near plane: skip
+                // A face the game culls does not occlude. Screen y is down, so a clockwise
+                // triangle has positive signed area and is the FRONT face under D3DCULL_CCW; a
+                // mirrored world flips that.
+                const float sarea = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+                if (std::fabs(sarea) < 1e-6f) continue;
+                const bool front = o.mirrored ? (sarea < 0.0f) : (sarea > 0.0f);
+                if (o.cull == D3DCULL_CCW && !front) continue;
+                if (o.cull == D3DCULL_CW && front) continue;
+                ++tris;
+                // the triangle's FARTHEST depth is what it writes: conservative for a LESS test
+                const float zmax = max(A[2], max(B[2], C[2]));
+                float minx = std::floor(min(A[0], min(B[0], C[0]))), maxx = std::ceil(max(A[0], max(B[0], C[0])));
+                float miny = std::floor(min(A[1], min(B[1], C[1]))), maxy = std::ceil(max(A[1], max(B[1], C[1])));
+                if (maxx < 0 || maxy < 0 || minx >= W || miny >= H) continue;
+                if (minx < 0) minx = 0; if (miny < 0) miny = 0;
+                if (maxx > W - 1) maxx = static_cast<float>(W - 1); if (maxy > H - 1) maxy = static_cast<float>(H - 1);
+                const float inv = 1.0f / sarea;
+                for (int y = static_cast<int>(miny); y <= static_cast<int>(maxy); ++y)
+                    for (int x = static_cast<int>(minx); x <= static_cast<int>(maxx); ++x) {
+                        const float px = x + 0.5f, py = y + 0.5f;
+                        const float w0 = ((B[0] - px) * (C[1] - py) - (B[1] - py) * (C[0] - px)) * inv;
+                        const float w1 = ((C[0] - px) * (A[1] - py) - (C[1] - py) * (A[0] - px)) * inv;
+                        const float w2 = 1.0f - w0 - w1;
+                        if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;
+                        const size_t pi = static_cast<size_t>(y) * W + x;
+                        if (zmax < depth[pi]) { depth[pi] = zmax; owner[pi] = o.id; ownerIdx[pi] = oi; }
+                    }
+            }
+        }
+        if ((g_occlJobsRun % 300) == 150)
+            Log("OCCLUSION JOB SUMMARY (job %llu): %u occluders in the job, %u used, %u skipped on the "
+                "triangle budget, %llu triangles rasterised, %u distinct objects",
+                g_occlJobsRun, static_cast<unsigned>(job.occluders.size()), used, skippedBudget, tris,
+                static_cast<unsigned>(ids.size()));
+        // the boxes
+        unsigned culled = 0, tested = 0, nearVis = 0, offVis = 0, nearDist = 0, selfFound = 0, pokeBoxes = 0;
+        double pokeMax = 0.0;
+        struct OcclOut {
+            unsigned long long key, objKey; const OcclBox* box; bool occluded, tested;
+            int x0, y0, x1, y1; float minW, limit;
+            size_t failPi; unsigned short failOwner; float failDepth; bool failSelf;
+        };
+        std::vector<OcclOut> out;
+        out.reserve(job.boxes.size());
+        const float selfTol = g_settings.occlusionSelfToleranceCm > 0 ? g_settings.occlusionSelfToleranceCm / 100.0f : 0.0f;
+        for (const OcclBox& b : job.boxes) {
+            ++tested;
+            OcclOut ob{};
+            ob.key = g_settings.occlusionKeyByObject ? b.objKey : static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(b.query));
+            ob.objKey = b.objKey;
+            ob.box = &b;
+            ob.failOwner = 0xFFFF;
+            float minx = 1e30f, maxx = -1e30f, miny = 1e30f, maxy = -1e30f, zmin = 1e30f, minW = 1e30f;
+            bool nearHit = false;
+            for (int i = 0; i < 8; ++i) {
+                float c4[4];
+                OcclTransform(b.c[i], job.viewProj, c4);
+                if (c4[3] <= 1e-3f) { nearHit = true; break; }
+                if (c4[3] < minW) minW = c4[3];   // clip w = view depth for a perspective projection
+                const float x = (c4[0] / c4[3] * 0.5f + 0.5f) * W, y = (0.5f - c4[1] / c4[3] * 0.5f) * H, z = c4[2] / c4[3];
+                if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+                if (z < zmin) zmin = z;
+            }
+            bool occluded = false;
+            if (nearHit) { ++nearVis; }
+            else if (minW < static_cast<float>(g_settings.occlusionMinDistance)) { ++nearDist; }   // the near field is the engine's
+            else if (minx < 0 || miny < 0 || maxx > W || maxy > H) { ++offVis; }   // partly off screen: unknown
+            else {
+                occluded = true;
+                ob.tested = true;
+                // The box's own object never occludes it: every id whose translation is within
+                // occlusionSelfToleranceCm of the box's (0 = the exact quantised key). Everything
+                // else must be nearer by a margin - 3 units or 3% of the distance, whichever is
+                // larger - so a surface at the box's own depth cannot decide it.
+                unsigned short selfIds[16]; unsigned nSelf = 0;
+                if (selfTol > 0.0f) {
+                    for (unsigned i = 0; i < idCount && nSelf < 16; ++i)
+                        if (std::fabs(idT[i * 3] - b.t[0]) <= selfTol && std::fabs(idT[i * 3 + 1] - b.t[1]) <= selfTol &&
+                            std::fabs(idT[i * 3 + 2] - b.t[2]) <= selfTol)
+                            selfIds[nSelf++] = static_cast<unsigned short>(i);
+                } else {
+                    const auto selfIt = ids.find(keyOf(b.t));
+                    if (selfIt != ids.end()) selfIds[nSelf++] = selfIt->second;
+                }
+                if (nSelf) {
+                    ++selfFound;
+                    // Does the box CONTAIN its own geometry? Self-occlusion is only possible when
+                    // it does not, and the whole design assumes it does. World AABB of the box
+                    // against the world AABB of every occluder that shares its id.
+                    float bmin[3] = {1e30f, 1e30f, 1e30f}, bmax[3] = {-1e30f, -1e30f, -1e30f};
+                    for (int i = 0; i < 8; ++i) for (int k = 0; k < 3; ++k) { if (b.c[i][k] < bmin[k]) bmin[k] = b.c[i][k]; if (b.c[i][k] > bmax[k]) bmax[k] = b.c[i][k]; }
+                    float worstPoke = 0.0f; const OcclOccluder* worst = nullptr;
+                    for (const OcclOccluder& o : job.occluders) {
+                        bool mine = false;
+                        for (unsigned s = 0; s < nSelf; ++s) if (selfIds[s] == o.id) { mine = true; break; }
+                        if (!mine) continue;
+                        float poke = 0.0f;
+                        for (int i = 0; i < 8; ++i) {
+                            const float p[3] = {(i & 1) ? o.mesh->bmax[0] : o.mesh->bmin[0], (i & 2) ? o.mesh->bmax[1] : o.mesh->bmin[1], (i & 4) ? o.mesh->bmax[2] : o.mesh->bmin[2]};
+                            float w4[4]; OcclTransform(p, o.world, w4);
+                            for (int k = 0; k < 3; ++k) { if (bmin[k] - w4[k] > poke) poke = bmin[k] - w4[k]; if (w4[k] - bmax[k] > poke) poke = w4[k] - bmax[k]; }
+                        }
+                        if (poke > worstPoke) { worstPoke = poke; worst = &o; }
+                    }
+                    if (worstPoke > 0.25f) {
+                        ++pokeBoxes;
+                        if (worstPoke > pokeMax) pokeMax = worstPoke;
+                        if (g_occlPokeExplained < 5) {
+                            ++g_occlPokeExplained;
+                            Log("OCCL BOX DOES NOT CONTAIN ITS GEOMETRY: box t=(%.1f %.1f %.1f) size (%.1f %.1f %.1f) world aabb (%.1f %.1f %.1f)..(%.1f %.1f %.1f); "
+                                "own occluder t=(%.1f %.1f %.1f) %u tris local bbox (%.1f %.1f %.1f)..(%.1f %.1f %.1f) pokes %.2f units outside",
+                                b.t[0], b.t[1], b.t[2], b.size[0], b.size[1], b.size[2], bmin[0], bmin[1], bmin[2], bmax[0], bmax[1], bmax[2],
+                                worst->t[0], worst->t[1], worst->t[2], static_cast<unsigned>(worst->mesh->idx.size() / 3),
+                                worst->mesh->bmin[0], worst->mesh->bmin[1], worst->mesh->bmin[2], worst->mesh->bmax[0], worst->mesh->bmax[1], worst->mesh->bmax[2], worstPoke);
+                        }
+                    }
+                }
+                const float margin = max(3.0f, 0.03f * minW);
+                const float limit = minW - margin;
+                const int x0 = max(0, static_cast<int>(std::floor(minx)) - 1), x1 = min(W - 1, static_cast<int>(std::ceil(maxx)) + 1);
+                const int y0 = max(0, static_cast<int>(std::floor(miny)) - 1), y1 = min(H - 1, static_cast<int>(std::ceil(maxy)) + 1);
+                ob.x0 = x0; ob.y0 = y0; ob.x1 = x1; ob.y1 = y1; ob.minW = minW; ob.limit = limit;
+                for (int y = y0; y <= y1 && occluded; ++y)
+                    for (int x = x0; x <= x1; ++x) {
+                        const size_t pi = static_cast<size_t>(y) * W + x;
+                        const unsigned short ow = owner[pi];
+                        bool self = false;
+                        for (unsigned s = 0; s < nSelf; ++s) if (selfIds[s] == ow) { self = true; break; }
+                        if (self || !(depth[pi] < limit)) {
+                            occluded = false;
+                            ob.failPi = pi; ob.failOwner = ow; ob.failDepth = depth[pi]; ob.failSelf = self;
+                            break;
+                        }
+                    }
+            }
+            ob.occluded = occluded;
+            if (occluded) ++culled;
+            if (explain && &b == &job.boxes[0])
+                Log("    first box: screen rect x %.0f..%.0f y %.0f..%.0f, nearest view depth %.1f, zmin %.4f -> %s",
+                    minx, maxx, miny, maxy, minW, zmin,
+                    nearHit ? "near plane" : (minW < g_settings.occlusionMinDistance ? "within min distance" :
+                    ((minx < 0 || miny < 0 || maxx > W || maxy > H) ? "partly off screen" : (occluded ? "OCCLUDED" : "visible"))));
+            out.push_back(ob);
+        }
+        // pool churn while the camera is still: which occluders came and went
+        unsigned churnUsedAdd = 0, churnUsedRem = 0, churnOffAdd = 0, churnOffRem = 0;
+        if (still) {
+            for (const auto& e : usedNow) if (!prevUsed.count(e)) ++churnUsedAdd;
+            for (const auto& e : prevUsed) if (!usedNow.count(e)) ++churnUsedRem;
+            for (const auto& e : offeredNow) if (!prevOffered.count(e)) ++churnOffAdd;
+            for (const auto& e : prevOffered) if (!offeredNow.count(e)) ++churnOffRem;
+        }
+        unsigned flipVis = 0, flipCull = 0, flipSelf = 0, flipUnwritten = 0, flipMargin = 0, flipFarther = 0,
+                 flipNotOffered = 0, flipNotUsed = 0, flipUsedNotCov = 0;
+        std::unordered_map<unsigned long long, bool> culledNow;
+        std::unordered_set<unsigned long long> culledNowT;
+        std::vector<OcclCulledBox> culledBoxesNow;
+        {
+            std::lock_guard<std::mutex> lk(g_occlMu);
+            for (const OcclOut& r : out) {
+                auto& res = g_occlResults[r.key];
+                if (res.frame == job.frame) continue;    // a second box of the same object this job
+                res.streak = r.occluded ? res.streak + 1 : 0;
+                res.occluded = r.occluded;
+                res.frame = job.frame;
+                const bool cn = res.streak >= 4;
+                culledNow[r.objKey] = cn;
+                if (cn) {
+                    culledNowT.insert(keyOf(r.box->t));
+                    OcclCulledBox cb{};
+                    cb.mn[0] = cb.mn[1] = cb.mn[2] = 1e30f; cb.mx[0] = cb.mx[1] = cb.mx[2] = -1e30f;
+                    for (int i = 0; i < 8; ++i) for (int k = 0; k < 3; ++k) { if (r.box->c[i][k] < cb.mn[k]) cb.mn[k] = r.box->c[i][k]; if (r.box->c[i][k] > cb.mx[k]) cb.mx[k] = r.box->c[i][k]; }
+                    for (int k = 0; k < 3; ++k) { cb.t[k] = r.box->t[k]; cb.size[k] = r.box->size[k]; }
+                    try { culledBoxesNow.push_back(cb); } catch (...) {}
+                }
+                if (!still) continue;
+                const auto pc = prevCulled.find(r.objKey);
+                if (pc == prevCulled.end() || pc->second == cn) continue;
+                if (cn) { ++flipCull; continue; }
+                // culled last job, visible this one, camera still: THE flicker. Attribute it.
+                ++flipVis;
+                const char* why = "not tested (near plane / distance / off screen)";
+                char detail[700] = "";
+                if (r.tested) {
+                    const int fx = static_cast<int>(r.failPi % W), fy = static_cast<int>(r.failPi / W);
+                    const unsigned short po = (r.failPi < prevOwner.size()) ? prevOwner[r.failPi] : 0xFFFF;
+                    const float* pt = (po != 0xFFFF && static_cast<size_t>(po) * 3 + 3 <= prevIdT.size()) ? &prevIdT[po * 3] : nullptr;
+                    if (r.failSelf) {
+                        ++flipSelf; why = "own object";
+                        const float* st = (r.failOwner * 3u + 3u <= idT.size()) ? &idT[r.failOwner * 3] : nullptr;
+                        snprintf(detail, sizeof detail, "pixel (%d,%d) is owned by the box's own object id %u t=(%.1f %.1f %.1f), depth %.1f",
+                                 fx, fy, r.failOwner, st ? st[0] : 0.f, st ? st[1] : 0.f, st ? st[2] : 0.f, r.failDepth);
+                    } else if (r.failOwner == 0xFFFF) {
+                        ++flipUnwritten; why = "pixel unwritten";
+                        // the MESH that wrote the pixel last job, and what became of it
+                        const unsigned short poi = (r.failPi < prevOwnerIdx.size()) ? prevOwnerIdx[r.failPi] : 0xFFFF;
+                        const OcclPrevInfo* pin = (poi < prevOccl.size()) ? &prevOccl[poi] : nullptr;
+                        if (!pin) {
+                            snprintf(detail, sizeof detail, "pixel (%d,%d) has no occluder now; last job's writer is unrecorded (owner id %u)", fx, fy, po);
+                        } else {
+                            const bool usd = usedNow.count(pin->ident) != 0, off = offeredNow.count(pin->ident) != 0;
+                            const char* now;
+                            if (usd) { ++flipUsedNotCov; now = "USED this job but no longer covering the pixel"; }
+                            else if (off) { ++flipNotUsed; now = "offered this job but NOT USED (cap or triangle budget)"; }
+                            else { ++flipNotOffered; now = "NOT OFFERED this job (the game did not draw it, or its mesh was dropped from the cache)"; }
+                            char inbox[220] = "";
+                            const float c[3] = {(pin->amin[0] + pin->amax[0]) * 0.5f, (pin->amin[1] + pin->amax[1]) * 0.5f, (pin->amin[2] + pin->amax[2]) * 0.5f};
+                            for (const OcclCulledBox& cb : prevCulledBoxes)
+                                if (c[0] >= cb.mn[0] && c[0] <= cb.mx[0] && c[1] >= cb.mn[1] && c[1] <= cb.mx[1] && c[2] >= cb.mn[2] && c[2] <= cb.mx[2]) {
+                                    snprintf(inbox, sizeof inbox, "; its centre lies inside the box of object t=(%.1f %.1f %.1f) size (%.1f %.1f %.1f) which WE CULLED last job",
+                                             cb.t[0], cb.t[1], cb.t[2], cb.size[0], cb.size[1], cb.size[2]);
+                                    break;
+                                }
+                            snprintf(detail, sizeof detail, "pixel (%d,%d) has no occluder now; last job it was written by occluder #%u (ident %016llx, t=(%.1f %.1f %.1f), %u tris, world aabb (%.1f %.1f %.1f)..(%.1f %.1f %.1f)) - %s%s",
+                                     fx, fy, poi, pin->ident, pin->t[0], pin->t[1], pin->t[2], pin->tris, pin->amin[0], pin->amin[1], pin->amin[2],
+                                     pin->amax[0], pin->amax[1], pin->amax[2], now, inbox);
+                        }
+                    } else {
+                        const bool inMargin = r.failDepth < r.minW;
+                        if (inMargin) { ++flipMargin; why = "inside margin"; } else { ++flipFarther; why = "farther"; }
+                        const float* ot = (r.failOwner * 3u + 3u <= idT.size()) ? &idT[r.failOwner * 3] : nullptr;
+                        snprintf(detail, sizeof detail, "pixel (%d,%d) owner id %u t=(%.1f %.1f %.1f) depth %.1f vs limit %.1f (box minW %.1f); last job this pixel was id %u t=(%.1f %.1f %.1f)%s",
+                                 fx, fy, r.failOwner, ot ? ot[0] : 0.f, ot ? ot[1] : 0.f, ot ? ot[2] : 0.f, r.failDepth, r.limit, r.minW,
+                                 po, pt ? pt[0] : 0.f, pt ? pt[1] : 0.f, pt ? pt[2] : 0.f,
+                                 (pt && prevCulledT.count(keyOf(pt))) ? " - CULLED BY US last job" : "");
+                    }
+                }
+                if (g_occlFlipExplained < static_cast<unsigned>(g_settings.occlusionExplainFlips)) {
+                    ++g_occlFlipExplained;
+                    Log("OCCL FLIP job %llu (camera still): object t=(%.1f %.1f %.1f) size (%.1f %.1f %.1f) rect x%d..%d y%d..%d -> VISIBLE after being culled: %s - %s",
+                        g_occlJobsRun, r.box->t[0], r.box->t[1], r.box->t[2], r.box->size[0], r.box->size[1], r.box->size[2],
+                        r.x0, r.x1, r.y0, r.y1, why, detail);
+                }
+            }
+            // results age out (a wholesale clear would reset every streak at once: a mass pop-in)
+            if ((g_occlJobsRun % 600) == 599)
+                for (auto it = g_occlResults.begin(); it != g_occlResults.end();)
+                    if (job.frame > it->second.frame + 600) it = g_occlResults.erase(it); else ++it;
+            if (still) {
+                ++g_occlStillJobs;
+                g_occlFlipVis += flipVis; g_occlFlipCull += flipCull; g_occlFlipSelf += flipSelf;
+                g_occlFlipUnwritten += flipUnwritten; g_occlFlipMargin += flipMargin; g_occlFlipFarther += flipFarther;
+                g_occlChurnUsedAdd += churnUsedAdd; g_occlChurnUsedRem += churnUsedRem;
+                g_occlChurnOffAdd += churnOffAdd; g_occlChurnOffRem += churnOffRem;
+                g_occlFlipNotOffered += flipNotOffered; g_occlFlipNotUsed += flipNotUsed; g_occlFlipUsedNotCov += flipUsedNotCov;
+            }
+            g_occlCapSkipped += capSkipped;
+            g_occlStickyKept += stickyKept;
+            g_occlSelfFound += selfFound;
+            g_occlPokeBoxes += pokeBoxes;
+            if (pokeMax > g_occlPokeMax) g_occlPokeMax = pokeMax;
+            g_occlTrisRaster += tris;
+            g_occlOccluders += used;
+            g_occlJobOccluders += job.occluders.size();
+            g_occlSkippedBudget += skippedBudget;
+            g_occlTested += tested;
+            g_occlCulled += culled;
+            g_occlNearVisible += nearVis;
+            g_occlNearDistVisible += nearDist;
+            g_occlOffscreenVisible += offVis;
+            g_occlWorkerMs += MsSince(t0);
+            ++g_occlJobsRun;
+            g_occlWorkerBusy = false;
+        }
+        // carry this job's state for the next attribution
+        // this job's occluders summarised (sorted order, as ownerIdx indexes them)
+        std::vector<OcclPrevInfo> occlNow;
+        try {
+            occlNow.reserve(job.occluders.size());
+            for (const OcclOccluder& o : job.occluders) {
+                OcclPrevInfo info{};
+                info.ident = o.ident; info.t[0] = o.t[0]; info.t[1] = o.t[1]; info.t[2] = o.t[2];
+                info.tris = static_cast<unsigned>(o.mesh->idx.size() / 3);
+                info.used = usedNow.count(o.ident) != 0;
+                info.amin[0] = info.amin[1] = info.amin[2] = 1e30f; info.amax[0] = info.amax[1] = info.amax[2] = -1e30f;
+                for (int i = 0; i < 8; ++i) {
+                    const float p[3] = {(i & 1) ? o.mesh->bmax[0] : o.mesh->bmin[0], (i & 2) ? o.mesh->bmax[1] : o.mesh->bmin[1], (i & 4) ? o.mesh->bmax[2] : o.mesh->bmin[2]};
+                    float w4[4]; OcclTransform(p, o.world, w4);
+                    for (int k = 0; k < 3; ++k) { if (w4[k] < info.amin[k]) info.amin[k] = w4[k]; if (w4[k] > info.amax[k]) info.amax[k] = w4[k]; }
+                }
+                occlNow.push_back(info);
+            }
+        } catch (...) { occlNow.clear(); }
+        prevOccl.swap(occlNow);
+        prevCulledBoxes.swap(culledBoxesNow);
+        prevViewProj = job.viewProj;
+        prevHave = job.haveViewProj;
+        prevOwner.swap(owner);
+        prevOwnerIdx.swap(ownerIdx);
+        prevIdT.swap(idT);
+        prevCulled.swap(culledNow);
+        prevCulledT.swap(culledNowT);
+        prevUsed.swap(usedNow);
+        prevOffered.swap(offeredNow);
+    }
+}
+
+// End of frame: hand this frame's data to the worker, or drop it if the worker is still busy.
+void KickOcclusionJob() {
+    if (!g_settings.occlusionCull) { g_occlBuilding = OcclFrame{}; return; }
+    // Age out meshes the city has streamed away: not used for 900 frames, checked every 300.
+    if ((g_frames % 300) == 0 && g_occlMeshes.size() > 2000) {
+        for (auto it = g_occlMeshes.begin(); it != g_occlMeshes.end();)
+            if (g_frames > it->second->lastUsed + 900) it = g_occlMeshes.erase(it); else ++it;
+        OcclMeshIndexRebuild();
+    }
+    // The culler REFINES the fabricated "visible" answer; it has nothing to refine when the real
+    // query is passed through, and the real query, against a depth buffer Remix never writes,
+    // culls the whole world. Said once, loudly, rather than silently doing nothing.
+    static bool warned = false;
+    if (!g_settings.forceOcclusionVisible && !warned) {
+        warned = true;
+        Log("OCCLUSION CULL: occlusionCull=1 but forceOcclusionVisible=0 - the culler only acts on "
+            "the fabricated answer, so it is INERT, and the engine is culling against an unwritten "
+            "depth buffer. Set forceOcclusionVisible=1.");
+    }
+    g_occlBoxes += g_occlBuilding.boxes.size();
+    if (!g_occlWorkerStarted) {
+        g_occlWorkerStarted = true;
+        try { std::thread(OcclWorker).detach(); } catch (...) { g_settings.occlusionCull = false; return; }
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_occlMu);
+        if (g_occlJobReady || g_occlWorkerBusy) { ++g_occlJobsDropped; g_occlBuilding = OcclFrame{}; return; }
+        g_occlBuilding.frame = g_frames;
+        g_occlJob = std::move(g_occlBuilding);
+        g_occlJobReady = true;
+    }
+    g_occlBuilding = OcclFrame{};
+    g_occlCv.notify_one();
+}
+
+// The answer for a query, if the worker has one that is recent enough. True = occluded.
+bool OcclusionSaysOccluded(IDirect3DQuery9* q) {
+    if (!g_settings.occlusionCull || !q) return false;
+    unsigned long long key = static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(q));
+    if (g_settings.occlusionKeyByObject) {
+        const auto qi = g_occlQueryObj.find(q);   // the object this query was last issued for
+        if (qi == g_occlQueryObj.end()) return false;
+        key = qi->second;
+    }
+    std::lock_guard<std::mutex> lk(g_occlMu);
+    const auto it = g_occlResults.find(key);
+    if (it == g_occlResults.end()) return false;
+    if (g_frames > it->second.frame + 3) return false;   // stale: visible
+    return it->second.streak >= 4;   // four consecutive jobs must agree before a cull; one visible resets
+}
+
+IDirect3DQuery9* g_curOcclusionQuery = nullptr;
+unsigned g_occlProxyGeomReports = 0;
+unsigned long long g_occlProxyObjTM = 0, g_occlProxyNoObjTM = 0;
+unsigned long long g_occlCandDraws = 0, g_occlCandOpaque = 0, g_occlCandTris = 0,
+                   g_occlCandBig = 0, g_occlCandMid = 0, g_occlCandInstanced = 0,
+                   g_occlCandBlend = 0, g_occlCandATest = 0, g_occlCandTexkill = 0;
+IDirect3DVertexBuffer9* g_occlProxyVBs[8] = {};
+unsigned g_occlProxyVBCount = 0;
+// Counts the draw and decides whether it is a proxy to drop. Called first thing in the hooks.
+inline bool OcclusionProxyDraw(IDirect3DDevice9* dev, UINT primitiveCount, UINT numVertices,
+                               UINT firstVertex) {
+    if (!g_inOcclusionQuery) return false;
+    ++g_occlDrawsSeen;
+    if (g_curVS.usesObjTM) ++g_occlProxyObjTM; else ++g_occlProxyNoObjTM;
+    if (numVertices == 8 && primitiveCount == 12) RecordProxyBox(g_curOcclusionQuery);
+    if (g_stream0) {
+        bool known = false;
+        for (unsigned i = 0; i < g_occlProxyVBCount; ++i) if (g_occlProxyVBs[i] == g_stream0) known = true;
+        if (!known && g_occlProxyVBCount < 8) g_occlProxyVBs[g_occlProxyVBCount++] = g_stream0;
+    }
+    // The first few proxies, in full: the 8 positions as stored, objTM, and the query.
+    if (g_occlProxyGeomReports < 4 && g_stream0 && g_stream0Stride && numVertices == 8 &&
+        g_curLayout.posOffset >= 0 &&
+        (g_curLayout.posType == D3DDECLTYPE_FLOAT3 || g_curLayout.posType == D3DDECLTYPE_FLOAT4) &&
+        VertexRangeFits(g_stream0, g_stream0Offset, firstVertex, numVertices, g_stream0Stride)) {
+        void* m = nullptr;
+        if (SUCCEEDED(g_stream0->Lock(g_stream0Offset + firstVertex * g_stream0Stride,
+                                      numVertices * g_stream0Stride, &m,
+                                      D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) && m) {
+            ++g_occlProxyGeomReports;
+            const unsigned char* b = static_cast<const unsigned char*>(m);
+            char buf[400];
+            int n = 0;
+            for (UINT i = 0; i < 8 && n < 360; ++i) {
+                const float* p = reinterpret_cast<const float*>(b + i * g_stream0Stride + g_curLayout.posOffset);
+                n += _snprintf_s(buf + n, sizeof(buf) - n, _TRUNCATE, "(%.1f %.1f %.1f) ", p[0], p[1], p[2]);
+            }
+            g_stream0->Unlock();
+            if (g_occlProxyGeomReports == 1 && g_lastVS) {
+                // The shader that places the cube, and every constant it could be reading.
+                UINT sz = 0;
+                if (SUCCEEDED(g_lastVS->GetFunction(nullptr, &sz)) && sz && sz < (1u << 20)) {
+                    std::vector<unsigned char> code(sz);
+                    if (SUCCEEDED(g_lastVS->GetFunction(code.data(), &sz))) {
+                        char vdir[MAX_PATH] = {0};
+                        GetModuleFileNameA(GetModuleHandleW(nullptr), vdir, MAX_PATH);
+                        char* vsl = strrchr(vdir, 0x5C);
+                        if (vsl) *(vsl + 1) = 0;
+                        char vpath[MAX_PATH];
+                        sprintf_s(vpath, "%ssr3-remix-proxy-vs.bin", vdir);
+                        FILE* vf = nullptr;
+                        if (fopen_s(&vf, vpath, "wb") == 0 && vf) { fwrite(code.data(), 1, sz, vf); fclose(vf); }
+                        Log("OCCLUSION PROXY vertex shader: %u bytes -> %s", sz, vpath);
+                    }
+                }
+                for (UINT r = 0; r < 40; r += 4)
+                    Log("    proxy vs c%u..c%u: (%.3f %.3f %.3f %.3f) (%.3f %.3f %.3f %.3f) (%.3f %.3f %.3f %.3f) (%.3f %.3f %.3f %.3f)",
+                        r, r + 3,
+                        g_vsConst[r][0], g_vsConst[r][1], g_vsConst[r][2], g_vsConst[r][3],
+                        g_vsConst[r+1][0], g_vsConst[r+1][1], g_vsConst[r+1][2], g_vsConst[r+1][3],
+                        g_vsConst[r+2][0], g_vsConst[r+2][1], g_vsConst[r+2][2], g_vsConst[r+2][3],
+                        g_vsConst[r+3][0], g_vsConst[r+3][1], g_vsConst[r+3][2], g_vsConst[r+3][3]);
+            }
+            const float* o = &g_vsConst[kRegObjTM][0];
+            Log("OCCLUSION PROXY #%u: query %p, vb %p first %u, posType %d stride %u, usesObjTM %d | "
+                "verts %s| objTM rows (%.2f %.2f %.2f %.1f) (%.2f %.2f %.2f %.1f) (%.2f %.2f %.2f %.1f)",
+                g_occlProxyGeomReports, static_cast<void*>(g_curOcclusionQuery),
+                static_cast<void*>(g_stream0), firstVertex, g_curLayout.posType, g_stream0Stride,
+                g_curVS.usesObjTM ? 1 : 0, buf,
+                o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9], o[10], o[11]);
+        }
+    }
+    const bool proxySized = primitiveCount <= static_cast<UINT>(g_settings.occlusionProxyMaxPrims);
+    if (proxySized) ++g_occlDrawsSmall; else ++g_occlDrawsLarge;
+    if (g_occlDrawReports < 8) {
+        ++g_occlDrawReports;
+        Log("INSIDE OCCLUSION QUERY #%u: %u prims, %u verts, target %ux%u, vs %s, ps %s, "
+            "zwrite=%lu zenable=%lu blend=%lu -> %s",
+            g_occlDrawReports, primitiveCount, numVertices, g_rt0Width, g_rt0Height,
+            g_lastVS ? "bound" : "none", g_lastPS ? "bound" : "none",
+            static_cast<unsigned long>(g_rsShadow[D3DRS_ZWRITEENABLE]),
+            static_cast<unsigned long>(g_rsShadow[D3DRS_ZENABLE]),
+            static_cast<unsigned long>(g_rsShadow[D3DRS_ALPHABLENDENABLE]),
+            (proxySized && g_settings.skipOcclusionProxies && g_settings.forceOcclusionVisible)
+                ? "SKIPPED as a proxy"
+                : "forwarded (too many prims to be a box)");
+    }
+    // 2026-09-18 AUDIT FIX: dropping the proxy draw is only safe when forceOcclusionVisible is
+    // ALSO on. With it off, Hook_QueryGetData passes the query straight through instead of
+    // fabricating an answer (see there), so a proxy skipped here leaves a REAL occlusion query
+    // with nothing drawn inside it - an honest, and wrong, "0 pixels" that reads as "occluded"
+    // and stops the engine submitting the object. Hook_QueryIssue already requires both switches
+    // before it will drop the begin/end pair; this site was the one pairing bug left. No new ini
+    // key - this is a pairing bug, and the live configuration (both 1) is unchanged.
+    if (proxySized && g_settings.skipOcclusionProxies && g_settings.forceOcclusionVisible) {
+        ++g_occlDrawsSkipped;
+        return true;
+    }
+    return false;
+}
 HRESULT WINAPI Hook_DrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT start,
                                   UINT count) {
     ++g_drawsTotal;
     ++g_drawIndexThisFrame;
+    if (OcclusionProxyDraw(dev, count, count * 3, start)) return D3D_OK;
     // Was missing here, so this path used whatever the previous indexed draw left behind and
     // keyed the mesh-albedo cache on the wrong mesh. `start` identifies the run of vertices for
     // a non-indexed draw the way baseVertex+minIndex does for an indexed one.
@@ -9871,6 +13377,21 @@ HRESULT WINAPI Hook_DrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, 
     // require a minimum size, so they simply decline rather than read something arbitrary.
     g_curDrawVertexCount = 0;
     g_curDrawIndexed = false;
+    // 2026-09-18 AUDIT FIX: the rest of the indexed-draw shape, reset so a non-indexed draw is
+    // described by ITS OWN values instead of whatever the previous INDEXED draw left behind.
+    // BeginFFP folds minIndex/startIndex/primCount/baseVertex/primType into both the layer key
+    // and the albedo-churn identity, so two unrelated non-indexed draws used to hash to one
+    // identity (whatever the last indexed draw's leftover fields happened to be) and the churn
+    // report could fire on a draw that never churned. primCount and primType have real values
+    // for a non-indexed draw too (count and type, both already in hand here); baseVertex,
+    // minIndex and startIndex describe indices this draw does not have, so they are zeroed
+    // rather than carried over.
+    g_curDrawBaseVertex = 0;
+    g_curDrawMinIndex = 0;
+    g_curDrawStartIndex = 0;
+    g_curDrawPrimCount = count;
+    g_curDrawPrimType = type;
+    NoteIfFinalComposite(dev);   // injectProbe/injectControl PART 1/2: before Classify runs
     EmitLight(dev);   // harvest lights before anything else touches device state
     FFPScope scope;
     const Disp d = BeginFFP(dev, scope);
@@ -9883,9 +13404,21 @@ HRESULT WINAPI Hook_DrawPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, 
         g_worldWrittenSinceDraw = false;
         return D3D_OK;
     }
+    if (d == Disp::PassThrough) {
+        if (g_settings.skipDeclinedPassThrough && g_lastVS) {
+            ++g_declinedPassSkipped;
+            EndFFP(dev, scope);
+            g_worldWrittenSinceDraw = false;
+            return D3D_OK;
+        }
+        ++g_passForwarded;
+    }
     const bool ui = (d == Disp::Convert) ? false : BeginUIDemote(dev, d == Disp::Hide);
     const unsigned marked = (d == Disp::Mark) ? BeginMark(dev, g_markClearAllStages) : 0u;
+    SyncBridgeVS(dev, (d == Disp::Convert) ? nullptr : g_lastVS);
+    const InjectSuppression injectSup = BeforeShimDraw(dev, d, count);
     const HRESULT hr = g_origDrawPrimitive(dev, type, start, count);
+    AfterShimDrawSite(dev, injectSup);
     EndMark(dev, marked);
     EndUIDemote(dev, ui);
     EndFFP(dev, scope);
@@ -9922,7 +13455,7 @@ static_assert(sizeof(HudSrcVertex) == 28, "HUD source vertex must match the meas
 static_assert(sizeof(HudFfpVertex) == 28, "XYZRHW|DIFFUSE|TEX1 is 28 bytes");
 
 std::vector<HudFfpVertex> g_hudVerts;
-unsigned g_hudConverted = 0, g_hudConvertRefused = 0, g_hudDrawFailed = 0;
+unsigned g_hudConverted = 0, g_hudConvertRefused = 0, g_hudDrawFailed = 0, g_hudRebuiltOnly = 0, g_hudRawAfterRebuild = 0;
 HRESULT g_hudLastFail = 0;
 
 // How many vertices a primitive count means. Getting this wrong reads past the end of the game's
@@ -9973,7 +13506,8 @@ bool DrawHudFixedFunction(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT cou
     dev->GetFVF(&oldFVF);
 
     g_internal = true;
-    g_origSetVertexShader(dev, nullptr);
+    g_internalThread = GetCurrentThreadId();
+    SyncBridgeVS(dev, nullptr);
     // ------------------------------------------------------------------------------------
     // THE PIXEL SHADER STAYS.
     //
@@ -9999,6 +13533,9 @@ bool DrawHudFixedFunction(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT cou
     // rebuild.
     if (!g_settings.uiKeepPixelShader) g_origSetPixelShader(dev, nullptr);
     dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+    // injectProbe/injectControl PART 1/2: this draw is always RHW, VS already nulled above.
+    const InjectSuppression injectSup =
+        BeforeShimDrawSite(dev, InjectSite::HudRebuild, false, count, true);
 
     // STATE THIS DRAW CHANGES IS SAVED AND PUT BACK.
     //
@@ -10057,11 +13594,13 @@ bool DrawHudFixedFunction(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT cou
 
     const HRESULT hr = g_origDrawPrimitiveUP(dev, type, count, g_hudVerts.data(),
                                              sizeof(HudFfpVertex));
+    AfterShimDrawSite(dev, injectSup);
 
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     dev->SetFVF(oldFVF);
     g_origSetVertexDeclaration(dev, oldDecl);
-    g_origSetVertexShader(dev, oldVS);
+    SyncBridgeVS(dev, oldVS);
     if (!g_settings.uiKeepPixelShader) g_origSetPixelShader(dev, oldPS);
     for (unsigned i = 0; i < savedCount; ++i)
         g_origSetTextureStageState(dev, saved[i].stage,
@@ -10133,17 +13672,23 @@ bool DrawCompositeFixedFunction(IDirect3DDevice9* dev) {
     dev->GetFVF(&oldFVF);
 
     g_internal = true;
-    g_origSetVertexShader(dev, nullptr);      // the pixel shader is deliberately left alone
+    g_internalThread = GetCurrentThreadId();
+    SyncBridgeVS(dev, nullptr);      // the pixel shader is deliberately left alone
     dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
     g_internal = false;
 
+    // injectProbe/injectControl PART 1/2: this draw is always RHW, VS already nulled above.
+    const InjectSuppression injectSup =
+        BeforeShimDrawSite(dev, InjectSite::AtlasComposite, false, 2, true);
     const HRESULT hr = g_origDrawPrimitiveUP(dev, D3DPT_TRIANGLELIST, 2, quad,
                                              sizeof(HudFfpVertex));
+    AfterShimDrawSite(dev, injectSup);
 
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     dev->SetFVF(oldFVF);
     g_origSetVertexDeclaration(dev, oldDecl);
-    g_origSetVertexShader(dev, oldVS);
+    SyncBridgeVS(dev, oldVS);
     g_internal = false;
 
     if (oldVS) oldVS->Release();
@@ -10186,20 +13731,26 @@ bool IsAtlasComposite(UINT primitiveCount, Disp d) {
 // not drawn. That is the whole "the in-game HUD is invisible and the sub-menus have no text or
 // background" report. This names them by shader instead of leaving it to be guessed, which is
 // the rule that found the hair, the triangle strips and the HUD itself.
-struct PassCensusRow { const char* sampler; UINT w, h; unsigned count; };
+// sampler used to be a `const char*` set to g_curPS.firstSampler - the SAME global array on
+// every call, since g_curPS is one struct instance reused for every shader. Every row therefore
+// stored the identical pointer, `sampler == name` was true by construction regardless of which
+// shader was actually current when the row was FIRST recorded, and the row printed whatever
+// shader happened to be bound at REPORT time. A real copy, compared by content, is what the
+// other name tables in this file already do.
+struct PassCensusRow { char sampler[28]; UINT w, h; unsigned count; };
 constexpr unsigned kPassCensusRows = 40;
 PassCensusRow g_passCensus[kPassCensusRows];
 unsigned g_passCensusUsed = 0;
 
 void NotePassedThrough(UINT primitiveCount) {
     if (!g_settings.passCensus) return;
-    const char* name = g_curPS.firstSampler ? g_curPS.firstSampler : "";
+    const char* name = g_curPS.firstSampler;
     for (unsigned i = 0; i < g_passCensusUsed; ++i) {
-        if (g_passCensus[i].sampler == name && g_passCensus[i].w == g_rt0Width &&
+        if (!strcmp(g_passCensus[i].sampler, name) && g_passCensus[i].w == g_rt0Width &&
             g_passCensus[i].h == g_rt0Height) { ++g_passCensus[i].count; return; }
     }
     if (g_passCensusUsed >= kPassCensusRows) return;
-    g_passCensus[g_passCensusUsed].sampler = name;
+    strncpy_s(g_passCensus[g_passCensusUsed].sampler, name, _TRUNCATE);
     g_passCensus[g_passCensusUsed].w = g_rt0Width;
     g_passCensus[g_passCensusUsed].h = g_rt0Height;
     g_passCensus[g_passCensusUsed].count = 1;
@@ -10237,6 +13788,7 @@ HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type
     ++g_drawsTotal;
     ++g_drawIndexThisFrame;
     ++g_upDrawsTotal;
+    NoteIfFinalComposite(dev);   // injectProbe/injectControl PART 1/2
 
     // THE HUD, named from the frame dump of 2026-09-04 rather than guessed from a screenshot.
     // That dump holds 76 user-pointer draws and they split cleanly into two populations:
@@ -10261,6 +13813,12 @@ HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type
     const bool hud = g_settings.uiDemoteUP && !g_curVS.usesProjTM &&
                      !ShadowGetRS(dev, D3DRS_ZENABLE);
     if (hud) ++g_upHudDemoted; else ++g_upLeftAlone;
+    // injectProbe/injectControl PART 2(b): this population is the established "ALL of them
+    // into the BACK BUFFER, after the frame's final composite" (see the comment above) - the
+    // right place to notice the first HUD draw of the frame and, if the composite has already
+    // been seen and the quad has not gone out yet, issue it right here, before anything else
+    // about this particular HUD draw runs.
+    NoteFirstHudAndMaybeInject(dev, hud);
 
     // ---------------------------------------------------------------- what IS a HUD vertex?
     //
@@ -10349,12 +13907,59 @@ HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type
                        : "user-pointer draw, depth-tested - in-world, left alone";
     RecordFrameDraw(dev, count * 3, count, hud ? Disp::Hide : Disp::PassThrough);
 
+    // THE RASTERIZED-FRAME INVARIANT, gated on `hud` because that population (no projTM, depth
+    // test off) is exactly where a screen-space post effect and a real HUD icon are otherwise
+    // indistinguishable - see CompositesEngineOutputToScreen's own comment (above Classify) for
+    // why this exists at all: this function's HUD test is the confirmed gap that let a
+    // rasterized-frame composite ride the HUD rebuild straight to Remix.
+    if (hud && g_settings.blockEngineOutputToScreen) {
+        int rtStage = -1;
+        UINT rtW = 0, rtH = 0;
+        if (CompositesEngineOutputToScreen(dev, &rtStage, &rtW, &rtH)) {
+            const bool hasVS = g_lastVS != nullptr;
+            LogRtInvariantBlock("DrawPrimitiveUP", rtStage, rtW, rtH, count, hasVS);
+            if (hasVS) {
+                ++g_rtInvariantUPPass;
+                g_dispReason = "BLOCKED: UP draw samples a render target and writes the screen - "
+                               "vertex shader bound, passed through untouched so Remix (capture "
+                               "off) declines it";
+                SyncBridgeVS(dev, g_lastVS);
+                return g_origDrawPrimitiveUP(dev, type, count, vertices, stride);
+            }
+            ++g_rtInvariantUPSkip;
+            g_dispReason = "BLOCKED: UP draw samples a render target and writes the screen - "
+                           "already fixed function, skipped so it never reaches the device";
+            return D3D_OK;
+        }
+    }
     const bool ui = BeginUIDemote(dev, hud);
     HRESULT hr = D3D_OK;
     // Rebuild it as fixed function if we can; pass the game's own draw through if we cannot.
-    if (!(hud && g_settings.uiConvertUP &&
-          DrawHudFixedFunction(dev, type, count, vertices, stride)))
+    // A HUD draw rebuilt as fixed function must NOT also go out raw. It did, since 2026-09-04:
+    // the brace was missing, so the game's own draw followed the rebuilt one - float4 PIXEL
+    // positions (2560, 1440, 0) through whatever the bridge had bound (fixed function after a
+    // converted draw) - and the pause menu, the map and the HUD landed in the world a thousand
+    // units above the player. The frame dump of 2026-09-11 showed the menu's 58 HUD draws and
+    // nothing else that could float. uiRawAfterHud=1 restores the double draw for an A/B.
+    const bool rebuilt = hud && g_settings.uiConvertUP &&
+                         DrawHudFixedFunction(dev, type, count, vertices, stride);
+    if (rebuilt) ++g_hudRebuiltOnly;
+    if (!rebuilt || g_settings.uiRawAfterHud) {
+        if (rebuilt) ++g_hudRawAfterRebuild;
+        SyncBridgeVS(dev, g_lastVS);
+        // injectProbe/injectControl PART 1/2: only under an ACTIVE UI demote (hud) - with
+        // hud false, BeginUIDemote above did nothing and this is a plain pass-through draw,
+        // not one of the five sites PART 1 watches. CurrentDrawIsRHW asks the device directly
+        // for the same reason the HUD-format probe does (see "what IS a HUD vertex?", above):
+        // this draw may carry an FVF this shim's own declaration shadow knows nothing about.
+        InjectSuppression injectSup;
+        if (hud) {
+            injectSup = BeforeShimDrawSite(dev, InjectSite::UIDemote, g_lastVS != nullptr,
+                                           count, CurrentDrawIsRHW(dev));
+        }
         hr = g_origDrawPrimitiveUP(dev, type, count, vertices, stride);
+        if (hud) AfterShimDrawSite(dev, injectSup);
+    }
     EndUIDemote(dev, ui);
     return hr;
 }
@@ -10366,8 +13971,38 @@ HRESULT WINAPI Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETY
     ++g_drawsTotal;
     ++g_drawIndexThisFrame;
     ++g_upIndexedTotal;
+    NoteIfFinalComposite(dev);   // injectProbe/injectControl PART 1/2 - for completeness only:
+                                 // this function issues no fixed-function draw of its own
     g_dispReason = "DrawIndexedPrimitiveUP - user-pointer draw, NOT classified by this shim";
+    // THE RASTERIZED-FRAME INVARIANT. Found by searching for every exit this shim makes a draw
+    // visible to Remix through: this function classifies NOTHING at all, an unconditional
+    // pass-through, so a composite draw arriving through THIS call has never had any protection,
+    // HUD-test gap or otherwise. See CompositesEngineOutputToScreen, above Classify.
+    if (g_settings.blockEngineOutputToScreen) {
+        int rtStage = -1;
+        UINT rtW = 0, rtH = 0;
+        if (CompositesEngineOutputToScreen(dev, &rtStage, &rtW, &rtH)) {
+            const bool hasVS = g_lastVS != nullptr;
+            LogRtInvariantBlock("DrawIndexedPrimitiveUP", rtStage, rtW, rtH, count, hasVS);
+            g_dispReason = hasVS
+                ? "BLOCKED: indexed UP draw samples a render target and writes the screen - "
+                  "vertex shader bound, passed through untouched so Remix (capture off) declines "
+                  "it"
+                : "BLOCKED: indexed UP draw samples a render target and writes the screen - "
+                  "already fixed function, skipped so it never reaches the device";
+            RecordFrameDraw(dev, numVertices, count, hasVS ? Disp::PassThrough : Disp::Skip);
+            if (hasVS) {
+                ++g_rtInvariantIndexedUPPass;
+                SyncBridgeVS(dev, g_lastVS);
+                return g_origDrawIndexedPrimitiveUP(dev, type, minIndex, numVertices, count,
+                                                    indices, indexFormat, vertices, stride);
+            }
+            ++g_rtInvariantIndexedUPSkip;
+            return D3D_OK;
+        }
+    }
     RecordFrameDraw(dev, numVertices, count, Disp::PassThrough);
+    SyncBridgeVS(dev, g_lastVS);
     return g_origDrawIndexedPrimitiveUP(dev, type, minIndex, numVertices, count, indices,
                                         indexFormat, vertices, stride);
 }
@@ -10544,14 +14179,101 @@ float g_dumpSkinBindC[3] = {}, g_dumpSkinPosedC[3] = {};
 // 47-bone upload is reading somebody else's palette.
 unsigned g_dumpSkinPalNewBones = 0, g_dumpSkinPalOldBones = 0;
 unsigned g_dumpSkinPalNewDraw = 0, g_dumpSkinPalOldDraw = 0, g_dumpSkinPalGens = 0;
+// Same per-draw-dump pattern, for the hardware (fixed-function) skin path - filled by
+// SkinViaFixedFunction itself, right before it returns success, and consumed (then cleared) by
+// RecordFrameDraw's own ffskin= annotation.
+bool g_dumpSkinFF = false;
+bool g_dumpSkinFFReuse = false;    // this draw reused the previous draw's staged palette
+bool g_dumpSkinFFBone0 = false;    // this mesh uses bone 0 (WORLDMATRIX(0) IS D3DTS_WORLD)
+unsigned g_dumpSkinFFBones = 0, g_dumpSkinFFLowBone = 0, g_dumpSkinFFHighBone = 0;
+UINT g_dumpSkinFFSideOffset = 0, g_dumpSkinFFUvOffset = 0;
+bool g_dumpSkinFFSingle = false;   // FIX 5: this draw was staged in single-bone mode (shader reads no BLENDWEIGHT)
+int g_dumpSkinFFBake = 0;          // THE SHAPE BAKE: 0 none, 1 hit, 2 built, 3 rebuilt
 
 unsigned g_frameDumpTarget = 0;
 unsigned g_captureIndex = 0;        // 0 = the automatic first capture, then 1, 2, 3...
+unsigned g_hudProbeReports = 0;     // the HUD draw probe's report count; re-armed with the captures
+unsigned g_decalProbeReports = 0;   // ProbeDecalDraw's report count (defined far below); re-armed too
+unsigned g_outsideWinReports = 0;   // OUTSIDE WINDOW probe's report count (TightenConvertedWindow, defined far below); re-armed too
+// ---------------------------------------------------------------- the rolling draw record
+// The last ringFrames frames' indexed draws, compact, written to sr3-rtx-ring-N.log on F9.
+// The one-frame stretched polygons cannot be caught by a dump that fires two seconds after the
+// key; this holds the frames BEFORE the key, each draw with its buffer's freshness.
+struct RingDraw {
+    unsigned frame, idx; unsigned char disp; UINT verts, prims;
+    unsigned char proj, obj, skin, inst; signed char freshAge;
+    char ps[20]; void* tex; void* alb; signed char albStage; signed char uvSet; float at[3]; const char* reason;
+};
+std::vector<std::vector<RingDraw>> g_ring;
+unsigned g_ringSlotFrame = 0xFFFFFFFFu;
+void RingRecordDraw(UINT numVertices, UINT primitiveCount, Disp d, int freshAge) {
+    const int n = g_settings.ringFrames;
+    if (n <= 0) return;
+    if (g_ring.size() != static_cast<size_t>(n)) { try { g_ring.assign(static_cast<size_t>(n), {}); } catch (...) { return; } }
+    auto& slot = g_ring[g_frames % static_cast<unsigned>(n)];
+    if (g_ringSlotFrame != g_frames) { slot.clear(); g_ringSlotFrame = g_frames; }
+    if (slot.size() >= 8192) return;
+    RingDraw r{};
+    r.frame = g_frames; r.idx = g_drawIndexThisFrame; r.disp = static_cast<unsigned char>(d);
+    r.verts = numVertices; r.prims = primitiveCount;
+    r.proj = g_curVS.usesProjTM ? 1 : 0; r.obj = g_curVS.usesObjTM ? 1 : 0; r.skin = g_curVS.skinned ? 1 : 0;
+    r.inst = g_instancedDraw ? 1 : 0;
+    r.freshAge = static_cast<signed char>(freshAge < 0 ? -1 : (freshAge > 100 ? 100 : freshAge));
+    strncpy_s(r.ps, g_curPS.firstSampler ? g_curPS.firstSampler : "", _TRUNCATE);
+    r.tex = g_curTexture[0];
+    r.alb = g_lastEffectiveAlbedo;
+    r.albStage = static_cast<signed char>(g_lastEffectiveAlbedoStage);
+    r.uvSet = static_cast<signed char>(
+        (g_lastEffectiveAlbedoStage >= 0 && g_lastEffectiveAlbedoStage < 8)
+            ? g_curPS.samplerUv[g_lastEffectiveAlbedoStage] : -1);
+    r.at[0] = g_vsConst[kRegObjTM][3]; r.at[1] = g_vsConst[kRegObjTM + 1][3]; r.at[2] = g_vsConst[kRegObjTM + 2][3];
+    r.reason = g_dispReason;
+    try { slot.push_back(r); } catch (...) {}
+}
+void CaptureFileName(char* out, size_t n, const char* stem);
+void WriteRing() {
+    if (g_ring.empty()) return;
+    char fname[64];
+    CaptureFileName(fname, sizeof(fname), "ring");
+    FILE* f = _fsopen(fname, "w", _SH_DENYNO);
+    if (!f) return;
+    static const char* kD[] = {"CONVERT", "HIDE   ", "SKIP   ", "PASS   ", "MARK   "};
+    const unsigned n = static_cast<unsigned>(g_ring.size());
+    fprintf(f, "rolling draw record - the last %u frames before the capture key, oldest first\n"
+               "FRESH=N: this draw's static stream-0 range was written N frames earlier (shown when within deferFreshFrames)\n\n", n);
+    for (unsigned k = 1; k <= n; ++k) {
+        const auto& slot = g_ring[(g_frames + k) % n];
+        if (slot.empty()) continue;
+        fprintf(f, "=== frame %u: %u draws ===\n", slot[0].frame, static_cast<unsigned>(slot.size()));
+        for (const RingDraw& r : slot) {
+            char fr[24] = "";
+            if (r.freshAge >= 0) _snprintf_s(fr, _TRUNCATE, " FRESH=%d", r.freshAge);
+            fprintf(f, "%5u %s v=%-6u p=%-6u vs%s%s%s inst=%u ps='%s' tex0=%p alb=%p@%d uv=%d at(%.1f %.1f %.1f)%s | %s\n",
+                    r.idx, kD[r.disp < 5 ? r.disp : 2], r.verts, r.prims,
+                    r.proj ? "[proj]" : "[    ]", r.obj ? "[obj]" : "[   ]", r.skin ? "[skin]" : "[    ]",
+                    r.inst, r.ps, r.tex, r.alb, r.albStage, r.uvSet, r.at[0], r.at[1], r.at[2], fr, r.reason ? r.reason : "");
+        }
+    }
+    fclose(f);
+    Log("rolling draw record written to %s", fname);
+}
+
+bool g_frozen = false, g_pauseKeyWasDown = false, g_heldSinceLastPresent = false;
+unsigned g_frameSteps = 0;
+double g_frameStepHeldMs = 0.0;
+
 bool g_captureKeyWasDown = false;
 bool g_captureRequested = false;
 
+// ASSET HASH PROBE: forward declarations. Defined far below (after GetTightIbShape/
+// GetBaseMesh, which it reuses) but called from here - RearmCaptures arms it on the same F9
+// trigger that re-arms the ring/frame dumps above - and from Hook_Present, which ticks the
+// burst to its own end and logs the summary.
+void ArmAssetHashProbe();
+void TickAssetHashProbeBurst();
+
 // Re-arm both dumps for the next frame. Called from Present, so no draw is half-recorded.
-void RearmCaptures() {
+void RearmCaptures(bool ring) {
     ++g_captureIndex;
     g_frameDumpDone = false;
     g_frameDumpTarget = 0;
@@ -10560,8 +14282,18 @@ void RearmCaptures() {
     g_shapeProbeTarget = 0;
     g_shapeReports = 0;
     if (g_shapeLog) { fclose(g_shapeLog); g_shapeLog = nullptr; }
+    g_hudProbeReports = 0;   // eight more "HUD draw:" blocks, with their matrices
+    g_decalProbeReports = 0;   // eight more "DECAL PROBE" blocks, texture identity and UV range
+    g_outsideWinReports = 0;   // twelve more "OUTSIDE WINDOW" blocks, TightenConvertedWindow's safety net
+    g_rtInvariantProbeReports = 0;   // twelve more "BLOCKED (rasterized-frame invariant)" blocks
+    g_injectProbeReports = 0;   // twelve more "INJECT PROBE" blocks (trigger preceded composite)
+    g_injectNonRhwReports = 0;   // twelve more "INJECT CONTROL" blocks (satisfied, not RHW)
+    if (ring) WriteRing();   // the frames BEFORE the key: where a one-frame glitch lives
+    if (ring) ArmAssetHashProbe();   // ASSET HASH PROBE: same F9 trigger, its own burst window
     Log("CAPTURE %u armed - the next frame goes to sr3-rtx-frame-%u.log and "
-        "sr3-rtx-shapes-%u.log", g_captureIndex, g_captureIndex, g_captureIndex);
+        "sr3-rtx-shapes-%u.log (a manual capture dumps the frame whatever its draw count)",
+        g_captureIndex, g_captureIndex, g_captureIndex);
+    if (g_frozen) g_frameDumpTarget = g_frames + 1;   // frozen: the capture is the next stepped frame
 }
 
 void PollCaptureKey() {
@@ -10571,11 +14303,55 @@ void PollCaptureKey() {
     g_captureKeyWasDown = down;
     if (g_captureRequested) {
         g_captureRequested = false;
-        RearmCaptures();
+        RearmCaptures(true);
     }
 }
 
 // Capture 0 keeps the original filenames so nothing that reads them has to change.
+// ---------------------------------------------------------------- frame stepping
+// Held on the render thread AFTER the real Present, so the frame stays on screen while the
+// game waits. The game's main thread stalls on the render thread within a frame, so a step is
+// one game tick and one frame: hold the camera key while stepping and the camera turns one
+// tick per press. Each stepped frame can carry a full frame dump (sr3-rtx-frame-N.log), so the
+// frame that shows a one-frame fault already has its record when you see it.
+void FrameStepHold() {
+    if (!g_settings.frameStepPauseKey) return;
+    const bool pauseDown = (GetAsyncKeyState(g_settings.frameStepPauseKey) & 0x8000) != 0;
+    if (pauseDown && !g_pauseKeyWasDown) {
+        g_frozen = !g_frozen;
+        Log("FRAME STEP: %s at frame %u", g_frozen
+            ? "FROZEN - the step key releases one frame, the capture key writes the ring, the pause key resumes"
+            : "resumed", g_frames);
+    }
+    g_pauseKeyWasDown = pauseDown;
+    if (!g_frozen) return;
+    const LONGLONG t0 = Now();
+    bool stepWasDown = (GetAsyncKeyState(g_settings.frameStepKey) & 0x8000) != 0;
+    for (;;) {
+        Sleep(4);
+        const bool p = (GetAsyncKeyState(g_settings.frameStepPauseKey) & 0x8000) != 0;
+        if (p && !g_pauseKeyWasDown) {
+            g_pauseKeyWasDown = p;
+            g_frozen = false;
+            Log("FRAME STEP: resumed at frame %u after %u steps", g_frames, g_frameSteps);
+            break;
+        }
+        g_pauseKeyWasDown = p;
+        const bool st = (GetAsyncKeyState(g_settings.frameStepKey) & 0x8000) != 0;
+        if (st && !stepWasDown) {
+            ++g_frameSteps;
+            if (g_settings.frameStepDumpEachStep) RearmCaptures(false);   // frozen: targets the next frame
+            Log("FRAME STEP: step %u -> frame %u%s", g_frameSteps, g_frames + 1,
+                g_settings.frameStepDumpEachStep ? " (full dump armed for it)" : "");
+            break;
+        }
+        stepWasDown = st;
+        PollCaptureKey();   // the capture key while frozen: the ring, and a dump armed for the next step
+    }
+    g_frameStepHeldMs += MsSince(t0);
+    g_heldSinceLastPresent = true;
+}
+
 void CaptureFileName(char* out, size_t n, const char* stem) {
     if (g_captureIndex == 0) sprintf_s(out, n, "sr3-rtx-%s.log", stem);
     else                     sprintf_s(out, n, "sr3-rtx-%s-%u.log", stem, g_captureIndex);
@@ -10666,8 +14442,11 @@ void RecordFrameDraw(IDirect3DDevice9* dev, UINT numVertices, UINT primitiveCoun
     // So the countdown does not START until a frame has actually submitted a world's worth of
     // geometry. That is a property of the frame rather than of elapsed time, so it cannot be
     // fooled by a slow load.
+    // An F9 capture dumps whatever the frame holds: the pause menu is a few hundred draws and
+    // the 1,500 floor (there to skip loading screens on the automatic capture) never let it in.
+    const bool manual = g_captureIndex > 0;
     if (!g_frameDumpTarget) {
-        if (g_lastFrameDraws < kDumpMinDraws) return;
+        if (g_lastFrameDraws < kDumpMinDraws && !manual) return;
         g_frameDumpTarget = g_frames + 1 + g_settings.dumpFrame;
     }
     if (g_frames + 1 != g_frameDumpTarget) return;
@@ -10675,7 +14454,7 @@ void RecordFrameDraw(IDirect3DDevice9* dev, UINT numVertices, UINT primitiveCoun
     // third bad dump came from exactly this: the countdown began in gameplay and 1,800 frames
     // later landed on a 997-draw frame while the counters read 2,661. A condition tested once,
     // long before the thing it guards, guards nothing - so push the target forward instead.
-    if (g_lastFrameDraws < kDumpMinDraws) {
+    if (g_lastFrameDraws < kDumpMinDraws && !manual) {
         g_frameDumpTarget = g_frames + 1 + 60;
         return;
     }
@@ -10746,24 +14525,106 @@ void RecordFrameDraw(IDirect3DDevice9* dev, UINT numVertices, UINT primitiveCoun
                     g_dumpSkinPalOldBones, g_dumpSkinPalOldDraw, g_dumpSkinPalGens);
         g_dumpSkin = false;   // so the next, non-skinned draw does not inherit this line
     }
+    // Same idea, for the hardware (fixed-function) skin path - see g_dumpSkinFF's own comment.
+    char ffTxt[200] = "";
+    if (g_dumpSkinFF) {
+        _snprintf_s(ffTxt, _TRUNCATE,
+                    " | ffskin reuse=%d bone0=%d bones=%u[%u..%u] side@%u uv@%u single=%d bake=%d",
+                    g_dumpSkinFFReuse ? 1 : 0, g_dumpSkinFFBone0 ? 1 : 0,
+                    g_dumpSkinFFBones, g_dumpSkinFFLowBone, g_dumpSkinFFHighBone,
+                    g_dumpSkinFFSideOffset, g_dumpSkinFFUvOffset, g_dumpSkinFFSingle ? 1 : 0,
+                    g_dumpSkinFFBake);
+        g_dumpSkinFF = false;   // so the next, non-FF-skinned draw does not inherit this line
+    }
+    // This draw's OWN camera and projection, from its constants: where the view matrix puts the
+    // eye, whether the derived projection is perspective, whether the view differs from the
+    // frame's main camera, and whether a vertex shader is bound at all. For tiny draws (a UI
+    // quad) the raw positions too. Written so a pause-menu frame can be read without guessing.
+    char xf[220] = "";
+    {
+        const D3DMATRIX view = FromRegisters(&g_vsConst[kRegWorld2View][0], 3);
+        const D3DMATRIX viewProj = FromRegisters(&g_vsConst[kRegProjTM][0], 4);
+        D3DMATRIX proj, invView;
+        if (IsFinite(view) && IsFinite(viewProj) && DeriveProjection(view, viewProj, proj) && Invert(view, invView))
+            _snprintf_s(xf, _TRUNCATE, " | cam(%.1f %.1f %.1f) proj(%.3f %.3f %.3f %.3f %s)%s%s",
+                        invView._41, invView._42, invView._43, proj._11, proj._22, proj._34, proj._44,
+                        IsPerspective(proj) ? "persp" : "ORTHO",
+                        (g_haveMainCamera && !Same(view, g_mainView)) ? " OTHER-CAM" : "",
+                        g_lastVS ? "" : " NOVS");
+        else
+            _snprintf_s(xf, _TRUNCATE, " | (no transform)%s", g_lastVS ? "" : " NOVS");
+    }
+    char rawTxt[240] = "";
+    if (numVertices <= 8 && g_stream0 && g_stream0Stride >= 12 && g_curLayout.posOffset >= 0 &&
+        g_curLayout.posType == D3DDECLTYPE_FLOAT3) {
+        D3DVERTEXBUFFER_DESC vbd{};
+        if (SUCCEEDED(g_stream0->GetDesc(&vbd)) && !(vbd.Usage & D3DUSAGE_DYNAMIC) &&
+            VertexRangeFits(g_stream0, g_stream0Offset, g_curDrawFirstVertex, numVertices, g_stream0Stride)) {
+            void* mapped = nullptr;
+            if (SUCCEEDED(g_stream0->Lock(g_stream0Offset + g_curDrawFirstVertex * g_stream0Stride,
+                                          numVertices * g_stream0Stride, &mapped,
+                                          D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) && mapped) {
+                const unsigned char* b = static_cast<const unsigned char*>(mapped);
+                int off = _snprintf_s(rawTxt, _TRUNCATE, " | raw");
+                for (UINT i = 0; i < numVertices && i < 4 && off > 0 && off < 200; ++i) {
+                    const float* v = reinterpret_cast<const float*>(b + i * g_stream0Stride + g_curLayout.posOffset);
+                    const int n = _snprintf_s(rawTxt + off, sizeof(rawTxt) - off, _TRUNCATE, " (%.2f %.2f %.2f)", v[0], v[1], v[2]);
+                    if (n < 0) break;
+                    off += n;
+                }
+                g_stream0->Unlock();
+            }
+        }
+    }
+    // The chosen albedo's format and colour-channel count, cached (see AlbedoFormatFor) so
+    // this costs nothing beyond the frame dump's own overhead - one GetLevelDesc per distinct
+    // texture, not per draw. Printed below so a frame dump shows how many bound albedos are
+    // colourless (D3DFMT_A8 and the like) across the WHOLE frame, not only the eight decal
+    // probe slots.
+    const AlbedoFormatInfo& albFmtLine = AlbedoFormatFor(g_lastEffectiveAlbedo);
     fprintf(g_frameLog,
-            "%5u %s v=%-6u p=%-6u zw=%lu zt=%lu blend=%lu cw=%#lx | vs%s%s%s ps='%s' rank=%d | "
-            "tex0=%p%s inst=%d at(%.1f %.1f %.1f)%s | %s\n",
+            "%5u %s v=%-6u p=%-6u zw=%lu zt=%lu zf=%lu bias=%#lx blend=%lu(%lu/%lu) cw=%#lx layer=%u pull=%#x | vs%s%s%s ps='%s' rank=%d low='%s'@%d | "
+            "tex0=%p%s alb=%p@%d albfmt=%u(%uch) uv=%d%s tc0type=%d tc0stream=%d ttff=%d aarg1=%u su=%.6f inst=%d at(%.1f %.1f %.1f) s0off=%u%s%s%s%s | %s\n",
             g_drawIndexThisFrame, kDisp[static_cast<int>(d)], numVertices, primitiveCount,
             ShadowGetRS(dev, D3DRS_ZWRITEENABLE), ShadowGetRS(dev, D3DRS_ZENABLE),
-            ShadowGetRS(dev, D3DRS_ALPHABLENDENABLE), ShadowGetRS(dev, D3DRS_COLORWRITEENABLE),
+            ShadowGetRS(dev, D3DRS_ZFUNC), ShadowGetRS(dev, D3DRS_DEPTHBIAS),
+            ShadowGetRS(dev, D3DRS_ALPHABLENDENABLE), ShadowGetRS(dev, D3DRS_SRCBLEND),
+            ShadowGetRS(dev, D3DRS_DESTBLEND), ShadowGetRS(dev, D3DRS_COLORWRITEENABLE), g_curLayer,
+            (d == Disp::Convert) ? g_curPullWhy : 0u,
             g_curVS.usesProjTM ? "[proj]" : "[     ]",
             g_curVS.usesObjTM ? "[obj]" : "[   ]",
             g_curVS.skinned ? "[skin]" : "[    ]",
             g_curPS.firstSampler, g_curPS.albedoRank,
+            g_curPS.lowestSampler, g_curPS.lowestSamplerReg,
             static_cast<void*>(g_curTexture[0]),
             g_rtTextures.count(g_curTexture[0]) ? "(RT)" : "    ",
+            static_cast<void*>(g_lastEffectiveAlbedo), g_lastEffectiveAlbedoStage,
+            static_cast<unsigned>(albFmtLine.fmt), albFmtLine.channels,
+            (g_lastEffectiveAlbedoStage >= 0 && g_lastEffectiveAlbedoStage < 8)
+                ? g_curPS.samplerUv[g_lastEffectiveAlbedoStage] : -1,
+            (g_lastEffectiveAlbedoStage >= 0 && g_lastEffectiveAlbedoStage < 8)
+                ? (g_curPS.samplerUvDirect[g_lastEffectiveAlbedoStage] ? "" : "*") : "",
+            // CHANGE 3, 2026-09-18: the five fields that would settle several open questions
+            // at once, published from where each is actually set rather than recomputed
+            // here. tc0type/tc0stream are g_curLayout's own fields (a tc0type=-1 alongside a
+            // non-zero tc0stream names the declaration-side blind spot ParseDeclaration has
+            // for a TEXCOORD0 that lives outside stream 0 - see VertexLayout::texcoordStream
+            // and ParseDeclaration). ttff and aarg1 are read straight out of the TSS shadow
+            // SetupTextureStages already maintains for stage 0, so this is the REAL state a
+            // Convert draw was actually given, not a guess at it - on the Alpha_MaskSampler
+            // rows this is what confirms or refutes CHANGE 1's premise directly. su is
+            // g_decalProbeSu, already published by SetupTextureStages for ProbeDecalDraw and
+            // reused here as-is rather than recomputed.
+            g_curLayout.texcoordType, g_curLayout.texcoordStream,
+            static_cast<int>(g_tssShadow[0][D3DTSS_TEXTURETRANSFORMFLAGS]),
+            static_cast<unsigned>(g_tssShadow[0][D3DTSS_ALPHAARG1]),
+            g_decalProbeSu,
             g_instancedDraw ? 1 : 0,
             // Two draws of one mesh at ONE position are a duplicate; at two positions they are two
             // objects that happen to share a texture. Nothing else in this line separates those,
             // and the head double-draw cannot be diagnosed without knowing which it is.
             g_vsConst[kRegObjTM][3], g_vsConst[kRegObjTM + 1][3], g_vsConst[kRegObjTM + 2][3],
-            skinTxt, g_dispReason);
+            g_stream0Offset, skinTxt, ffTxt, xf, rawTxt, g_dispReason);
 }
 
 void FinishFrameDump() {
@@ -10829,7 +14690,6 @@ void ProbeDraw(IDirect3DDevice9* dev, UINT numVertices, UINT primitiveCount, boo
 //
 // Guessing between those would be three builds. This reports the declaration and the actual
 // numbers so it is one.
-unsigned g_hudProbeReports = 0;
 
 // Re-aimed 2026-08-18 after the first version reported nothing: `g_isHudDraw` never fires,
 // because the HUD is NOT screen-space by our test. The frame dump shows the last non-post draws
@@ -10842,6 +14702,7 @@ unsigned g_hudProbeReports = 0;
 // the pass rather than an index into a list of targets - the distinction that matters, because
 // selecting passes by target INDEX is a recorded dead end (indices are not stable).
 void ProbeHudDraw(UINT minIndex, UINT numVertices, Disp d) {
+    if (!g_settings.hudProbe) return;
     if (g_hudProbeReports >= 8 || !g_haveCamera) return;
     if (d != Disp::Convert && d != Disp::PassThrough) return;
     if (!g_curRenderTarget) return;
@@ -10991,6 +14852,7 @@ void ClearBackBufferOnce(IDirect3DDevice9* dev) {
     if (!g_backBufferSurface || g_curRenderTarget != g_backBufferSurface) return;
     g_clearedThisFrame = true;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0, 0, 0), 1.0f, 0);
     g_internal = false;
     ++g_backBufferClears;
@@ -11354,6 +15216,23 @@ struct BaseMesh {
     // Which bones this mesh actually reads, one bit each. 64 bones fits exactly, and it lets the
     // per-draw check walk only the bones that matter instead of all 64.
     unsigned long long usedBones = 0;
+    // FIX 5 CACHE (2026-09-22): SkinViaFixedFunction used to re-derive these two facts on EVERY
+    // draw with a per-vertex scan - 140 hardware-skinned draws/frame over meshes of thousands of
+    // vertices, measured as a real part of the 9.5 ms skin phase. Both are pure functions of the
+    // decoded vertices above, computed once here instead. safeBones itself is NOT cached - it
+    // depends on the SHADER's bone register (kRegBonePalette or wherever this shader's CTAB put
+    // it), not the mesh, so only the raw per-vertex facts are cached and the shader-dependent
+    // comparison still runs per draw, cheaply, against these.
+    //
+    // Single-bone mode (shader reads no BLENDWEIGHT): every vertex follows idx[0] alone, so the
+    // bones to stage are a mask over idx[0] across the mesh, not the four-weight usedBones above.
+    unsigned long long singleBoneMask = 0;   // OR of (1ull<<idx[0]) for every vertex with idx[0] < kBonesMax
+    unsigned singleBoneMaxIdx0 = 0;          // true max idx[0] across every vertex, UNfiltered by kBonesMax
+    bool singleBoneIdx0Overflow = false;     // true if some vertex's idx[0] >= kBonesMax (unstageable on any shader)
+    // Four-bone mode: true if some vertex has no usable influence at all (every weight 0, or
+    // every weighted index >= kBonesMax) - SkinAndBind's CPU path leaves such a vertex at its
+    // bind pose, which the GPU path cannot express, so the whole draw must refuse.
+    bool noUsableInfluence = false;
 };
 std::unordered_map<unsigned long long, BaseMesh> g_baseMeshes;
 // Which cached meshes came out of which buffer, so a write-lock can drop exactly those.
@@ -11687,11 +15566,19 @@ const BaseMesh* GetBaseMesh(UINT firstVertex, UINT numVertices) {
         }
         // Only weighted components count: an unused slot carries index 255 with weight 0 and
         // would make every mesh look like it reads bone 255.
+        bool vertUsable = false;
         for (int k = 0; k < 4; ++k) {
             if (out.w[k] == 0.0f || out.idx[k] >= static_cast<unsigned>(kBonesMax)) continue;
             if (out.idx[k] > mesh.maxBone) mesh.maxBone = out.idx[k];
             mesh.usedBones |= 1ull << out.idx[k];
+            vertUsable = true;
         }
+        if (!vertUsable) mesh.noUsableInfluence = true;
+        // FIX 5 CACHE: the single-bone-mode facts SkinViaFixedFunction used to re-derive with its
+        // own per-draw scan of idx[0] alone - see the BaseMesh comment above.
+        if (out.idx[0] > mesh.singleBoneMaxIdx0) mesh.singleBoneMaxIdx0 = out.idx[0];
+        if (out.idx[0] >= static_cast<unsigned>(kBonesMax)) mesh.singleBoneIdx0Overflow = true;
+        else mesh.singleBoneMask |= 1ull << out.idx[0];
     }
     g_stream0->Unlock();
     if (!ok) return nullptr;
@@ -11721,6 +15608,19 @@ const BaseMesh* GetBaseMesh(UINT firstVertex, UINT numVertices) {
 // The bind pose is cached and the base mesh is static; the morph lives in a dynamic buffer the
 // game rewrites. Baking it would have needed the cache invalidated on every write to a
 // per-frame buffer - and would have served one NPC's face to the next the moment it went stale.
+// THE SHAPE BAKE: forward-declared so the probe below (and MorphBakeFor, further down) can hash
+// a delta slice. AssetHashFnv1a's own definition sits far below, beside the asset-hash probe it
+// was written for; moving a 300-line-separated inline function is more invasive than a forward
+// declaration. No default argument here - the real definition supplies it, and a default may be
+// specified only once per TU - so every call below passes the FNV offset basis explicitly.
+inline unsigned long long AssetHashFnv1a(const void* data, size_t len, unsigned long long h);
+
+// THE SHAPE BAKE: find-only accessor into g_instCache's writeSeq/discardSeq, under SnoopGuard -
+// never inserts (RegisterSnoop is the only thing allowed to create an entry). Forward-declared
+// for the same reason as AssetHashFnv1a above; defined beside the rest of the bake machinery,
+// after MorphForThisDraw.
+bool SnoopWriteSeq(IDirect3DVertexBuffer9* vb, unsigned* writeSeq, unsigned* discardSeq = nullptr);
+
 struct MorphSource {
     // A COPY of this draw's slice, not a pointer into the snoop cache - the locking thread can
     // resize that vector while this loop is running. Reused across draws so the allocation
@@ -11730,8 +15630,61 @@ struct MorphSource {
     int posOff = -1, nrmOff = -1;
     bool fresh = false;      // every byte of the slice was written since the last discard
     bool active = false;
+    // THE SHAPE BAKE: which buffer this slice came from and at what byte offset.
+    // MorphForThisDraw already computes both (vb, base64) to call SnoopCopy, but never kept them
+    // past that call. MorphBakeFor and the morph probe both need to name the buffer this delta is
+    // READ FROM (distinct from g_stream0, the mesh it is applied TO).
+    IDirect3DVertexBuffer9* vb = nullptr;
+    UINT base = 0;
 };
 std::vector<unsigned char> g_morphSlice;
+
+// THE SHAPE BAKE - always-on bookkeeping and the morph probe (morphProbe).
+//
+// "0 vertices/frame fell back (not written yet)" was a LYING counter: g_morphStaleVerts only
+// ever incremented in SkinAndBind's reference loop, so with skinFast=1 (the default) a non-fresh
+// morph slice silently rendered the base mesh and nothing said so. g_morphStaleDraws is the
+// truthful replacement - one bump per DRAW whose morph slice was not fully fresh, counted here
+// regardless of which SkinAndBind loop runs, and regardless of morphProbe.
+unsigned g_morphStaleDraws = 0;
+// One character's morph delta, tracked across frames: does its hash actually change, and how
+// often? Keyed by (vb, morphBase, bytes) - the morph buffer identity alone, not the mesh it is
+// applied to, since two draws through different meshes (body, head, accessory) of the SAME
+// character read DIFFERENT slices of the SAME morph buffer and are different blocks.
+struct MorphProbeBlock {
+    unsigned firstFrame = 0, lastFrame = 0, framesSeen = 0;
+    unsigned long long hash = 0;
+    bool haveHash = false;
+    unsigned hashChanges = 0;
+    unsigned lastChangeFrame = 0;
+    unsigned discardSeqAtLastChange = 0;
+    UINT verts = 0;
+    IDirect3DVertexBuffer9* morphVb = nullptr;
+    UINT morphBase = 0;
+    IDirect3DVertexBuffer9* s0vb = nullptr;
+    UINT s0stride = 0, s0size = 0;
+    UINT firstVertex = 0;
+    // Dedupe stamp: MorphForThisDraw runs TWICE for one logical draw when skinViaFixedFunction=1
+    // refuses a morph-active draw for some OTHER reason after already checking morph.active here
+    // (its own call), and SkinAndBind's CPU fallback then calls this again for the same draw.
+    unsigned lastProbedFrame = 0xFFFFFFFFu;
+    unsigned lastProbedDraw = 0xFFFFFFFFu;
+};
+std::unordered_map<unsigned long long, MorphProbeBlock> g_morphProbeBlocks;
+constexpr size_t kMaxMorphProbeBlocks = 128;
+unsigned g_morphProbeChangesAfterDiscard = 0, g_morphProbeChangesInPlace = 0;
+// Gaps (in frames) between consecutive hash changes of ANY block, capped - the report's median/
+// min/max gap is computed over this at report time, not maintained incrementally.
+std::vector<unsigned> g_morphProbeGaps;
+constexpr size_t kMaxMorphProbeGaps = 4096;
+
+unsigned long long MorphProbeKey(IDirect3DVertexBuffer9* vb, UINT base, UINT bytes) {
+    unsigned long long h = 1469598103934665603ull;
+    const unsigned long long parts[3] = {
+        reinterpret_cast<unsigned long long>(vb), base, bytes};
+    for (int i = 0; i < 3; ++i) { h ^= parts[i]; h *= 1099511628211ull; }
+    return h;
+}
 
 MorphSource MorphForThisDraw(UINT firstVertex, UINT numVertices) {
     MorphSource m;
@@ -11744,6 +15697,16 @@ MorphSource MorphForThisDraw(UINT firstVertex, UINT numVertices) {
     m.stride = g_streamStride[L.morphStream];
     if (m.stride < 8) { ++g_morphNoStride; return m; }
     RegisterSnoop(vb);
+    // THE SHAPE BAKE: mark this buffer as a MORPH stream, so Hook_VBLock/Hook_VBUnlock can bump
+    // the morph-specific counters beside the generic ones they already maintain for every snooped
+    // buffer. RegisterSnoop inserts+AddRefs; this only marks an entry that must already exist (the
+    // call above either just created it or found it), so find - never operator[] - is used here,
+    // which cannot itself create an un-AddRef'd entry.
+    {
+        SnoopGuard g;
+        const auto mit = g_instCache.find(vb);
+        if (mit != g_instCache.end()) mit->second.isMorph = true;
+    }
     const unsigned long long base64 =
         static_cast<unsigned long long>(g_streamOffset[L.morphStream]) +
         static_cast<unsigned long long>(firstVertex) * m.stride;
@@ -11768,7 +15731,514 @@ MorphSource MorphForThisDraw(UINT firstVertex, UINT numVertices) {
                 L.morphNrmOffset >= 0 &&
                 L.morphNrmOffset + 4 <= static_cast<int>(m.stride)) ? L.morphNrmOffset : -1;
     m.active = true;
+    m.vb = vb;
+    m.base = static_cast<UINT>(base64);
+
+    // Truthful replacement for the dead g_morphStaleVerts-only signal: one bump per DRAW whose
+    // morph slice was not fully fresh. Deduped per draw: with skinViaFixedFunction=1 a refused
+    // morph draw reaches this twice (SkinViaFixedFunction, then SkinAndBind's fallback).
+    {
+        static unsigned s_staleFrame = 0xFFFFFFFFu, s_staleDraw = 0xFFFFFFFFu;
+        if (!m.fresh && (s_staleFrame != g_frames || s_staleDraw != g_drawIndexThisFrame)) {
+            s_staleFrame = g_frames;
+            s_staleDraw = g_drawIndexThisFrame;
+            ++g_morphStaleDraws;
+        }
+    }
+
+    // THE MORPH PROBE: has this character's delta actually CHANGED since we last saw it? Nothing
+    // before this measured that - the bake below is only safe if the answer is usually "no".
+    if (g_settings.morphProbe) {
+        const unsigned long long pkey = MorphProbeKey(vb, m.base, bytes);
+        auto pit = g_morphProbeBlocks.find(pkey);
+        if (pit == g_morphProbeBlocks.end() && g_morphProbeBlocks.size() < kMaxMorphProbeBlocks) {
+            MorphProbeBlock nb;
+            nb.firstFrame = g_frames;
+            nb.morphVb = vb;
+            nb.morphBase = m.base;
+            nb.verts = numVertices;
+            nb.s0vb = g_stream0;
+            nb.s0stride = g_stream0Stride;
+            nb.firstVertex = firstVertex;
+            if (g_stream0) {
+                const auto dit = g_vbDescCache.find(g_stream0);
+                if (dit != g_vbDescCache.end()) nb.s0size = dit->second.Size;
+            }
+            pit = g_morphProbeBlocks.emplace(pkey, nb).first;
+        }
+        if (pit != g_morphProbeBlocks.end()) {
+            MorphProbeBlock& blk = pit->second;
+            if (blk.lastProbedFrame != g_frames || blk.lastProbedDraw != g_drawIndexThisFrame) {
+                blk.lastProbedFrame = g_frames;
+                blk.lastProbedDraw = g_drawIndexThisFrame;
+                ++blk.framesSeen;
+                blk.lastFrame = g_frames;
+                const unsigned long long h = AssetHashFnv1a(m.slice->data(), bytes, 1469598103934665603ull);
+                if (!blk.haveHash) {
+                    blk.hash = h;
+                    blk.haveHash = true;
+                } else if (h != blk.hash) {
+                    unsigned curDiscardSeq = 0;
+                    SnoopWriteSeq(vb, nullptr, &curDiscardSeq);
+                    if (blk.hashChanges > 0) {
+                        const unsigned gap = g_frames - blk.lastChangeFrame;
+                        if (g_morphProbeGaps.size() < kMaxMorphProbeGaps) g_morphProbeGaps.push_back(gap);
+                    }
+                    if (curDiscardSeq != blk.discardSeqAtLastChange) ++g_morphProbeChangesAfterDiscard;
+                    else ++g_morphProbeChangesInPlace;
+                    blk.discardSeqAtLastChange = curDiscardSeq;
+                    blk.hash = h;
+                    ++blk.hashChanges;
+                    blk.lastChangeFrame = g_frames;
+                }
+            }
+        }
+    }
     return m;
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE SHAPE BAKE (morphBake) - apply the morph delta ONCE into a whole-buffer copy of the source
+// mesh, and hand THAT to SkinViaFixedFunction instead of refusing the draw outright. Safe only
+// when the delta itself is close to static frame to frame - see the morph probe above, which
+// exists to answer that before this is trusted. Math is exactly section 2.1 of the plan and
+// SkinAndBind's own fast-path morph block: the same fresh/offset guards, the same 1/8192 position
+// delta, the same normal delta-and-renormalise - reproduced here (not shared) because SkinAndBind
+// writes into a fixed-format SkinnedVertex and this writes back into the SOURCE layout's own byte
+// formats, in place, across the whole buffer.
+// ---------------------------------------------------------------------------------------------
+struct MorphBake {
+    IDirect3DVertexBuffer9* src = nullptr;      // the WHOLE source VB this was copied from (AddRef'd)
+    IDirect3DVertexBuffer9* baked = nullptr;    // shim-owned copy, morph applied to its window
+    UINT srcSize = 0;                            // src's desc.Size at build time - baked's own size too
+    UINT stride = 0;
+    UINT phase = 0;
+    UINT firstVertex = 0;
+    UINT numVertices = 0;
+    // Content-addressed 2026-09-22: morphVb/morphBase/morphBytes are NO LONGER part of the cache
+    // identity (see MorphBakeKey) - deltaHash is. morphVb is kept AddRef'd purely to hold the
+    // buffer alive for TallyOrphans' bookkeeping; morphBase/morphBytes are informational only.
+    IDirect3DVertexBuffer9* morphVb = nullptr;  // AddRef'd - kept alive only, not part of the key
+    UINT morphBase = 0;
+    UINT morphBytes = 0;
+    unsigned long long deltaHash = 0;   // THE CACHE IDENTITY now (folded into MorphBakeKey), not just a staleness check
+    unsigned snoopWriteSeq = 0;         // diagnostic only now - hit/miss no longer depends on it
+    unsigned lastUsedFrame = 0;
+};
+std::unordered_map<unsigned long long, MorphBake> g_morphBakes;
+size_t g_morphBakeBytes = 0;
+unsigned g_morphBakeBuilt = 0, g_morphBakeRebuilt = 0, g_morphBakeHits = 0,
+        g_morphBakeSeqRehash = 0, g_morphBakeEvicted = 0, g_morphBakeDraws = 0;
+unsigned g_morphBakeRefuseNotFresh = 0, g_morphBakeRefuseLock = 0, g_morphBakeRefuseCreate = 0,
+        g_morphBakeRefuseBudget = 0, g_morphBakeRefusePooled = 0, g_morphBakeRefusePerFrame = 0;
+double g_morphBakeMsTotal = 0.0, g_morphBakeMsWorst = 0.0;
+// MEASURED 2026-09-22: the game writes the morph buffer ~190 times a frame and repacks its shared
+// pool on nearly every DISCARD, so a per-draw hash of the delta is now unconditional (the content
+// hash IS the cache key below, not just a staleness check) - 34.7 morph draws a frame over only a
+// HANDFUL of distinct character blocks (the probe saw 2), i.e. ~3 MB of hashing a frame to
+// re-derive the same few answers if it were not memoised. One hash per (block, frame): every draw
+// of the SAME block in the SAME frame reuses it instead of re-hashing.
+struct MorphDeltaHashMemo { unsigned frame = 0xFFFFFFFFu; unsigned seq = 0; unsigned long long hash = 0; };
+std::unordered_map<unsigned long long, MorphDeltaHashMemo> g_morphDeltaHashMemo;
+unsigned g_morphBakeHashMemoHits = 0;
+bool g_skinFFBakeBound = false;
+const char* g_morphBakeRefuseWhy = nullptr;
+// Per-frame budget bookkeeping, reset in Hook_Present beside the other per-frame resets.
+unsigned g_morphBakeBuildsThisFrame = 0;      // new (first-time) builds this frame
+unsigned g_morphBakeRebuildsThisFrame = 0;    // rebuilds (delta actually changed) this frame
+bool g_morphBakeChurnLoggedThisFrame = false;
+// 0 none, 1 hit, 2 built, 3 rebuilt - read by SkinViaFixedFunction right after calling
+// MorphBakeFor, to fill g_dumpSkinFFBake on the dump frame. A plain global rather than an
+// out-param: MorphBakeFor's signature is exactly the plan's (dev, firstVertex, numVertices,
+// const MorphSource&), and this is dump-only bookkeeping the same way g_dumpSkinFF* already is.
+int g_morphBakeLastOutcome = 0;
+
+// THE SHAPE BAKE (content-addressed 2026-09-22): keyed on the delta's own CONTENT HASH instead
+// of (morphVb, morphBase, morphBytes). MEASURED: the game repacks its shared morph pool 163-190
+// writes/frame with 0.88 DISCARD/frame, and every content change (8,735 of 8,735 probed) landed
+// after a DISCARD - never in place - which means a character's block routinely MOVES to a new
+// offset (sometimes a new VB) between frames even when its shape bytes are byte-for-byte
+// unchanged. Keying on (morphVb, morphBase) made every such move look like a brand-new block and
+// forced a full rebuild - 7,699 of them in one measured run. Keying on deltaHash instead means an
+// unchanged shape hits the SAME entry no matter where the game put it.
+unsigned long long MorphBakeKey(IDirect3DVertexBuffer9* src, UINT stride, UINT phase,
+                                UINT firstVertex, UINT numVertices,
+                                unsigned long long deltaHash) {
+    unsigned long long h = 1469598103934665603ull;
+    const unsigned long long parts[6] = {
+        reinterpret_cast<unsigned long long>(src), stride, phase, firstVertex, numVertices,
+        deltaHash};
+    for (int i = 0; i < 6; ++i) { h ^= parts[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+bool SnoopWriteSeq(IDirect3DVertexBuffer9* vb, unsigned* writeSeq, unsigned* discardSeq) {
+    if (!vb) return false;
+    SnoopGuard guard;
+    const auto it = g_instCache.find(vb);
+    if (it == g_instCache.end()) return false;
+    if (writeSeq) *writeSeq = it->second.writeSeq;
+    if (discardSeq) *discardSeq = it->second.discardSeq;
+    return true;
+}
+
+// A write to the SOURCE mesh kills every bake taken from it - NOT keyed on the morph VB, because
+// the key names src explicitly and a write to src invalidates every entry regardless of which
+// morph buffer it paired with.
+void InvalidateMorphBakesBySrc(IDirect3DVertexBuffer9* vb) {
+    if (!vb) return;
+    for (auto it = g_morphBakes.begin(); it != g_morphBakes.end();) {
+        if (it->second.src == vb) {
+            g_morphBakeBytes -= (it->second.srcSize <= g_morphBakeBytes) ? it->second.srcSize : g_morphBakeBytes;
+            if (it->second.baked) it->second.baked->Release();
+            if (it->second.src) it->second.src->Release();
+            if (it->second.morphVb) it->second.morphVb->Release();
+            it = g_morphBakes.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// Same, but by either role - src OR morphVb - for ForgetInstanceStream, which does not know which
+// role an orphaned buffer played.
+void InvalidateMorphBakes(IDirect3DVertexBuffer9* vb) {
+    if (!vb) return;
+    for (auto it = g_morphBakes.begin(); it != g_morphBakes.end();) {
+        if (it->second.src == vb || it->second.morphVb == vb) {
+            g_morphBakeBytes -= (it->second.srcSize <= g_morphBakeBytes) ? it->second.srcSize : g_morphBakeBytes;
+            if (it->second.baked) it->second.baked->Release();
+            if (it->second.src) it->second.src->Release();
+            if (it->second.morphVb) it->second.morphVb->Release();
+            it = g_morphBakes.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// Evict least-recently-used bakes (by lastUsedFrame, never one used THIS frame) until `needed`
+// more bytes fit under morphBakeMaxMB, or nothing more can be evicted.
+void MorphBakeEvictFor(size_t needed) {
+    const size_t capBytes = static_cast<size_t>(max(1, g_settings.morphBakeMaxMB)) * 1024ull * 1024ull;
+    while (g_morphBakeBytes + needed > capBytes) {
+        auto oldest = g_morphBakes.end();
+        for (auto it = g_morphBakes.begin(); it != g_morphBakes.end(); ++it) {
+            if (it->second.lastUsedFrame == g_frames) continue;   // never evict something used this frame
+            if (oldest == g_morphBakes.end() || it->second.lastUsedFrame < oldest->second.lastUsedFrame)
+                oldest = it;
+        }
+        if (oldest == g_morphBakes.end()) return;   // nothing evictable this frame
+        g_morphBakeBytes -= (oldest->second.srcSize <= g_morphBakeBytes) ? oldest->second.srcSize : g_morphBakeBytes;
+        if (oldest->second.baked) oldest->second.baked->Release();
+        if (oldest->second.src) oldest->second.src->Release();
+        if (oldest->second.morphVb) oldest->second.morphVb->Release();
+        g_morphBakes.erase(oldest);
+        ++g_morphBakeEvicted;
+    }
+}
+
+// Apply section 2.1's math into the whole-buffer copy already sitting in `dstMapped`, at
+// [firstVertex, firstVertex+numVertices) - exactly SkinAndBind's fast-path morph block, byte for
+// byte, except position/normal are written back into the SOURCE layout's own types (float3
+// position always - GetBaseMesh already refused anything else before this mesh could reach here;
+// UBYTE4N or float3 normal, matching g_curLayout.normalType) instead of into a fixed SkinnedVertex.
+static void ApplyMorphBakeDelta(unsigned char* dstMapped, UINT stride, UINT firstVertex,
+                                UINT numVertices, const MorphSource& morph) {
+    unsigned char* dst8 = dstMapped;
+    for (UINT i = 0; i < numVertices; ++i) {
+        const size_t off = static_cast<size_t>(i) * morph.stride;
+        if (off + static_cast<size_t>(morph.posOff) + 8u > morph.slice->size()) continue;
+        const unsigned char* md = morph.slice->data();
+        unsigned char* v = dst8 + (static_cast<size_t>(firstVertex) + i) * stride;
+
+        // pos += short.xyz * kMorphScale - written straight back as the float3 GetBaseMesh
+        // already required this layout's position to be.
+        const short* d = reinterpret_cast<const short*>(md + off + morph.posOff);
+        float* posOut = reinterpret_cast<float*>(v + g_curLayout.posOffset);
+        for (int k = 0; k < 3; ++k) posOut[k] += static_cast<float>(d[k]) * kMorphScale;
+
+        if (morph.nrmOff < 0 || off + static_cast<size_t>(morph.nrmOff) + 4u > morph.slice->size())
+            continue;
+        // n = normalize(n_base + 2*(ubyte/255*2-1)) - n_base decoded straight from the vertex we
+        // just copied, exactly GetBaseMesh's own UBYTE4N/FLOAT3 decode.
+        float nBase[3];
+        if (g_curLayout.normalType == D3DDECLTYPE_FLOAT3) {
+            const float* nf = reinterpret_cast<const float*>(v + g_curLayout.normalOffset);
+            nBase[0] = nf[0]; nBase[1] = nf[1]; nBase[2] = nf[2];
+        } else {
+            const unsigned char* nb = v + g_curLayout.normalOffset;
+            for (int k = 0; k < 3; ++k) nBase[k] = (static_cast<float>(nb[k]) / 255.0f) * 2.0f - 1.0f;
+        }
+        const unsigned char* nn = md + off + morph.nrmOff;
+        float mnrm[3]; float len = 0.0f;
+        for (int k = 0; k < 3; ++k) {
+            const float nm = (static_cast<float>(nn[k]) / 255.0f) * 2.0f - 1.0f;
+            mnrm[k] = nBase[k] + 2.0f * nm;
+            len += mnrm[k] * mnrm[k];
+        }
+        len = std::sqrt(len);
+        if (len > 1e-8f) for (int k = 0; k < 3; ++k) mnrm[k] /= len;
+        if (g_curLayout.normalType == D3DDECLTYPE_FLOAT3) {
+            float* nOut = reinterpret_cast<float*>(v + g_curLayout.normalOffset);
+            nOut[0] = mnrm[0]; nOut[1] = mnrm[1]; nOut[2] = mnrm[2];
+        } else {
+            unsigned char* nOut = v + g_curLayout.normalOffset;   // 4th byte (index 3) untouched
+            for (int k = 0; k < 3; ++k) {
+                int enc = static_cast<int>(std::round((mnrm[k] * 0.5f + 0.5f) * 255.0f));
+                if (enc < 0) enc = 0; else if (enc > 255) enc = 255;
+                nOut[k] = static_cast<unsigned char>(enc);
+            }
+        }
+    }
+}
+
+// Build (or return the cached) whole-source-VB copy with this draw's morph delta baked in.
+// Refuses - with g_morphBakeRefuseWhy set and the matching counter already bumped - for anything
+// not safe, exactly SkinViaFixedFunction's own refusal contract: the caller's CPU fallback runs
+// unchanged.
+IDirect3DVertexBuffer9* MorphBakeFor(IDirect3DDevice9* dev, UINT firstVertex, UINT numVertices,
+                                     const MorphSource& morph) {
+    g_morphBakeRefuseWhy = nullptr;
+    g_morphBakeLastOutcome = 0;
+    if (!morph.fresh) {
+        g_morphBakeRefuseWhy = "morph block not fresh";
+        ++g_morphBakeRefuseNotFresh;
+        return nullptr;
+    }
+    if (!g_stream0 || g_stream0Stride == 0) {
+        g_morphBakeRefuseWhy = "no stream 0";
+        ++g_morphBakeRefuseLock;
+        return nullptr;
+    }
+    const UINT stride = g_stream0Stride;
+    const UINT phase = g_stream0Offset % stride;
+
+    D3DVERTEXBUFFER_DESC desc{};
+    const auto dit = g_vbDescCache.find(g_stream0);
+    if (dit != g_vbDescCache.end()) {
+        desc = dit->second;
+    } else if (SUCCEEDED(g_stream0->GetDesc(&desc))) {
+        try { g_vbDescCache[g_stream0] = desc; } catch (...) {}
+    } else {
+        g_morphBakeRefuseWhy = "GetDesc on the source buffer failed";
+        ++g_morphBakeRefuseLock;
+        return nullptr;
+    }
+    if (desc.Usage & D3DUSAGE_DYNAMIC) {
+        g_morphBakeRefuseWhy = "source buffer is DYNAMIC";
+        ++g_morphBakeRefuseLock;
+        return nullptr;
+    }
+    if (!VertexRangeFits(g_stream0, g_stream0Offset, firstVertex, numVertices, stride)) {
+        g_morphBakeRefuseWhy = "vertex range lies outside the source buffer";
+        ++g_morphBakeRefuseLock;
+        return nullptr;
+    }
+    // A pooled buffer holding many meshes end to end is exactly the wrong shape for a
+    // WHOLE-buffer bake: one draw's morph would be baked across every OTHER mesh sharing it too.
+    if (static_cast<unsigned long long>(desc.Size) > 4ull * numVertices * stride &&
+        desc.Size > (1u << 20)) {
+        g_morphBakeRefuseWhy = "source buffer pooled across many meshes";
+        ++g_morphBakeRefusePooled;
+        return nullptr;
+    }
+
+    const UINT morphBytes = numVertices * morph.stride;
+
+    // THE SHAPE BAKE (content-addressed 2026-09-22): hash the delta BEFORE building the key - the
+    // hash IS one of the key's own inputs now, so a lookup needs it up front, not just to validate
+    // a stale entry. Still at most one real hash per (block, frame) thanks to the memo below: its
+    // own key stays (vb, base, bytes) exactly as it was, since that is what identifies WHICH slice
+    // is being read this draw, regardless of what the resulting bake key looks like.
+    unsigned seq = 0;
+    const bool haveSeq = SnoopWriteSeq(morph.vb, &seq, nullptr);
+    const unsigned long long memoKey = MorphProbeKey(morph.vb, morph.base, morphBytes);
+    unsigned long long h = 0ull;
+    {
+        auto& memo = g_morphDeltaHashMemo[memoKey];
+        if (haveSeq && memo.frame == g_frames && memo.seq == seq) {
+            h = memo.hash;
+            ++g_morphBakeHashMemoHits;
+        } else {
+            ++g_morphBakeSeqRehash;
+            h = morph.slice
+                ? AssetHashFnv1a(morph.slice->data(), morphBytes, 1469598103934665603ull) : 0ull;
+            memo.frame = g_frames;
+            memo.seq = seq;
+            memo.hash = h;
+        }
+    }
+
+    const unsigned long long key = MorphBakeKey(g_stream0, stride, phase, firstVertex, numVertices, h);
+
+    bool isRebuild = false;
+    auto it = g_morphBakes.find(key);
+    if (it != g_morphBakes.end()) {
+        MorphBake& e = it->second;
+        if (e.deltaHash == h) {
+            // Content-addressed HIT: the map key already proves the bytes match (h fed the key
+            // formula itself) - this equality only guards the combined 64-bit MorphBakeKey against
+            // the astronomically unlikely case of two different inputs folding to the same value.
+            // No snoopWriteSeq comparison needed any more: a block that moved to a new offset but
+            // kept its bytes now simply hashes to the SAME key it always did.
+            e.lastUsedFrame = g_frames;
+            if (haveSeq) e.snoopWriteSeq = seq;
+            ++g_morphBakeHits;
+            g_morphBakeLastOutcome = 1;
+            return e.baked;
+        }
+        // A genuine MorphBakeKey collision - different content folded to the same 64-bit key.
+        // g_morphBakeRebuilt now means exactly this and should sit at ~0; nonzero here is a real
+        // collision, not routine churn (the old offset-move churn is gone - a moved-but-unchanged
+        // block just HITS, above).
+        isRebuild = true;
+    }
+
+    // Per-frame budget: new builds and (now vanishingly rare) collision rebuilds are counted and
+    // capped separately against morphBakeMaxPerFrame.
+    const unsigned perFrameCap = static_cast<unsigned>(max(0, g_settings.morphBakeMaxPerFrame));
+    if (!isRebuild) {
+        if (g_morphBakeBuildsThisFrame >= perFrameCap) {
+            g_morphBakeRefuseWhy = "per-frame new-build budget spent";
+            ++g_morphBakeRefusePerFrame;
+            return nullptr;
+        }
+    } else {
+        ++g_morphBakeRebuildsThisFrame;
+        if (g_morphBakeRebuildsThisFrame > perFrameCap) {
+            if (!g_morphBakeChurnLoggedThisFrame) {
+                g_morphBakeChurnLoggedThisFrame = true;
+                Log("MORPH BAKE: %u MorphBakeKey collisions in frame %u - different delta content "
+                    "folded to the same 64-bit key, which should not happen; set morphBake=0",
+                    g_morphBakeRebuildsThisFrame, g_frames);
+            }
+            g_morphBakeRefuseWhy = "MorphBakeKey collision - per-frame rebuild budget spent";
+            ++g_morphBakeRefusePerFrame;
+            return nullptr;
+        }
+    }
+
+    // An entry always holds a valid baked buffer or does not exist at all - so a rebuild that
+    // fails anywhere below drops the whole entry (releasing src/morphVb too) rather than leaving
+    // a half-updated one with a stale byte count.
+    auto dropFailedRebuild = [&]() {
+        if (!isRebuild) return;
+        MorphBake& e2 = it->second;
+        if (e2.src) e2.src->Release();
+        if (e2.morphVb) e2.morphVb->Release();
+        g_morphBakes.erase(it);
+    };
+
+    if (isRebuild) {
+        MorphBake& e = it->second;
+        e.lastUsedFrame = g_frames;   // protect this entry from self-eviction below
+        g_morphBakeBytes -= (e.srcSize <= g_morphBakeBytes) ? e.srcSize : g_morphBakeBytes;
+        if (e.baked) { e.baked->Release(); e.baked = nullptr; }
+        // A true collision could in principle pair this key with a DIFFERENT src or morph VB than
+        // last time - keep the entry's AddRef'd pointers in sync so exactly one AddRef of whichever
+        // buffer is actually held is what TallyOrphans ever counts.
+        if (e.src != g_stream0) {
+            if (e.src) e.src->Release();
+            e.src = g_stream0;
+            if (e.src) e.src->AddRef();
+        }
+        if (e.morphVb != morph.vb) {
+            if (e.morphVb) e.morphVb->Release();
+            e.morphVb = morph.vb;
+            if (e.morphVb) e.morphVb->AddRef();
+        }
+    }
+    MorphBakeEvictFor(desc.Size);
+    const size_t capBytes = static_cast<size_t>(max(1, g_settings.morphBakeMaxMB)) * 1024ull * 1024ull;
+    if (g_morphBakeBytes + desc.Size > capBytes) {
+        g_morphBakeRefuseWhy = "bake budget";
+        ++g_morphBakeRefuseBudget;
+        dropFailedRebuild();
+        return nullptr;
+    }
+
+    const LONGLONG t0 = Now();
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* srcMapped = nullptr;
+    if (FAILED(g_stream0->Lock(0, 0, &srcMapped, D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) || !srcMapped) {
+        g_internal = false;
+        g_morphBakeRefuseWhy = "read-lock of the source buffer failed";
+        ++g_morphBakeRefuseLock;
+        dropFailedRebuild();
+        return nullptr;
+    }
+    IDirect3DVertexBuffer9* baked = nullptr;
+    const HRESULT hrCreate = dev->CreateVertexBuffer(desc.Size, D3DUSAGE_WRITEONLY, 0,
+                                                     D3DPOOL_DEFAULT, &baked, nullptr);
+    if (FAILED(hrCreate) || !baked) {
+        g_stream0->Unlock();
+        g_internal = false;
+        g_morphBakeRefuseWhy = "CreateVertexBuffer failed for the baked copy";
+        ++g_morphBakeRefuseCreate;
+        dropFailedRebuild();
+        return nullptr;
+    }
+    void* dstMapped = nullptr;
+    if (FAILED(baked->Lock(0, 0, &dstMapped, D3DLOCK_DISCARD)) || !dstMapped) {
+        baked->Release();
+        g_stream0->Unlock();
+        g_internal = false;
+        g_morphBakeRefuseWhy = "lock of the baked copy failed";
+        ++g_morphBakeRefuseLock;
+        dropFailedRebuild();
+        return nullptr;
+    }
+    memcpy(dstMapped, srcMapped, desc.Size);
+    ApplyMorphBakeDelta(static_cast<unsigned char*>(dstMapped), stride, firstVertex, numVertices, morph);
+    baked->Unlock();
+    g_stream0->Unlock();
+    g_internal = false;
+
+    const double ms = MsSince(t0);
+    g_morphBakeMsTotal += ms;
+    if (ms > g_morphBakeMsWorst) g_morphBakeMsWorst = ms;
+
+    // deltaHash is just `h`, already computed above from the same bytes - no need to hash again.
+    if (isRebuild) {
+        MorphBake& e = it->second;
+        e.baked = baked;
+        e.srcSize = desc.Size;
+        e.stride = stride;
+        e.phase = phase;
+        e.firstVertex = firstVertex;
+        e.numVertices = numVertices;
+        e.morphBase = morph.base;
+        e.morphBytes = morphBytes;
+        e.deltaHash = h;
+        if (haveSeq) e.snoopWriteSeq = seq;
+        e.lastUsedFrame = g_frames;
+        g_morphBakeBytes += desc.Size;
+        ++g_morphBakeRebuilt;
+        g_morphBakeLastOutcome = 3;
+    } else {
+        MorphBake e;
+        e.src = g_stream0; e.src->AddRef();
+        e.baked = baked;
+        e.srcSize = desc.Size;
+        e.stride = stride;
+        e.phase = phase;
+        e.firstVertex = firstVertex;
+        e.numVertices = numVertices;
+        e.morphVb = morph.vb; if (e.morphVb) e.morphVb->AddRef();
+        e.morphBase = morph.base;
+        e.morphBytes = morphBytes;
+        e.deltaHash = h;
+        if (haveSeq) e.snoopWriteSeq = seq;
+        e.lastUsedFrame = g_frames;
+        g_morphBakes.emplace(key, e);
+        g_morphBakeBytes += desc.Size;
+        ++g_morphBakeBuilt;
+        ++g_morphBakeBuildsThisFrame;
+        g_morphBakeLastOutcome = 2;
+    }
+    return baked;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -11952,7 +16422,555 @@ unsigned g_apiCharVertexCount = 0, g_apiCharTriangles = 0;
 float g_apiCharAt[3] = {0, 0, 0};
 const char* g_apiCharWhyNot = "not attempted yet";
 
+// ---------------------------------------------------------------- the skinning worker pool
+// Persistent workers, started on first use and never joined (an ASI has no orderly shutdown; the
+// threads are detached and die with the process). One job at a time: the caller publishes the
+// job and a chunk size, workers take chunks 1..N-1, the caller does chunk 0 itself, then waits.
+// The job must touch only its own vertex range and no globals - the fast path below does.
+struct SkinPool {
+    std::vector<std::thread> workers;
+    std::mutex mu;
+    std::condition_variable cvStart, cvDone;
+    std::function<void(UINT, UINT)> job;
+    UINT chunk = 0, total = 0;
+    // The generation and the pending count are atomics so both sides can SPIN on them briefly
+    // before sleeping: ~50 jobs a frame through a condition variable cost more in wake latency
+    // than the blending itself (loop 4.9 ms on four threads for ~1 ms of arithmetic).
+    std::atomic<unsigned> gen{0}, pending{0};
+    unsigned count = 0;
+    bool started = false;
+};
+SkinPool g_skinPool;
+unsigned g_skinFastDraws = 0, g_skinFastThreaded = 0;
+void SkinPoolWorker(unsigned idx) {
+    unsigned seen = 0;
+    for (;;) {
+        // spin for the next job (draws within a frame are microseconds apart), then sleep
+        unsigned g = seen;
+        for (int spin = 0; spin < 60000; ++spin) {
+            g = g_skinPool.gen.load(std::memory_order_acquire);
+            if (g != seen) break;
+            _mm_pause();
+        }
+        if (g == seen) {
+            std::unique_lock<std::mutex> lk(g_skinPool.mu);
+            g_skinPool.cvStart.wait(lk, [&] { return g_skinPool.gen.load(std::memory_order_acquire) != seen; });
+            g = g_skinPool.gen.load(std::memory_order_acquire);
+        }
+        seen = g;
+        // the job fields were written before the generation was published (release)
+        const std::function<void(UINT, UINT)>& j = g_skinPool.job;
+        UINT a = (idx + 1) * g_skinPool.chunk;
+        UINT b = a + g_skinPool.chunk;
+        if (b > g_skinPool.total) b = g_skinPool.total;
+        if (a < b) j(a, b);
+        if (g_skinPool.pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            std::lock_guard<std::mutex> lk(g_skinPool.mu);
+            g_skinPool.cvDone.notify_all();
+        }
+    }
+}
+void SkinPoolRun(const std::function<void(UINT, UINT)>& job, UINT total) {
+    unsigned want = g_settings.skinThreads > 0 ? static_cast<unsigned>(g_settings.skinThreads) : 0u;
+    if (!want) {
+        const unsigned hw = std::thread::hardware_concurrency();
+        want = hw ? hw / 2 : 1;
+        if (want < 1) want = 1;
+        if (want > 4) want = 4;
+    }
+    if (want > 8) want = 8;
+    if (!g_skinPool.started) {
+        g_skinPool.started = true;
+        g_skinPool.count = want;
+        for (unsigned i = 0; i + 1 < want; ++i) {
+            try {
+                std::thread t(SkinPoolWorker, i);
+                t.detach();
+            } catch (...) { g_skinPool.count = i + 1; break; }
+        }
+        Log("SKIN FAST PATH: policy gates all off, straight blend; %u thread%s for draws of "
+            "2048+ vertices (hardware_concurrency %u)",
+            g_skinPool.count, g_skinPool.count == 1 ? "" : "s", std::thread::hardware_concurrency());
+    }
+    const unsigned n = g_skinPool.count;
+    if (n <= 1 || total < 2048) { job(0, total); return; }
+    ++g_skinFastThreaded;
+    {
+        std::lock_guard<std::mutex> lk(g_skinPool.mu);
+        g_skinPool.job = job;
+        g_skinPool.total = total;
+        g_skinPool.chunk = (total + n - 1) / n;
+        g_skinPool.pending.store(n - 1, std::memory_order_release);
+        g_skinPool.gen.fetch_add(1, std::memory_order_acq_rel);
+    }
+    g_skinPool.cvStart.notify_all();   // for any worker that went to sleep
+    job(0, g_skinPool.chunk < total ? g_skinPool.chunk : total);
+    for (int spin = 0; spin < 200000; ++spin) {
+        if (g_skinPool.pending.load(std::memory_order_acquire) == 0) return;
+        _mm_pause();
+    }
+    std::unique_lock<std::mutex> lk(g_skinPool.mu);
+    g_skinPool.cvDone.wait(lk, [] { return g_skinPool.pending.load(std::memory_order_acquire) == 0; });
+}
+
+// ---------------------------------------------------------------- the index window probe
+// A skinned draw is served from OUR copy of its vertex window [minIndex, minIndex+numVertices)
+// in the skin ring. An index outside that window reads whatever else sits in the ring at that
+// address - a vertex of another mesh, or stale bytes - and the triangle stretches to wherever
+// that vertex is, for exactly as long as that ring content lasts. The game's own buffer holds
+// the whole mesh, so a rigid draw with the same indices renders correctly, which is why nothing
+// here ever saw it. Scanned once per index range, budgeted, reported in the frame report.
+struct IdxWinKey {
+    IDirect3DIndexBuffer9* ib; UINT start, prims, minIndex, count; int type;
+    bool operator==(const IdxWinKey& o) const {
+        return ib == o.ib && start == o.start && prims == o.prims && minIndex == o.minIndex && count == o.count && type == o.type;
+    }
+};
+struct IdxWinKeyHash {
+    size_t operator()(const IdxWinKey& k) const {
+        size_t h = reinterpret_cast<size_t>(k.ib) * 0x9E3779B1u;
+        h ^= (k.start * 0x85EBCA6Bu) + (k.prims * 0xC2B2AE35u) + (k.minIndex * 0x27D4EB2Fu) + (k.count * 0x165667B1u) + static_cast<size_t>(k.type);
+        return h;
+    }
+};
+struct IdxWinResult { bool scanned; unsigned below, above, lo, hi; };
+std::unordered_map<IdxWinKey, IdxWinResult, IdxWinKeyHash> g_idxWin;
+// NOT pinned by the 2026-09-18 g_tightWin fix below, deliberately: this cache never changes what
+// gets sent to the device, only what the INDEX WINDOW report counts, so a stale hit from a
+// recycled ib address costs a wrong number in a log line, not corrupted geometry - not a trade
+// worth pinning every index buffer this probe ever looks at for.
+unsigned g_idxWinBudgetFrame = 0, g_idxWinBudgetUsed = 0, g_idxWinReports = 0, g_idxWinWorstOver = 0;
+unsigned long long g_idxWinDrawsOut = 0, g_idxWinDrawsOk = 0, g_idxWinScans = 0, g_idxWinScanFail = 0;
+// A free measurement, already computed and previously thrown away: r.lo/r.hi is the tight
+// range a SKINNED draw's own indices actually reference, but SkinAndBind blends and uploads
+// the whole DECLARED numVertices regardless (skinned draws are deliberately excluded from
+// TightenConvertedWindow - see SkinAndBind's "vertex 0 must land on index minIndex" note).
+// Mirrors g_tightDeclaredSum/g_tightRefSum, so the two report lines read alike.
+unsigned long long g_idxWinDeclaredSum = 0, g_idxWinRefSum = 0;
+
+void ProbeIndexWindow(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, INT baseVertex, UINT minIndex,
+                      UINT numVertices, UINT startIndex, UINT prims) {
+    if (!g_settings.probeIndexWindow || !ib || !prims || !numVertices) return;
+    if (type != D3DPT_TRIANGLELIST && type != D3DPT_TRIANGLESTRIP) return;
+    const IdxWinKey key{ib, startIndex, prims, minIndex, numVertices, static_cast<int>(type)};
+    auto it = g_idxWin.find(key);
+    if (it == g_idxWin.end()) {
+        if (g_idxWinBudgetFrame != g_frames) { g_idxWinBudgetFrame = g_frames; g_idxWinBudgetUsed = 0; }
+        if (g_idxWinBudgetUsed >= 8 || g_idxWin.size() > 8192) return;
+        ++g_idxWinBudgetUsed;
+        IdxWinResult r{};
+        const UINT nIdx = (type == D3DPT_TRIANGLESTRIP) ? prims + 2 : prims * 3;
+        D3DINDEXBUFFER_DESC d{};
+        void* m = nullptr;
+        const bool wasInt = g_internal;
+        g_internal = true;
+        g_internalThread = GetCurrentThreadId();
+        if (SUCCEEDED(ib->GetDesc(&d)) && d.Size) {
+            const UINT isz = (d.Format == D3DFMT_INDEX32) ? 4 : 2;
+            if (static_cast<unsigned long long>(startIndex) * isz + static_cast<unsigned long long>(nIdx) * isz <= d.Size &&
+                SUCCEEDED(ib->Lock(startIndex * isz, nIdx * isz, &m, D3DLOCK_READONLY)) && m) {
+                r.scanned = true; r.lo = 0xFFFFFFFFu; r.hi = 0;
+                // indices are relative to baseVertex, as minIndex is
+                const UINT winLo = minIndex, winHi = minIndex + numVertices;
+                for (UINT i = 0; i < nIdx; ++i) {
+                    const unsigned v = (isz == 4) ? static_cast<const unsigned*>(m)[i] : static_cast<const unsigned short*>(m)[i];
+                    if (v < r.lo) r.lo = v;
+                    if (v > r.hi) r.hi = v;
+                    if (v < winLo) ++r.below; else if (v >= winHi) ++r.above;
+                }
+                ib->Unlock();
+                ++g_idxWinScans;
+            } else ++g_idxWinScanFail;
+        } else ++g_idxWinScanFail;
+        g_internal = wasInt;
+        try { it = g_idxWin.emplace(key, r).first; } catch (...) { return; }
+        if (r.scanned && (r.below || r.above) && g_idxWinReports < 10) {
+            ++g_idxWinReports;
+            Log("INDEX OUTSIDE THE VERTEX WINDOW #%u (skinned draw): window [%u, %u) but its %u indices span [%u, %u] - "
+                "%u below, %u above; baseVertex %d, %u prims (%s). The ring copy holds only the window, so those "
+                "triangles read another mesh's vertices.",
+                g_idxWinReports, minIndex, minIndex + numVertices, nIdx, r.lo, r.hi, r.below, r.above, baseVertex, prims,
+                type == D3DPT_TRIANGLESTRIP ? "strip" : "list");
+        }
+    }
+    const IdxWinResult& r = it->second;
+    if (!r.scanned) return;
+    g_idxWinDeclaredSum += numVertices;
+    g_idxWinRefSum += (r.hi - r.lo + 1);
+    if (r.below || r.above) {
+        ++g_idxWinDrawsOut;
+        const unsigned over = (r.hi >= minIndex + numVertices) ? (r.hi - (minIndex + numVertices) + 1) : (minIndex - r.lo);
+        if (over > g_idxWinWorstOver) g_idxWinWorstOver = over;
+    } else {
+        ++g_idxWinDrawsOk;
+    }
+}
+
+// ---------------------------------------------------------------- tighten converted window
+//
+// A building decal is submitted as 2-4 triangles with NumVertices declaring the WHOLE mesh the
+// index buffer belongs to (measured: NumVertices = 28336 for a 2-triangle draw). Remix's geometry
+// generation hash, from its own startup log, is positions, indices, texcoords, geometrydescriptor,
+// vertexlayout, vertexshader - positions and texcoords included - so that decal's identity to
+// Remix is computed over a 28,336-vertex slice of a buffer the game's own streamer rewrites many
+// times a frame. The decal's six vertices never move; its DECLARED WINDOW does, and Remix cannot
+// tell those apart because the whole-mesh window is all this shim ever forwarded.
+//
+// TEAM A's cleanroom disassembly of the engine (spec-geometry-format.md, paragraph 8.1-8.2) found
+// that SR3 itself stores a TIGHT per-range vertex bound with every draw range, validated on 8,899
+// of 8,899 ranges, and reads it back through FUN_00e72d00. The tight range already exists as
+// engine data; the D3D9 call this shim intercepts is simply never given it. This section recovers
+// the same tight range from the one thing the shim can see directly - the index buffer content -
+// rather than trying to reach into engine structures this shim does not otherwise touch.
+//
+// D3D9 SEMANTICS, worked out here so nobody has to re-derive them under a bug report: the vertex
+// an index i addresses is VB[BaseVertexIndex + i]. MinVertexIndex is the SMALLEST INDEX VALUE a
+// draw touches, NOT that value plus BaseVertexIndex, and NumVertices is (MaxVertexIndex -
+// MinVertexIndex + 1). BaseVertexIndex is added to every index the same way whether the window is
+// loose or tight, so tightening only ever changes MinVertexIndex and NumVertices; BaseVertexIndex
+// and StartIndex are carried through to the tightened call completely unchanged.
+//
+// NO INDEX BUFFER LOCK/UNLOCK HOOK EXISTS IN THIS SHIM (checked: no kSlotIBLock, no PatchVTable
+// call against an index buffer's vtable anywhere in this file - only vertex buffers are watched,
+// via kSlotVBLock/Hook_VBLock, see PatchVTable(buffer, kSlotVBLock, ...) above). So there is no
+// event that can invalidate a cached range when the game rewrites the bytes a cache entry
+// described. The only safe way to run this without that hook is to refuse every DYNAMIC index
+// buffer outright and cache ranges from non-dynamic buffers only, on the same assumption the rest
+// of this file already makes for static vertex data (see IsDynamicVB and the fresh-buffer
+// deferral above): a non-dynamic buffer is written once at load and never rewritten in place. If
+// an index-buffer Lock/Unlock hook is ever added, this is the first place that should start
+// trusting dynamic buffers too.
+struct TightWinKey {
+    IDirect3DIndexBuffer9* ib;
+    UINT start, prims;
+    int type;
+    // size/format (2026-09-18 audit fix): folded in so a DIFFERENTLY SHAPED buffer allocated at
+    // a released one's old address cannot be mistaken for it. Supplied by GetTightIbShape below,
+    // which is what keeps this from costing a GetDesc bridge round trip on every draw.
+    UINT size;
+    DWORD format;
+    bool operator==(const TightWinKey& o) const {
+        return ib == o.ib && start == o.start && prims == o.prims && type == o.type &&
+               size == o.size && format == o.format;
+    }
+};
+struct TightWinKeyHash {
+    size_t operator()(const TightWinKey& k) const {
+        size_t h = reinterpret_cast<size_t>(k.ib) * 0x9E3779B1u;
+        h ^= (k.start * 0x85EBCA6Bu) + (k.prims * 0xC2B2AE35u) + (static_cast<size_t>(k.type) * 0x27D4EB2Fu);
+        h ^= (k.size * 0x165667B1u) + (static_cast<size_t>(k.format) * 0xD3A2646Cu);
+        return h;
+    }
+};
+// ok=false is cached too, exactly as g_idxWin caches a scan failure: an unscannable slice does not
+// change shape draw to draw, so retrying it every frame would just pay the same refusal forever.
+// lo/hi are raw index VALUES with no BaseVertexIndex folded in - MinVertexIndex/MaxVertexIndex
+// exactly, per the semantics above, with nothing added by the caller.
+struct TightWinResult { bool ok; UINT lo, hi; unsigned lastUsed = 0; };   // lastUsed: frame, see tightWinEvictByAge
+std::unordered_map<TightWinKey, TightWinResult, TightWinKeyHash> g_tightWin;
+// Bounded the way g_idxWin is bounded: a decal-heavy area can introduce many distinct (ib,
+// start, prims, type) tuples in one loading burst, and letting the cache grow forever would
+// hold every tuple a whole level has ever declared. kTightWinCap is the SWEEP-eligibility
+// threshold (SweepTightWin only runs once the cache is past it, exactly like OcclMeshFor's
+// 2000), not a hard ceiling - the cache is allowed to grow past it between sweeps, because the
+// entries are cheap (four scalars each, unlike an occluder mesh's geometry) and refusing new
+// ones the moment the soft cap is touched is what made every insert-time refusal at kTightWinCap
+// pay the 32-lock budget on the SAME draws every frame. kTightWinHardCap is the actual refusal
+// point, mirroring OcclMeshFor's 20000-against-2000 ratio, and should essentially never be hit -
+// if it is, that is worth knowing (see g_tightRefuseCacheFull), not silently absorbing.
+constexpr size_t kTightWinCap = 4096;
+constexpr size_t kTightWinHardCap = kTightWinCap * 10;
+unsigned long long g_tightWinEvictions = 0;
+// New index ranges scanned this frame, budgeted like g_idxWinBudgetUsed above: first sight of a
+// new area can offer many distinct decal ranges in one frame, and bounding the Locks spent on
+// them keeps that frame from paying for the whole area's decals at once. The cache backfills over
+// the following frames instead.
+unsigned g_tightWinBudgetFrame = 0, g_tightWinBudgetUsed = 0;
+
+// Refused, and counted apart, so a silent guard is never the reason this looks inert (the project
+// has been bitten by that before: see idxWin, occlMesh). Every one of these falls back to the
+// draw's ORIGINAL declared window - nothing here can make a draw's window WIDER.
+unsigned long long g_tightRefuseNoIB = 0;        // no index buffer bound to the draw
+unsigned long long g_tightRefuseType = 0;        // primitive type not scanned here, or an empty draw - its index count would be a guess
+unsigned long long g_tightRefuseDescFail = 0;    // GetDesc on the index buffer failed
+unsigned long long g_tightRefuseDynamic = 0;     // DYNAMIC index buffer: no Lock/Unlock hook watches it, see the comment above
+unsigned long long g_tightRefuseOOB = 0;         // the index slice [startIndex, startIndex+nIdx) runs past the buffer's own byte size
+unsigned long long g_tightRefuseLockFail = 0;    // the read lock itself failed
+unsigned long long g_tightRefuseBudget = 0;      // per-frame Lock budget spent; retried next frame
+unsigned long long g_tightRefuseNotSubset = 0;   // refused because the range fell outside [minIndex, minIndex+numVertices) AND widenUnderDeclaredWindow is OFF - see below; with it ON (the default) this population is WIDENED instead (g_tightWidened) unless that would run past the buffer (g_tightRefuseWidenBeyondBuffer)
+unsigned long long g_tightRefuseCacheFull = 0;   // tightWinEvictByAge on, and the cache is past kTightWinHardCap even after sweeping - should not happen
+
+// How often the safety net's referenced range falls outside what the game declared, measured
+// every time regardless of widenUnderDeclaredWindow - this is the instrument the OUTSIDE WINDOW
+// report line and probe (in TightenConvertedWindow, below) are built from. below/above are not
+// mutually exclusive with "both": a draw counted in "both" is also counted in below and in above,
+// so below + above - both is the total, exactly what g_tightRefuseNotSubset alone used to be
+// before widening existed.
+unsigned long long g_tightOutsideBelow = 0;   // referenced lo is below the declared minIndex
+unsigned long long g_tightOutsideAbove = 0;   // referenced hi reaches at or past minIndex+numVertices
+unsigned long long g_tightOutsideBoth = 0;    // both at once
+// TASK 2's fix, counted apart from g_tightComputed (which stays the "genuine subset, narrowed or
+// unchanged" population only, exactly as before). g_tightWidenedAddedSum is verts ADDED to the
+// declared window, the mirror of g_tightRemoved above.
+unsigned long long g_tightWidened = 0;
+unsigned long long g_tightWidenedAddedSum = 0;
+// The widened window would have declared a vertex past the end of the bound stream-0 buffer.
+// Not papered over: this means the game itself is referencing vertices that do not exist, worse
+// than the original defect this feature was written to fix, so it is refused and counted apart.
+unsigned long long g_tightRefuseWidenBeyondBuffer = 0;
+
+// Measured whether or not tightenConvertedWindow is ON: this is the instrument for "how big is
+// the prize", meant to run a whole play session with the switch OFF and read the answer off the
+// report line before ever changing a pixel. Totalled here per DRAW; the report line divides by
+// frames or by g_tightComputed as appropriate. Repeated a second time for draws whose albedo
+// sampler is Decal-named (StrStrIA(...,"Decal"), the same test ProbeDecal/the overlay-offset code
+// already use) - that is the population this was written for, so its own figures must be visible
+// apart from the general ones rather than diluted into them.
+unsigned long long g_tightComputed = 0, g_tightDeclaredSum = 0, g_tightRefSum = 0, g_tightRemoved = 0;
+unsigned long long g_tightDecalComputed = 0, g_tightDecalDeclaredSum = 0, g_tightDecalRefSum = 0, g_tightDecalRemoved = 0;
+
+// TIGHT WINDOW's own per-buffer shape: ibd.Size, ibd.Format and whether it is DYNAMIC, for one
+// distinct index buffer pointer, resolved once and shared by every (ib, start, prims, type)
+// tuple that references it. GetDesc is a bridge round trip (see g_rtChannels far above -
+// "measured once per target CHANGE, never per draw"), and TightWinKey now needs a buffer's shape
+// on EVERY lookup, hit or miss, not only on first sight of a new tuple the way ibd used to be
+// fetched - this is what keeps that from costing a round trip on every draw whose window is
+// already cached.
+struct TightIbShape { UINT size; DWORD format; bool dynamic; };
+std::unordered_map<IDirect3DIndexBuffer9*, TightIbShape> g_tightIbShapes;
+
+// Referenced on first sight exactly like g_shaders/g_layouts far above (see their comments) when
+// tightenWindowPinIndexBuffers is on - nothing here is ever erased, so the reference also pins
+// the buffer for the process lifetime. This is what actually closes the defect TightWinKey's
+// size/format fields only defend against: while a buffer's shape is cached here, its address
+// cannot be freed and handed to a new, differently-shaped buffer, so a stale g_tightWin entry can
+// never be read back for the wrong object. With the switch off this cache still exists -
+// TightWinKey needs SOME shape to hash - but takes no reference, which is what makes the switch a
+// fair A/B against today's shipped behaviour rather than a weaker version of the fix.
+//
+// Returns null only when GetDesc itself fails. Not cached: that should never happen for a live
+// resource pointer, and caching a permanent failure would mean caching a shape never actually
+// read.
+const TightIbShape* GetTightIbShape(IDirect3DIndexBuffer9* ib) {
+    const auto it = g_tightIbShapes.find(ib);
+    if (it != g_tightIbShapes.end()) return &it->second;
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    D3DINDEXBUFFER_DESC ibd{};
+    const HRESULT hr = ib->GetDesc(&ibd);
+    g_internal = wasInt;
+    if (FAILED(hr)) return nullptr;
+    if (g_settings.tightenWindowPinIndexBuffers) ib->AddRef();
+    return &g_tightIbShapes.emplace(
+        ib, TightIbShape{ibd.Size, static_cast<DWORD>(ibd.Format),
+                        (ibd.Usage & D3DUSAGE_DYNAMIC) != 0}).first->second;
+}
+
+// Computes the tight window a RIGID, CONVERTED, INDEXED draw's own indices actually reference.
+// Always updates the counters above, regardless of g_settings.tightenConvertedWindow - the caller
+// decides whether to act on *outMinIndex/*outNumVertices, but the measurement runs every time so
+// a session with the switch off still reports the size of what tightening it would remove.
+// Returns false, leaving the outputs untouched, on every refusal reason named above; the caller's
+// own fallback is simply to keep using the draw's original minIndex/numVertices. Can also return
+// true with a WIDENED *outMinIndex/*outNumVertices - wider than the game's own declared window -
+// when the referenced range falls outside it and widenUnderDeclaredWindow is on; that widened
+// window is always checked against the real vertex buffer first (see g_tightRefuseWidenBeyondBuffer
+// in TightenConvertedWindow's body), so a true return never claims a vertex that does not exist.
+bool TightenConvertedWindow(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, INT baseVertex,
+                            UINT minIndex, UINT numVertices, UINT startIndex, UINT primitiveCount,
+                            bool albedoIsDecal, UINT* outMinIndex, UINT* outNumVertices) {
+    if (!ib) { ++g_tightRefuseNoIB; return false; }
+    // Triangle list, strip AND fan: a strip's and a fan's index COUNT is the same formula
+    // (VertsForPrimitives already gives prims+2 for both), and the referenced index VALUES for
+    // either one are simply the whole contiguous slice [startIndex, startIndex+nIdx) - winding
+    // decides how those indices group into triangles, not which vertices they touch, and a
+    // min/max scan does not care about winding. Anything else (points, lines, or a type this
+    // function does not name) is refused rather than guessed at.
+    if (type != D3DPT_TRIANGLELIST && type != D3DPT_TRIANGLESTRIP && type != D3DPT_TRIANGLEFAN) {
+        ++g_tightRefuseType;
+        return false;
+    }
+    const UINT nIdx = VertsForPrimitives(type, primitiveCount);
+    if (!nIdx) { ++g_tightRefuseType; return false; }
+
+    // 2026-09-18 AUDIT FIX: the shape has to be known before the cache can even be LOOKED UP now
+    // that it is part of the key (TightWinKey above), not only on a miss the way ibd used to be
+    // fetched. GetTightIbShape is what keeps that from costing a GetDesc bridge round trip on
+    // every draw.
+    const TightIbShape* shape = GetTightIbShape(ib);
+    if (!shape) { ++g_tightRefuseDescFail; return false; }
+
+    const TightWinKey key{ib, startIndex, primitiveCount, static_cast<int>(type),
+                          shape->size, shape->format};
+    auto it = g_tightWin.find(key);
+    if (it == g_tightWin.end()) {
+        // Cache MISS only, bracketed by PH_TIGHTEN: a hit falls straight through to the return
+        // below and must stay completely outside this timer, so tightening a warm frame keeps
+        // costing nothing. This pays a synchronous D3DLOCK_READONLY Lock/Unlock round trip, up
+        // to 32 times a frame, and until the 2026-09-18 PROFILE audit nothing timed it at all -
+        // it was invisible inside PH_PROBES, which is where this cost used to be attributed.
+        LONGLONG tT = Now();
+        if (g_tightWinBudgetFrame != g_frames) { g_tightWinBudgetFrame = g_frames; g_tightWinBudgetUsed = 0; }
+        if (g_tightWinBudgetUsed >= 32) { ++g_tightRefuseBudget; PhaseAdd(PH_TIGHTEN, tT); return false; }
+        ++g_tightWinBudgetUsed;
+
+        TightWinResult r{false, 0, 0};
+        if (shape->dynamic) {
+            ++g_tightRefuseDynamic;
+        } else {
+            const UINT isz = (shape->format == D3DFMT_INDEX32) ? 4 : 2;
+            if (static_cast<unsigned long long>(startIndex) * isz + static_cast<unsigned long long>(nIdx) * isz > shape->size) {
+                ++g_tightRefuseOOB;
+            } else {
+                const bool wasInt = g_internal;
+                g_internal = true;
+                g_internalThread = GetCurrentThreadId();
+                void* m = nullptr;
+                if (SUCCEEDED(ib->Lock(startIndex * isz, nIdx * isz, &m, D3DLOCK_READONLY)) && m) {
+                    UINT lo = 0xFFFFFFFFu, hi = 0;
+                    for (UINT i = 0; i < nIdx; ++i) {
+                        const unsigned v = (isz == 4) ? static_cast<const unsigned*>(m)[i]
+                                                       : static_cast<const unsigned short*>(m)[i];
+                        if (v < lo) lo = v;
+                        if (v > hi) hi = v;
+                    }
+                    ib->Unlock();
+                    r.ok = true; r.lo = lo; r.hi = hi;
+                } else {
+                    ++g_tightRefuseLockFail;
+                }
+                g_internal = wasInt;
+            }
+        }
+        if (g_settings.tightWinEvictByAge) {
+            // No per-insert eviction: SweepTightWin (Hook_Present, every 300 frames, the same
+            // cadence KickOcclusionJob ages out g_occlMeshes) reclaims whatever has gone unused
+            // for a while instead. Refused past the hard ceiling only - see its comment above,
+            // this should not happen in practice.
+            if (g_tightWin.size() > kTightWinHardCap) { ++g_tightRefuseCacheFull; PhaseAdd(PH_TIGHTEN, tT); return false; }
+        } else if (g_tightWin.size() >= kTightWinCap) {
+            g_tightWin.erase(g_tightWin.begin());
+            ++g_tightWinEvictions;
+        }
+        try { it = g_tightWin.emplace(key, r).first; } catch (...) { PhaseAdd(PH_TIGHTEN, tT); return false; }
+        PhaseAdd(PH_TIGHTEN, tT);
+    }
+    // Stamped here rather than in each branch above, so both a HIT and a freshly inserted
+    // MISS get exactly the same touch - this is the one line SweepTightWin relies on to know
+    // an entry is still wanted.
+    it->second.lastUsed = g_frames;
+    const TightWinResult& r = it->second;
+    if (!r.ok) return false;
+
+    // MinVertexIndex is the index VALUE r.lo itself, never r.lo relative to anything else - see
+    // the D3D9 semantics above. NumVertices covers up to and including the highest value read.
+    const UINT tMin = r.lo;
+    const UINT tNum = r.hi - r.lo + 1;
+
+    // THE SAFETY NET. [tMin, tMin+tNum) is what the indices actually reference; when it is not
+    // entirely inside [minIndex, minIndex+numVertices), what the game declared, something has to
+    // give: either the window is corrected to cover both, or the draw is refused rather than
+    // guessed at, because silent geometry corruption dressed up as an optimisation is the
+    // alternative. below/above/both are measured every time this fires, whether or not
+    // widenUnderDeclaredWindow goes on to act on it - see the OUTSIDE WINDOW report line, which is
+    // what named this population before this function ever corrected anything.
+    const unsigned long long declaredEnd = static_cast<unsigned long long>(minIndex) + numVertices;
+    const unsigned long long refEnd = static_cast<unsigned long long>(tMin) + tNum;
+    const bool below = tMin < minIndex;
+    const bool above = refEnd > declaredEnd;
+    if (below || above) {
+        if (below) ++g_tightOutsideBelow;
+        if (above) ++g_tightOutsideAbove;
+        if (below && above) ++g_tightOutsideBoth;
+        // Capped at 12 and re-armed by the capture key, exactly like ProbeDecalDraw/ProbeHudDraw
+        // (RearmCaptures resets g_outsideWinReports to 0 alongside them). Everything printed here
+        // already describes THIS draw: g_curPS, g_curDrawVertexCount/g_curDrawPrimCount and
+        // g_lastWorld are all stamped for it earlier in Hook_DrawIndexedPrimitive, the same fields
+        // ProbeDecalDraw reads. Fires for the whole population, not only the fraction still
+        // refused below - naming what these draws ARE is the point, not just what happens to them.
+        if (g_outsideWinReports < 12) {
+            ++g_outsideWinReports;
+            const unsigned belowBy = below ? (minIndex - tMin) : 0;
+            const unsigned aboveBy = above ? static_cast<unsigned>(refEnd - declaredEnd) : 0;
+            Log("    OUTSIDE WINDOW probe #%u: albedoSampler='%s' lowest='%s'@%d | verts=%u prims=%u "
+                "at(%.2f %.2f %.2f) | declared=[%u,%u) referenced=[%u,%u] | outside: below=%u above=%u "
+                "| stream0 dynamic=%s, index format=%s",
+                g_outsideWinReports, g_curPS.albedoSampler, g_curPS.lowestSampler, g_curPS.lowestSamplerReg,
+                g_curDrawVertexCount, g_curDrawPrimCount, g_lastWorld._41, g_lastWorld._42, g_lastWorld._43,
+                minIndex, minIndex + numVertices, r.lo, r.hi, belowBy, aboveBy,
+                IsDynamicVB(g_stream0) ? "yes" : "no",
+                shape->format == D3DFMT_INDEX32 ? "INDEX32" : "INDEX16");
+        }
+
+        if (!g_settings.widenUnderDeclaredWindow) {
+            ++g_tightRefuseNotSubset;
+            return false;
+        }
+
+        // WIDEN instead of refuse: the corrected window covers both what the game declared and
+        // what the indices actually reference. BaseVertexIndex and StartIndex are not touched
+        // here - the caller keeps passing its own baseVertex/startIndex through unchanged, exactly
+        // as the narrowing path above already does.
+        const UINT wMin = min(minIndex, tMin);
+        const unsigned long long wEnd = max(declaredEnd, refEnd);
+
+        // CLAMP TO THE BUFFER. The vertex actually addressed by index value v is BaseVertexIndex +
+        // v, so the highest legal index value depends on baseVertex too, not only on the buffer's
+        // own size - VertexRangeFits already does exactly this arithmetic for every read-lock of a
+        // game vertex buffer in this shim (see its own comment on the baseVertex/UINT overflow
+        // trap). If the corrected window would still reach past the end of the bound stream-0
+        // buffer, this is not a window chosen too small: it is the game referencing vertices that
+        // DO NOT EXIST, worse than the defect this feature fixes, and it must be refused and
+        // counted apart rather than papered over.
+        if (wEnd - wMin > 0xFFFFFFFFull) { ++g_tightRefuseWidenBeyondBuffer; return false; }
+        const UINT wNum = static_cast<UINT>(wEnd - wMin);
+        const INT wFirstSigned = baseVertex + static_cast<INT>(wMin);
+        if (wFirstSigned < 0 ||
+            !VertexRangeFits(g_stream0, g_stream0Offset, static_cast<UINT>(wFirstSigned), wNum, g_stream0Stride)) {
+            ++g_tightRefuseWidenBeyondBuffer;
+            return false;
+        }
+
+        ++g_tightWidened;
+        g_tightWidenedAddedSum += (wNum - numVertices);
+        *outMinIndex = wMin;
+        *outNumVertices = wNum;
+        return true;
+    }
+
+    ++g_tightComputed;
+    g_tightDeclaredSum += numVertices;
+    g_tightRefSum += tNum;
+    g_tightRemoved += (numVertices - tNum);
+    if (albedoIsDecal) {
+        ++g_tightDecalComputed;
+        g_tightDecalDeclaredSum += numVertices;
+        g_tightDecalRefSum += tNum;
+        g_tightDecalRemoved += (numVertices - tNum);
+    }
+    *outMinIndex = tMin;
+    *outNumVertices = tNum;
+    return true;
+}
+
+// Age out g_tightWin entries the streamer has moved past, the same way KickOcclusionJob ages
+// out g_occlMeshes: checked every 300 frames, only once the cache is past its soft cap, erasing
+// whatever has not been looked up (hit OR miss - TightenConvertedWindow's single, unconditional
+// "it->second.lastUsed = g_frames" after the cache lookup covers both) in the last 900. Called
+// from Hook_Present,
+// after KickOcclusionJob, for the same reason KickOcclusionJob itself runs there: end of frame,
+// once per frame, nothing else needs to run between the sweep and the next draw.
+void SweepTightWin() {
+    if (!g_settings.tightWinEvictByAge) return;
+    if ((g_frames % 300) != 0 || g_tightWin.size() <= kTightWinCap) return;
+    for (auto it = g_tightWin.begin(); it != g_tightWin.end();)
+        if (g_frames > it->second.lastUsed + 900) { it = g_tightWin.erase(it); ++g_tightWinEvictions; }
+        else ++it;
+}
+
 bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numVertices) {
+    LONGLONG tS = Now();
     g_skinRefuseWhy = nullptr;
     if (!g_skinVB || numVertices == 0) { g_skinRefuseWhy = "no ring buffer"; return false; }
     // Negative baseVertex is legal in D3D9 and would address before the buffer.
@@ -12127,11 +17145,22 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
     //
     // Read back only for the first few draws: GetVertexShaderConstantF crosses the 32-to-64-bit
     // bridge and is far too expensive to do per draw.
-    if (g_shadowCheckReports < 12 && !g_curVS.usesBlendWeights && !mesh->verts.empty()) {
+    //
+    // 2026-09-18 AUDIT FIX: the cap used to be tested against g_shadowCheckReports, which only
+    // ever incremented in the MISMATCH branch below - so if the shadow ever agreed with the
+    // device even once, the count would never reach 12 and this stayed armed forever, paying its
+    // two round trips on every single-bone skinned draw for the rest of the process. Inert today
+    // only because the answer has been 12 of 12 mismatched, every run - a trap set for the first
+    // session where it agrees. g_shadowCheckRuns increments once per ACTUAL round trip, win or
+    // lose, so the cap disarms it after 12 runs regardless of outcome. Also gated behind
+    // shadowCheckProbe now, OFF by default: this has already produced its answer.
+    if (g_settings.shadowCheckProbe && g_shadowCheckRuns < 12 && !g_curVS.usesBlendWeights && !mesh->verts.empty()) {
         const unsigned b0 = mesh->verts[0].idx[0];
         if (b0 < static_cast<unsigned>(kBonesMax)) {
+            ++g_shadowCheckRuns;
             float dev4[12] = {}, obj4[12] = {};
             g_internal = true;
+            g_internalThread = GetCurrentThreadId();
             const HRESULT h1 = dev->GetVertexShaderConstantF(boneBase + b0 * kRegsPerBone, dev4, 3);
             const HRESULT h2 = dev->GetVertexShaderConstantF(kRegObjTM, obj4, 3);
             g_internal = false;
@@ -12187,6 +17216,87 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
     }
     double cSkin[3] = {}, cBind[3] = {};
     unsigned cN = 0;
+    // THE FAST PATH. Identical output to the loop below whenever the four policy gates are off
+    // (the report has shown each of them dropping 0 influences/frame): no per-influence checks,
+    // no per-vertex counters, and safe to split across threads because it touches nothing but
+    // its own range of `out`. The reference loop below stays for when a policy is on.
+    PhaseAdd(PH_SKIN_PRE, tS);
+    const bool fastPath = g_settings.skinFast && !g_settings.rejectStaleBones &&
+                          !g_settings.paletteSetupScope && !g_settings.vehicleBonesOff &&
+                          !g_settings.clampBonesToUpload;
+    if (fastPath) {
+        const bool fReads = g_curVS.usesBlendIndices || !g_settings.skinRequireBoneDecl;
+        const int fInfl = !fReads ? 0 : (g_curVS.usesBlendWeights ? 4 : 1);
+        if (!fReads) ++g_skinNoBoneDecl;
+        else if (fInfl == 1) ++g_skinSingleBone;
+        else ++g_skinFourBone;
+        const BaseVertex* fv = mesh->verts.data();
+        const float* fShift = (g_clothRemap && g_clothRemap->shiftRaw.size() >= numVertices)
+                                  ? g_clothRemap->shiftRaw.data() : nullptr;
+        auto fastRange = [&, fv, fShift, fInfl](UINT i0, UINT i1) {
+            for (UINT i = i0; i < i1; ++i) {
+                const BaseVertex& b = fv[i];
+                float mpos[3] = {b.pos[0], b.pos[1], b.pos[2]};
+                float mnrm[3] = {b.nrm[0], b.nrm[1], b.nrm[2]};
+                if (morph.active) {
+                    const size_t off = static_cast<size_t>(i) * morph.stride;
+                    const unsigned char* md = morph.slice->data();
+                    if (morph.fresh && off + morph.posOff + 8u <= morph.slice->size()) {
+                        const short* d = reinterpret_cast<const short*>(md + off + morph.posOff);
+                        for (int k = 0; k < 3; ++k) mpos[k] += static_cast<float>(d[k]) * kMorphScale;
+                        if (morph.nrmOff >= 0 &&
+                            off + static_cast<size_t>(morph.nrmOff) + 4u <= morph.slice->size()) {
+                            const unsigned char* nn = md + off + morph.nrmOff;
+                            float len = 0.0f;
+                            for (int k = 0; k < 3; ++k) {
+                                const float nm = (static_cast<float>(nn[k]) / 255.0f) * 2.0f - 1.0f;
+                                mnrm[k] = b.nrm[k] + 2.0f * nm;
+                                len += mnrm[k] * mnrm[k];
+                            }
+                            len = std::sqrt(len);
+                            if (len > 1e-8f) for (int k = 0; k < 3; ++k) mnrm[k] /= len;
+                        }
+                    }
+                }
+                float m[12] = {};
+                float sum = 0.0f;
+                for (int k = 0; k < fInfl; ++k) {
+                    const float wk = (fInfl == 1) ? 1.0f : b.w[k];
+                    if (wk == 0.0f) continue;
+                    const unsigned bone = b.idx[k];
+                    if (bone >= safeBones) continue;
+                    const float* r = palette + bone * kRegsPerBone * 4;
+                    for (int e = 0; e < 12; ++e) m[e] += wk * r[e];
+                    sum += wk;
+                }
+                SkinnedVertex& o = out[i];
+                const float shift = fShift ? fShift[i] : 0.0f;
+                if (sum <= 0.0f) {
+                    o.pos[0] = mpos[0]; o.pos[1] = mpos[1]; o.pos[2] = mpos[2];
+                    o.nrm[0] = mnrm[0]; o.nrm[1] = mnrm[1]; o.nrm[2] = mnrm[2];
+                    o.uv[0] = b.uv[0] + shift;
+                    o.uv[1] = b.uv[1];
+                    continue;
+                }
+                const float inv = 1.0f / sum;
+                for (int e = 0; e < 12; ++e) m[e] *= inv;
+                for (int r = 0; r < 3; ++r)
+                    o.pos[r] = m[r * 4 + 0] * mpos[0] + m[r * 4 + 1] * mpos[1] +
+                               m[r * 4 + 2] * mpos[2] + m[r * 4 + 3];
+                float n[3];
+                for (int r = 0; r < 3; ++r)
+                    n[r] = m[r * 4 + 0] * mnrm[0] + m[r * 4 + 1] * mnrm[1] + m[r * 4 + 2] * mnrm[2];
+                const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                const float ninv = (len > 1e-8f) ? 1.0f / len : 0.0f;
+                for (int r = 0; r < 3; ++r) o.nrm[r] = n[r] * ninv;
+                o.uv[0] = b.uv[0] + shift;
+                o.uv[1] = b.uv[1];
+            }
+        };
+        SkinPoolRun(fastRange, numVertices);
+        ++g_skinFastDraws;
+        g_skinVertsTotal += numVertices;
+    } else
     for (UINT i = 0; i < numVertices; ++i) {
         const BaseVertex& b = mesh->verts[i];
         // pos = base + delta/8192, and NORMAL1 replaces NORMAL0 - the order and the scale the
@@ -12523,6 +17633,7 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
             out[numVertices + j].uv[0] = out[srcV].uv[0] - home + g_clothRemap->dupShiftRaw[j];
         }
     }
+    PhaseAdd(PH_SKIN_LOOP, tS);
     g_skinVB->Unlock();
 
     // Only on the dump frame: measuring a bounding box over every skinned vertex of every draw
@@ -12744,6 +17855,8 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
     }
 
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    PhaseAdd(PH_SKIN_POST, tS);
     g_origSetStreamSource(dev, 0, g_skinVB, g_skinRingPos - base, stride);
     g_origSetVertexDeclaration(dev, nullptr);
     dev->SetFVF(kSkinnedFVF);
@@ -12757,6 +17870,7 @@ bool SkinAndBind(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numV
 
 void UnbindSkinned(IDirect3DDevice9* dev) {
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     g_origSetStreamSource(dev, 0, g_stream0, g_stream0Offset, g_stream0Stride);
     g_origSetVertexDeclaration(dev, g_curDecl);
     g_internal = false;
@@ -12780,12 +17894,761 @@ void CreateSkinBuffer(IDirect3DDevice9* dev) {
     // NOOVERWRITE/DISCARD locks avoid stalling on the GPU. Not DrawIndexedPrimitiveUP - that
     // path is recorded in sr2-fork.md as a null-pointer crash inside the Remix bridge server.
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     const HRESULT hr = dev->CreateVertexBuffer(g_skinRingBytes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
                                                0, D3DPOOL_DEFAULT, &g_skinVB, nullptr);
     g_internal = false;
     Log("skinning: vertex buffer %s (%u KB, %u-byte vertices)",
         SUCCEEDED(hr) ? "created" : "FAILED", g_skinRingBytes / 1024,
         static_cast<unsigned>(sizeof(SkinnedVertex)));
+}
+
+// ---------------------------------------------------------------- GPU (fixed-function) skinning
+//
+// skinViaFixedFunction, OFF by default. The alternative to CPU skinning above: instead of
+// blending every vertex on the CPU into a ring buffer, leave the game's own vertex buffer bound
+// exactly as it is and let the FIXED-FUNCTION PIPELINE do the blend, through D3D9's indexed
+// vertex blending (D3DRS_VERTEXBLEND / D3DRS_INDEXEDVERTEXBLENDENABLE). CPU skinning is 88% of
+// this shim's frame cost (see the PROFILE line's "skin" phase), and it also means Remix hashes
+// the ALREADY-POSED geometry every frame - a moving hash, which is what the compatibility wiki
+// means by "software animation will flicker". Hardware skinning keeps Remix's geometry hash on
+// the BIND POSE (the hash is computed before vertex capture replaces the input, which is "should
+// be stable" in the same wiki entry) - so this is a plausible fix for the character stutter
+// class as well as a large performance win.
+//
+// WHY THIS WAS THOUGHT CLOSED, AND WHY IT ISN'T: dxvk-remix's own D3DCAPS9 report gives
+// MaxVertexBlendMatrixIndex = 8 (see the Log call beside g_uvStream's own device-caps init,
+// above HookDevice's closing brace), which reads as "at most 9 bone matrices" and closed this
+// route the first time it was considered. That cap describes something else: Remix's fixed-
+// function skinning path stages `maxBone + 1` matrices starting at D3DTS_WORLDMATRIX(0),
+// tracking the highest world-matrix index the game has actually SET (defaulting to 255), and
+// both its SetTransform handler and the 32-to-64 bridge validate transform-state indices up to
+// WORLDMATRIX(255). A 58-bone palette (this shim tracks up to kBonesMax=64) fits inside that
+// with room to spare; the reported cap never gated it.
+//
+// THE APPROACH: leave stream 0 (the game's own bind-pose buffer) bound untouched, add a second
+// stream carrying NORMALISED float weights and remapped byte indices (built once per source
+// vertex buffer, below), stage the bones this mesh actually uses as world matrices with the
+// object transform folded in (see SkinViaFixedFunction's own comment for the multiplication
+// order and how it was determined), and enable D3DVBF_3WEIGHTS indexed blending for the draw.
+// Refuses - loudly, with a counted reason - for anything this first version does not attempt:
+// cloth, morph, a declaration this decoder cannot read, a bone the shader's own palette register
+// cannot reach. CPU skinning is the fallback for every one of those, unchanged.
+
+// The device stream the weight/index side buffer binds to, and whether there was room for it
+// alongside the uv stream. Set once in HookDevice, from D3DCAPS9.MaxStreams, exactly like
+// g_uvStream itself.
+DWORD g_skinFFStream = kSkinFFStreamDefault;
+bool g_skinFFStreamsOk = false;
+
+// ---- the weight/index side stream ----
+//
+// One converted buffer per SOURCE VERTEX BUFFER, covering every vertex it holds - not windowed
+// to one draw's [firstVertex, firstVertex+numVertices) range the way the bind-pose cache
+// (BaseMesh, above) is. That is deliberate: a device stream is addressed as
+// (streamOffset + (baseVertex+rawIndex)*ourStride), the SAME baseVertex D3D9 applies to every
+// bound stream including stream 0 - so entry i of this buffer must BE source vertex i for that
+// arithmetic to land on the right vertex regardless of which window a later draw asks for.
+// Windowing it per draw, the way the CPU skin RING does, only works there because the ring
+// controls its own write position and can place each mesh's data at or past
+// (baseVertex+minIndex)*stride (see SkinAndBind's "vertex 0 must land on index minIndex" note,
+// above); a long-lived buffer keyed by draw range the same way BaseMesh is would need a
+// DIFFERENT stream offset for every draw that shares the source buffer, and a stream offset is
+// one number for the whole draw call. Same mechanism and caching discipline as the UV side
+// stream (g_uvStream, UvBufferFor, UvKey) otherwise: one buffer per source range (here, the
+// whole buffer, like UvBufferFor's own STATIC-source branch), cached, and invalidated the moment
+// the game writes the source again - DrainPendingInvalidations calls InvalidateSkinFFBuffers
+// exactly where it already calls InvalidateUvBuffers/InvalidateBaseMeshes.
+//
+// SR3's skinned source buffers are STATIC (measured 2026-08-18: WRITEONLY, no DYNAMIC bit - see
+// the CPU skinning section's own comment, above), so there is no dynamic-ring case to support
+// here: GetBaseMesh already refuses a DYNAMIC source outright, and a hardware-skinned draw whose
+// bind pose GetBaseMesh could not decode never reaches this function at all.
+struct SkinFFBuffer {
+    IDirect3DVertexBuffer9* src = nullptr;   // referenced: the key is its address
+    IDirect3DVertexBuffer9* buf = nullptr;   // BLENDWEIGHT(float3) + BLENDINDICES(ubyte4), one entry per source vertex
+    UINT vertexCount = 0;
+    // The source stride this was decoded with, checked on every cache hit - GetBaseMesh's own
+    // hasUv2 comment explains why a shared buffer can be touched by more than one declaration
+    // across the draws that use it (typically a reduced prepass declaration first); a stride
+    // mismatch here means exactly that has happened, and the entry is rebuilt rather than trusted.
+    UINT stride = 0;
+    // FIX 2 (skinFFHonourStreamOffset): the byte g_stream0Offset was split into when this entry
+    // was decoded - phase = offset % stride, folded into the decode below; base = offset / stride
+    // is NOT part of this, on purpose, because it does not change which bytes get decoded, only
+    // where a draw BINDS this entry (SkinFFBufferFor's own out-param, g_skinFFBindOffset, carries
+    // base instead) - so two draws into the same pooled buffer at different whole-vertex offsets
+    // but the SAME phase correctly share one decoded entry here.
+    UINT phase = 0;
+    // FIX 5 (skinFFFollowShaderInfluences): whether THIS entry was decoded in single-bone mode
+    // (weight [1,0,0], index 0 only) rather than the full four-influence decode. A declaration
+    // without BLENDWEIGHT is always single (see SkinFFBufferFor's own rigidSingleBone), but a
+    // declaration WITH real weight data can still be asked for in single mode by a shader that
+    // ignores BLENDWEIGHT entirely - a different decode of the SAME source buffer, so it needs
+    // its own cache entry rather than overwriting the four-bone one.
+    bool single = false;
+    bool ok = false;
+    const char* refuseWhy = nullptr;
+};
+// One VB can now hold several entries - one per distinct (stride, phase) this shim has actually
+// seen bound at stream 0, small in practice (a handful of declarations/offsets per buffer, not
+// unbounded). See SkinFFBufferFor's own comment on why phase, not the whole offset, is the key.
+std::unordered_map<IDirect3DVertexBuffer9*, std::vector<SkinFFBuffer>> g_skinFFBuffers;
+constexpr UINT kSkinFFBytesPerVertex = 16;   // float3 weight (12) + ubyte4 index (4)
+unsigned g_skinFFBuildOk = 0, g_skinFFBuildFail = 0;
+unsigned g_skinFFBuildFailLayout = 0, g_skinFFBuildFailDesc = 0, g_skinFFBuildFailCreate = 0,
+        g_skinFFBuildFailLock = 0;
+// FIX 2's out-param, exactly like g_uvBindOffset: the stream offset (base*kSkinFFBytesPerVertex)
+// this call's side buffer must be BOUND at, read immediately by the caller before anything else
+// can overwrite it.
+UINT g_skinFFBindOffset = 0;
+// Measured whether or not the switch is on - the denominator that says how often the bug this
+// fix targets could even fire. Incremented once per FF-SKINNED draw (SkinViaFixedFunction's own
+// success path), not per SkinFFBufferFor call, so it matches "FF-skinned draws" exactly.
+unsigned g_skinFFNonZeroOffset = 0, g_skinFFNonZeroOffsetPhase = 0;
+// FIX 1's counter: a reused-palette draw (the sameStage branch, below) that needed WORLDMATRIX(0)
+// restaged because its mesh uses bone 0.
+unsigned g_skinFFBone0Restaged = 0;
+
+void InvalidateSkinFFBuffers(IDirect3DVertexBuffer9* vb) {
+    const auto it = g_skinFFBuffers.find(vb);
+    if (it == g_skinFFBuffers.end()) return;
+    // FIX 2: release EVERY (stride, phase) entry this buffer holds, not only one - the map now
+    // holds a small vector per VB instead of a single entry.
+    for (auto& e : it->second) {
+        if (e.src) e.src->Release();
+        if (e.buf) e.buf->Release();
+    }
+    g_skinFFBuffers.erase(it);
+}
+
+// Builds (or returns the cached) side buffer for g_stream0 as this draw has it bound. Only ever
+// called after GetBaseMesh has already decoded a bind pose from the SAME g_curLayout (see
+// SkinViaFixedFunction below), so the weight/index element types are already known good for this
+// draw - the gate here is repeated anyway because this cache is keyed on the buffer alone (to
+// get the whole-buffer addressing described above) rather than on the declaration, so it has to
+// stand on its own.
+IDirect3DVertexBuffer9* SkinFFBufferFor(IDirect3DDevice9* dev, bool wantSingle) {
+    g_skinFFBindOffset = 0;
+    if (!g_stream0 || g_stream0Stride == 0) { ++g_skinFFBuildFailLayout; ++g_skinFFBuildFail; return nullptr; }
+
+    // FIX 2 (skinFFHonourStreamOffset): D3D9 addresses stream 0 at g_stream0Offset + n*stride for
+    // vertex n (the SAME rule for every bound stream, including this side one) - but this buffer
+    // is decoded WHOLE, once, entry j from byte j*stride, which only equals vertex j's bytes when
+    // g_stream0Offset is 0. Split the offset instead: phase = offset % stride shifts where the
+    // decode STARTS (folded into every read below, and into the cache lookup just below); base =
+    // offset / stride does not change the decode at all, only where the draw must BIND this
+    // buffer (entry j then holds vertex (j - base) - see the struct's own comment on why base is
+    // not part of the key), returned through g_skinFFBindOffset for the caller to bind at. Off:
+    // phase = base = 0, byte-identical to the old whole-buffer, offset-blind addressing.
+    const UINT phase = g_settings.skinFFHonourStreamOffset ? (g_stream0Offset % g_stream0Stride) : 0;
+    const UINT base = g_settings.skinFFHonourStreamOffset ? (g_stream0Offset / g_stream0Stride) : 0;
+    g_skinFFBindOffset = base * kSkinFFBytesPerVertex;
+
+    // FIX 5 (skinFFFollowShaderInfluences): a declaration without BLENDWEIGHT is always
+    // single-bone (GetBaseMesh's own rigidSingleBone, recomputed below from g_curLayout directly
+    // since the `L` alias is not in scope yet) regardless of what the caller asked for - there is
+    // no per-vertex weight data to decode a four-bone buffer from. See SkinViaFixedFunction's own
+    // singleBone comment for why the caller asks in the first place.
+    const bool single = (g_settings.skinRigidSingleBone && g_curLayout.blendWeightType < 0) ||
+                        (g_settings.skinFFFollowShaderInfluences && wantSingle);
+
+    std::vector<SkinFFBuffer>& entries = g_skinFFBuffers[g_stream0];
+    for (const auto& e : entries)
+        if (e.stride == g_stream0Stride && e.phase == phase && e.single == single)
+            return e.ok ? e.buf : nullptr;
+
+    const VertexLayout& L = g_curLayout;
+    const int stride = static_cast<int>(g_stream0Stride);
+    auto fits = [&](int off, int type) {
+        const int size = DeclTypeSize(type);
+        return size > 0 && off >= 0 && off + size <= stride;
+    };
+    // Mirrors GetBaseMesh's own gate exactly, rigidSingleBone special case included (a
+    // declaration that carries BLENDINDICES and no BLENDWEIGHT at all is rigid single-bone
+    // attachment when the setting is on - see GetBaseMesh's own long comment on it, above).
+    const bool rigidSingleBone = g_settings.skinRigidSingleBone && (L.blendWeightType < 0);
+    const bool weightOk = rigidSingleBone ||
+        ((L.blendWeightType == D3DDECLTYPE_UBYTE4 || L.blendWeightType == D3DDECLTYPE_UBYTE4N ||
+          L.blendWeightType == D3DDECLTYPE_D3DCOLOR || L.blendWeightType == D3DDECLTYPE_FLOAT4) &&
+         fits(L.blendWeightOffset, L.blendWeightType));
+    const bool indexOk = (L.blendIndexType == D3DDECLTYPE_UBYTE4 || L.blendIndexType == D3DDECLTYPE_D3DCOLOR) &&
+                         fits(L.blendIndexOffset, L.blendIndexType);
+    SkinFFBuffer entry;
+    entry.stride = g_stream0Stride;
+    entry.phase = phase;
+    entry.single = single;
+    if (!weightOk || !indexOk) {
+        ++g_skinFFBuildFailLayout; ++g_skinFFBuildFail;
+        entry.src = g_stream0; entry.src->AddRef();
+        entry.ok = false; entry.refuseWhy = "declaration does not carry weights/indices this decoder reads";
+        entries.push_back(entry);
+        return nullptr;
+    }
+
+    D3DVERTEXBUFFER_DESC vbd{};
+    if (FAILED(g_stream0->GetDesc(&vbd)) || (vbd.Usage & D3DUSAGE_DYNAMIC) ||
+        vbd.Size < phase + static_cast<UINT>(stride)) {
+        ++g_skinFFBuildFailDesc; ++g_skinFFBuildFail;
+        entry.src = g_stream0; entry.src->AddRef();
+        entry.ok = false; entry.refuseWhy = "GetDesc failed, the source is DYNAMIC, or the stream-0 offset leaves no whole vertex";
+        entries.push_back(entry);
+        return nullptr;
+    }
+    const UINT vertexCount = (vbd.Size - phase) / static_cast<UINT>(stride);
+
+    void* srcMapped = nullptr;
+    if (FAILED(g_stream0->Lock(0, 0, &srcMapped, D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) || !srcMapped) {
+        ++g_skinFFBuildFailLock; ++g_skinFFBuildFail;
+        entry.src = g_stream0; entry.src->AddRef();
+        entry.ok = false; entry.refuseWhy = "read-lock of the source buffer failed";
+        entries.push_back(entry);
+        return nullptr;
+    }
+
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    IDirect3DVertexBuffer9* buf = nullptr;
+    const UINT bytes = vertexCount * kSkinFFBytesPerVertex;
+    const bool created = bytes > 0 &&
+        SUCCEEDED(dev->CreateVertexBuffer(bytes, D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &buf, nullptr)) &&
+        buf;
+    if (!created) {
+        g_internal = false;
+        g_stream0->Unlock();
+        ++g_skinFFBuildFailCreate; ++g_skinFFBuildFail;
+        entry.src = g_stream0; entry.src->AddRef();
+        entry.ok = false; entry.refuseWhy = "CreateVertexBuffer failed for the side stream";
+        entries.push_back(entry);
+        return nullptr;
+    }
+    void* dstMapped = nullptr;
+    if (FAILED(buf->Lock(0, 0, &dstMapped, D3DLOCK_DISCARD)) || !dstMapped) {
+        buf->Release();
+        g_internal = false;
+        g_stream0->Unlock();
+        ++g_skinFFBuildFailLock; ++g_skinFFBuildFail;
+        entry.src = g_stream0; entry.src->AddRef();
+        entry.ok = false; entry.refuseWhy = "lock of the side stream failed";
+        entries.push_back(entry);
+        return nullptr;
+    }
+
+    const unsigned char* src8 = static_cast<const unsigned char*>(srcMapped);
+    unsigned char* dst8 = static_cast<unsigned char*>(dstMapped);
+    for (UINT i = 0; i < vertexCount; ++i) {
+        const unsigned char* v = src8 + phase + static_cast<size_t>(i) * stride;
+        // Exactly GetBaseMesh's own weight/index decode (UBYTE4/UBYTE4N/D3DCOLOR/FLOAT4 weights,
+        // the BGRA reorder for a D3DCOLOR-typed field, rigidSingleBone's implicit single full
+        // weight) - reproduced rather than shared because GetBaseMesh writes into a BaseVertex
+        // windowed to one draw and this needs the whole buffer once, on a different cache.
+        float w[4];
+        if (single) {
+            w[0] = 1.0f; w[1] = w[2] = w[3] = 0.0f;
+        } else {
+            const unsigned char* wb = v + L.blendWeightOffset;
+            if (L.blendWeightType == D3DDECLTYPE_FLOAT4) {
+                const float* wf = reinterpret_cast<const float*>(wb);
+                for (int k = 0; k < 4; ++k) w[k] = std::isfinite(wf[k]) ? wf[k] : 0.0f;
+            } else if (L.blendWeightType == D3DDECLTYPE_D3DCOLOR) {
+                w[0] = static_cast<float>(wb[2]); w[1] = static_cast<float>(wb[1]);
+                w[2] = static_cast<float>(wb[0]); w[3] = static_cast<float>(wb[3]);
+            } else {
+                for (int k = 0; k < 4; ++k) w[k] = static_cast<float>(wb[k]);
+            }
+        }
+        unsigned idxRaw[4];
+        const unsigned char* ib = v + L.blendIndexOffset;
+        if (L.blendIndexType == D3DDECLTYPE_D3DCOLOR) {
+            idxRaw[0] = ib[2]; idxRaw[1] = ib[1]; idxRaw[2] = ib[0]; idxRaw[3] = ib[3];
+        } else {
+            for (int k = 0; k < 4; ++k) idxRaw[k] = ib[k];
+        }
+        // BLENDWEIGHT is UBYTE4, not UBYTE4N - the raw bytes sum to ~254-255, not 1.0, exactly the
+        // CPU blend's own comment above (SkinAndBind divides its accumulated matrix by the sum of
+        // the surviving weights). Fixed-function indexed blending has no such divide, so the
+        // normalising has to happen here, once, rather than every frame in a shader. An index at
+        // or beyond kBonesMax is not a bone this shim's palette shadow can stage at all (the
+        // shadow is exactly kBonesMax*kRegsPerBone registers) - drop that ONE influence from the
+        // sum, the same as the CPU blend's own `if (bone >= safeBones) continue`, rather than let
+        // it corrupt the whole vertex.
+        float sum = 0.0f;
+        for (int k = 0; k < 4; ++k) {
+            if (idxRaw[k] >= static_cast<unsigned>(kBonesMax)) w[k] = 0.0f;
+            sum += w[k];
+        }
+        float wn[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (sum > 0.0f) {
+            const float inv = 1.0f / sum;
+            for (int k = 0; k < 4; ++k) wn[k] = w[k] * inv;
+        }
+        // Index 255 is this format's "no influence" sentinel, always paired with weight 0 (see
+        // BaseVertex's own comment, above). Left as 255 it addresses a matrix nothing ever
+        // stages, and Remix would try to stage a 256th WORLDMATRIX to cover it. Remapped to 0 -
+        // ANY zero-weight slot is remapped to 0, not only a literal 255 - it addresses
+        // WORLDMATRIX(0), which is always finite (it is D3DTS_WORLD, already set to this draw's
+        // object transform by BeginFFP's own ApplyTransforms before this ever runs) and always
+        // contributes exactly zero at zero weight, whether or not bone 0 is really among this
+        // mesh's used bones.
+        unsigned char idxOut[4];
+        for (int k = 0; k < 4; ++k)
+            idxOut[k] = (wn[k] == 0.0f) ? 0 : static_cast<unsigned char>(idxRaw[k]);
+
+        float* wDst = reinterpret_cast<float*>(dst8 + static_cast<size_t>(i) * kSkinFFBytesPerVertex);
+        wDst[0] = wn[0]; wDst[1] = wn[1]; wDst[2] = wn[2];   // 4th weight is implicit: 1-w0-w1-w2
+        unsigned char* iDst = dst8 + static_cast<size_t>(i) * kSkinFFBytesPerVertex + 12;
+        iDst[0] = idxOut[0]; iDst[1] = idxOut[1]; iDst[2] = idxOut[2]; iDst[3] = idxOut[3];
+    }
+
+    buf->Unlock();
+    g_stream0->Unlock();
+    g_internal = false;
+
+    entry.src = g_stream0; entry.src->AddRef();
+    entry.buf = buf;
+    entry.vertexCount = vertexCount;
+    entry.ok = true;
+    entries.push_back(entry);
+    ++g_skinFFBuildOk;
+    return buf;
+}
+
+// ---- the declaration ----
+std::unordered_map<IDirect3DVertexDeclaration9*, IDirect3DVertexDeclaration9*> g_skinFFDecls;
+unsigned g_skinFFDeclsMade = 0, g_skinFFDeclFailures = 0;
+unsigned g_skinFFDeclFailLogged = 0;   // FIX 4: caps the one-time failure dump, below
+
+// A clone of the game's own skinned declaration with THREE elements retargeted, following
+// FloatUVDeclaration's own cloning approach exactly (GetDeclaration into a fixed array, retarget
+// matching elements IN PLACE, then CreateVertexDeclaration) rather than building one from
+// scratch: TEXCOORD0, when it is SHORT2, onto the existing float2 uv stream - Remix still
+// discards that format, the same reason FloatUVDeclaration exists for every other converted draw
+// - and BLENDWEIGHT/BLENDINDICES onto the new side stream above, as a normalised FLOAT3 and a
+// remapped UBYTE4. Retargeted IN PLACE, not appended: the source declaration already carries a
+// usable BLENDWEIGHT/BLENDINDICES pair (GetBaseMesh already required one to decode this mesh at
+// all, before this is ever called), and appending a second pair would leave two elements
+// claiming the same usage, which CreateVertexDeclaration correctly refuses - the exact pitfall
+// FloatUVDeclaration's own set-1 TEXCOORD0 displacement comment describes for TEXCOORD.
+IDirect3DVertexDeclaration9* SkinFFDeclarationFor(IDirect3DDevice9* dev,
+                                                  IDirect3DVertexDeclaration9* src) {
+    if (!src) return nullptr;
+    const auto it = g_skinFFDecls.find(src);
+    if (it != g_skinFFDecls.end()) return it->second;
+
+    D3DVERTEXELEMENT9 elems[64]{};
+    UINT count = 0;
+    IDirect3DVertexDeclaration9* clone = nullptr;
+    bool sawWeight = false, sawIndex = false;
+    if (SUCCEEDED(src->GetDeclaration(elems, &count)) && count > 0) {
+        for (UINT i = 0; i < count; ++i) {
+            if (elems[i].Stream == 0xFF) break;
+            if (elems[i].Usage == D3DDECLUSAGE_TEXCOORD && elems[i].UsageIndex == 0 &&
+                elems[i].Type == D3DDECLTYPE_SHORT2) {
+                elems[i].Stream = static_cast<WORD>(g_uvStream);
+                elems[i].Offset = 0;
+                elems[i].Type = D3DDECLTYPE_FLOAT2;
+            } else if (elems[i].Usage == D3DDECLUSAGE_BLENDWEIGHT && elems[i].UsageIndex == 0) {
+                elems[i].Stream = static_cast<WORD>(g_skinFFStream);
+                elems[i].Offset = 0;
+                elems[i].Type = D3DDECLTYPE_FLOAT3;
+                sawWeight = true;
+            } else if (elems[i].Usage == D3DDECLUSAGE_BLENDINDICES && elems[i].UsageIndex == 0) {
+                elems[i].Stream = static_cast<WORD>(g_skinFFStream);
+                elems[i].Offset = 12;
+                elems[i].Type = D3DDECLTYPE_UBYTE4;
+                sawIndex = true;
+            }
+        }
+        // FIX 4 (skinFFRigidDecl): a rigid single-bone declaration carries BLENDINDICES and
+        // legitimately NO BLENDWEIGHT at all (SkinFFBufferFor's own rigidSingleBone branch already
+        // writes an implicit [1,0,0] weight for these) - but this loop only RETARGETS an existing
+        // BLENDWEIGHT element, so a declaration with none never set sawWeight and every rigid mesh
+        // fell back to CPU skinning. Append the missing element instead of retargeting one that
+        // was never there: find the D3DDECL_END sentinel the loop above stopped at (elems[i] with
+        // Stream==0xFF) and use its slot, bounds-checked against the fixed 64-element array.
+        if (!sawWeight && sawIndex && g_settings.skinFFRigidDecl && g_settings.skinRigidSingleBone) {
+            UINT endIdx = count;
+            for (UINT i = 0; i < count; ++i) if (elems[i].Stream == 0xFF) { endIdx = i; break; }
+            if (endIdx + 1 < 64) {
+                D3DVERTEXELEMENT9 w{};
+                w.Stream = static_cast<WORD>(g_skinFFStream);
+                w.Offset = 0;
+                w.Type = D3DDECLTYPE_FLOAT3;
+                w.Method = D3DDECLMETHOD_DEFAULT;
+                w.Usage = D3DDECLUSAGE_BLENDWEIGHT;
+                w.UsageIndex = 0;
+                const D3DVERTEXELEMENT9 endMarker = D3DDECL_END();
+                elems[endIdx] = w;
+                elems[endIdx + 1] = endMarker;
+                sawWeight = true;
+                count = endIdx + 2;
+            }
+        }
+        if (sawWeight && sawIndex) {
+            if (FAILED(dev->CreateVertexDeclaration(elems, &clone))) clone = nullptr;
+        }
+    }
+    if (!clone) {
+        ++g_skinFFDeclFailures;
+        // Log EACH failed clone once (this only ever runs the first time a distinct source
+        // declaration is seen, because the cache check above returns early on every later draw
+        // that reuses it) with its reason and its full element list, reusing the same decl-element
+        // Log format Hook_SetVertexDeclaration already uses for the skinned-declaration dump.
+        if (g_skinFFDeclFailLogged < 32) {
+            ++g_skinFFDeclFailLogged;
+            const char* why = (count == 0) ? "GetDeclaration failed or returned no elements"
+                             : (!sawIndex) ? "no BLENDINDICES element"
+                             : (!sawWeight) ? "no BLENDWEIGHT element (and skinFFRigidDecl/skinRigidSingleBone did not supply one)"
+                             : "CreateVertexDeclaration failed";
+            Log("SKIN FF DECL CLONE FAILED (#%u): %s", g_skinFFDeclFailLogged, why);
+            for (UINT i = 0; i < count; ++i) {
+                if (elems[i].Stream == 0xFF) break;
+                Log("    stream=%u offset=%2u type=%-8s(%u) usage=%-12s index=%u",
+                    elems[i].Stream, elems[i].Offset, DeclTypeName(elems[i].Type),
+                    elems[i].Type, UsageName(elems[i].Usage), elems[i].UsageIndex);
+            }
+        }
+    } else ++g_skinFFDeclsMade;
+    src->AddRef();
+    g_skinFFDecls[src] = clone;
+    return clone;
+}
+
+// ---- staging and the draw itself ----
+unsigned g_skinFFConverted = 0;          // draws that took the hardware path
+unsigned g_skinFFVertsConverted = 0;     // vertices skinned on the GPU rather than the CPU
+unsigned g_skinFFTransforms = 0;         // SetTransform(WORLDMATRIX) calls this cost, total
+unsigned g_skinFFPaletteReused = 0;      // draws whose staged palette matched the previous draw's - restaging skipped
+unsigned g_skinFFSingleBoneDraws = 0;    // FIX 5: hardware-skinned draws whose shader reads no BLENDWEIGHT (staged from idx[0] alone, not mesh->usedBones)
+
+unsigned g_skinFFRefuseNoStreams = 0;    // device has no free stream slot for the side buffers
+unsigned g_skinFFRefuseCloth = 0;        // this draw uses the cloth remap - not attempted in this first version
+unsigned g_skinFFRefuseMorph = 0;        // this draw applies a morph delta - not attempted in this first version
+unsigned g_skinFFRefuseNoMesh = 0;       // GetBaseMesh could not decode a bind pose (dynamic source, bad declaration, wrong vertex count...)
+unsigned g_skinFFRefuseUsedBones = 0;    // mesh uses no bones at all - nothing to stage
+unsigned g_skinFFRefuseBoneRange = 0;    // a used bone sits beyond what this shader's own palette register can stage safely
+unsigned g_skinFFRefuseDecl = 0;         // the retargeted declaration failed to build
+unsigned g_skinFFRefuseSideBuffer = 0;   // the weight/index or uv side-stream conversion failed
+unsigned g_skinFFRefuseNoBoneDecl = 0;   // FIX 5: vertex shader reads no BLENDINDICES - the CPU path places it by objTM alone
+unsigned g_skinFFRefuseSingleBoneRange = 0; // FIX 5: single-bone mode, a vertex's blend index is beyond what the shader's register can stage safely
+unsigned g_skinFFRefuseNoInfluence = 0;  // FIX 5: four-bone mode, a vertex has no usable influence - the CPU path leaves it at its bind pose
+const char* g_skinFFRefuseWhy = nullptr;
+
+// Which mesh/objTM/palette-epoch the currently staged WORLDMATRIX(0..63) set belongs to, so a
+// run of draws sharing one character (several parts, same skeleton, same frame) restages nothing
+// after the first. Keyed on SkinMeshKey's own hash rather than the BaseMesh pointer on purpose -
+// a pointer could in principle be handed back to a NEW entry after an invalidation+rebuild (the
+// same address-reuse class of bug this file has hit before, see BaseMesh::owner's own comment),
+// and a value key does not have that failure mode. Conservative beyond that: any of the four
+// fields changing forces a full restage, even when the actual register VALUES that changed do
+// not touch this particular mesh's bones - a false restage costs bridge calls, a false skip
+// renders stale bones, and only one of those is a correctness bug.
+unsigned long long g_skinFFStageMeshKey = 0;
+unsigned g_skinFFStageFrame = 0xFFFFFFFFu;
+unsigned g_skinFFStageBoneDraw = 0xFFFFFFFFu;
+D3DMATRIX g_skinFFStageObjTM = kIdentity;
+bool g_skinFFStageValid = false;
+
+void UnbindSkinFF(IDirect3DDevice9* dev) {
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    g_origSetStreamSource(dev, g_skinFFStream, nullptr, 0, 0);
+    g_origSetStreamSource(dev, g_uvStream, nullptr, 0, 0);
+    // THE SHAPE BAKE: undo the stream-0 rebind SkinViaFixedFunction made when it bound a baked
+    // copy in place of the game's own bind-pose buffer. g_internal is already set for this whole
+    // function (see below).
+    if (g_skinFFBakeBound) {
+        g_origSetStreamSource(dev, 0, g_stream0, g_stream0Offset, g_stream0Stride);
+        g_skinFFBakeBound = false;
+    }
+    g_origSetVertexDeclaration(dev, g_curDecl);
+    ShadowSetRS(dev, D3DRS_INDEXEDVERTEXBLENDENABLE, FALSE);
+    ShadowSetRS(dev, D3DRS_VERTEXBLEND, D3DVBF_DISABLE);
+    // WORLDMATRIX(0) IS D3DTS_WORLD - staging bone 0 (when this mesh uses it) overwrote it with
+    // Bone[0]*objTM, and ApplyTransforms' own shadow (g_appliedWorld) was never told, because
+    // staging bypasses ApplyTransforms on purpose (see SkinViaFixedFunction's own comment on
+    // why). Left alone, the NEXT draw's ApplyTransforms could see its own world matrix already
+    // matches the shadow and skip calling SetTransform - while the device actually still held
+    // the bone-composed matrix from this draw. Restoring it here, unconditionally, keeps the
+    // shadow truthful without needing to track whether bone 0 was actually touched this time.
+    g_origSetTransform(dev, D3DTS_WORLD, &g_appliedWorld);
+    g_internal = false;
+}
+
+// Attempts the hardware path for a draw that would otherwise go to SkinAndBind. Returns false -
+// with g_skinFFRefuseWhy set and the matching counter above already incremented - for anything
+// not right, so the caller's existing CPU fallback runs exactly as it does today.
+bool SkinViaFixedFunction(IDirect3DDevice9* dev, INT baseVertex, UINT minIndex, UINT numVertices) {
+    g_skinFFRefuseWhy = nullptr;
+    // FIX 5: see the Settings::skinFFFollowShaderInfluences comment, and SkinAndBind's own
+    // "reads"/"influences" gate (above the fast path) that this mirrors exactly.
+    const bool followInfl = g_settings.skinFFFollowShaderInfluences;
+    const bool singleBone = followInfl && !g_curVS.usesBlendWeights;
+    if (!g_skinFFStreamsOk) {
+        g_skinFFRefuseWhy = "device has no free stream slot for the side buffers";
+        ++g_skinFFRefuseNoStreams;
+        return false;
+    }
+    // FIX 5, step 1: a vertex shader that reads no BLENDINDICES is not skinned by the game at
+    // all - SkinAndBind leaves it at its bind pose, placed by objTM alone. The GPU path has no
+    // "stage nothing" state (WORLDMATRIX(0) is always something), so refuse outright; the caller
+    // already falls back to SkinAndBind for any refusal from this function.
+    if (followInfl && g_settings.skinRequireBoneDecl && !g_curVS.usesBlendIndices) {
+        g_skinFFRefuseWhy = "vertex shader reads no BLENDINDICES - the CPU path places it by objTM alone";
+        ++g_skinFFRefuseNoBoneDecl;
+        return false;
+    }
+    if (numVertices == 0) { g_skinFFRefuseWhy = "no vertices"; ++g_skinFFRefuseNoMesh; return false; }
+    const INT first = baseVertex + static_cast<INT>(minIndex);
+    if (first < 0) {
+        g_skinFFRefuseWhy = "baseVertex + minIndex is negative";
+        ++g_skinFFRefuseNoMesh;
+        return false;
+    }
+    const UINT firstVertex = static_cast<UINT>(first);
+
+    // Cloth adds seam-duplicate vertices with a per-tile UV shift (g_clothRemap); morph adds a
+    // per-character delta read from a snooped dynamic buffer (MorphForThisDraw). Both modify the
+    // mesh per-draw in ways this first version does not reproduce on the GPU - refuse and let the
+    // proven CPU path (which already handles both) render this one, exactly as today.
+    if (g_clothRemap) { g_skinFFRefuseWhy = "cloth remap active"; ++g_skinFFRefuseCloth; return false; }
+    const MorphSource morph = MorphForThisDraw(firstVertex, numVertices);
+    // THE SHAPE BAKE: with morphBake on, a morph-active draw is no longer an automatic refusal -
+    // MorphBakeFor either returns a whole-buffer copy of the source mesh with this draw's delta
+    // already applied, or refuses with a counted reason (falls through to the same refusal as
+    // before). Obtained HERE, at the morph-check position, exactly where the plan requires: a
+    // LATER refusal in this function (bone range, declaration, side buffer...) simply abandons
+    // the bakedVb pointer - the cache still owns it via its own src/morphVb references, so
+    // nothing leaks and no counter/binding is left inconsistent.
+    IDirect3DVertexBuffer9* bakedVb = nullptr;
+    if (morph.active) {
+        if (!g_settings.morphBake) {
+            g_skinFFRefuseWhy = "morph delta active";
+            ++g_skinFFRefuseMorph;
+            return false;
+        }
+        bakedVb = MorphBakeFor(dev, firstVertex, numVertices, morph);
+        if (!bakedVb) {
+            g_skinFFRefuseWhy = g_morphBakeRefuseWhy ? g_morphBakeRefuseWhy : "morph bake failed";
+            ++g_skinFFRefuseMorph;
+            return false;
+        }
+    }
+
+    const BaseMesh* mesh = GetBaseMesh(firstVertex, numVertices);
+    if (!mesh || mesh->verts.size() != numVertices) {
+        g_skinFFRefuseWhy = g_skinRefuseWhy ? g_skinRefuseWhy : "no usable bind pose";
+        ++g_skinFFRefuseNoMesh;
+        return false;
+    }
+    if (!mesh->usedBones) {
+        g_skinFFRefuseWhy = "mesh uses no bones - nothing to stage";
+        ++g_skinFFRefuseUsedBones;
+        return false;
+    }
+
+    // Exactly SkinAndBind's own boneBase/safeBones (above): the register this shader's own CTAB
+    // declares for Bone_weights, or c52 if it declared none, and how many bones actually fit
+    // between there and the end of the shadow without reading past it.
+    const UINT boneBase = (g_curVS.boneReg >= 0) ? static_cast<UINT>(g_curVS.boneReg) : kRegBonePalette;
+    const unsigned safeBones =
+        (boneBase + static_cast<unsigned>(kBonesMax) * kRegsPerBone <= kMaxVsConst)
+            ? static_cast<unsigned>(kBonesMax)
+            : (kMaxVsConst > boneBase ? (kMaxVsConst - boneBase) / kRegsPerBone : 0u);
+
+    // FIX 5, step 2/3: which bones this DRAW actually needs to stage, and whether it can be
+    // expressed on the GPU at all - NOT mesh->usedBones/maxBone, which GetBaseMesh built from the
+    // declaration's weight bytes and which the shader may not agree with.
+    unsigned long long drawUsedBones = mesh->usedBones;
+    unsigned drawMaxBone = mesh->maxBone;
+    if (singleBone) {
+        // A shader with no BLENDWEIGHT input uses exactly bone idx[0] at implicit weight 1,
+        // whatever the declaration's other three weight bytes hold (SkinAndBind's own "A shader
+        // that declares no blendweight input uses exactly ONE bone" comment) - so the bones to
+        // stage are a mask over idx[0] alone, not the whole mesh and not the declaration's other
+        // three slots.
+        //
+        // FIX 5 CACHE (2026-09-22): mesh->singleBoneMask/singleBoneMaxIdx0/singleBoneIdx0Overflow
+        // are the raw, shader-independent facts GetBaseMesh already computed once at decode time
+        // (this draw's own window IS the whole cached mesh - GetBaseMesh's key already includes
+        // firstVertex/numVertices). safeBones is the only shader-dependent input, so it is the
+        // only thing still compared per draw - a single O(1) comparison replaces what used to be
+        // an O(numVertices) scan on every one of the 140 hardware-skinned draws/frame.
+        if (mesh->singleBoneIdx0Overflow || mesh->singleBoneMaxIdx0 >= safeBones) {
+            // The CPU path just drops this one influence (bone >= safeBones) and leaves the
+            // vertex at its bind pose. The GPU path has no per-vertex fallback once bone 0 is
+            // staged for the rest of the draw - WORLDMATRIX(0) would then hold a real
+            // Bone[0]*objTM, not the plain objTM this vertex needs - so refuse the whole draw
+            // rather than mispose one vertex.
+            g_skinFFRefuseWhy = "single-bone mode: a vertex's blend index is beyond what this shader's palette register can stage safely";
+            ++g_skinFFRefuseSingleBoneRange;
+            return false;
+        }
+        drawUsedBones = mesh->singleBoneMask;
+        drawMaxBone = mesh->singleBoneMaxIdx0;
+    } else {
+        if (mesh->maxBone >= safeBones) {
+            g_skinFFRefuseWhy = "a used bone sits beyond what this shader's palette register can stage safely";
+            ++g_skinFFRefuseBoneRange;
+            return false;
+        }
+        if (followInfl && mesh->noUsableInfluence) {
+            // A vertex with NO usable influence at all (every weight 0, or every weighted index
+            // beyond kBonesMax) is left at its bind pose by the CPU path (SkinAndBind: "sum <=
+            // 0.0f -> leave the vertex in its bind pose"). The GPU path has no such fallback: an
+            // all-zero explicit weight leaves the IMPLICIT fourth weight at 1, which
+            // D3DVBF_3WEIGHTS stages onto WORLDMATRIX(0) - not this vertex's own bind pose.
+            //
+            // FIX 5 CACHE (2026-09-22): mesh->noUsableInfluence is shader-independent (bv.w/bv.idx
+            // are fixed at decode) - GetBaseMesh already scanned every vertex once to build it, so
+            // this is an O(1) flag check instead of the O(numVertices*4) scan it replaces.
+            g_skinFFRefuseWhy = "a vertex in this draw has no usable bone influence - the CPU path leaves it at its bind pose, which the GPU path cannot express";
+            ++g_skinFFRefuseNoInfluence;
+            return false;
+        }
+    }
+
+    IDirect3DVertexDeclaration9* decl = SkinFFDeclarationFor(dev, g_curDecl);
+    if (!decl) { g_skinFFRefuseWhy = "declaration clone failed"; ++g_skinFFRefuseDecl; return false; }
+
+    // GetBaseMesh's own accepted texcoord types are exactly {SHORT2, FLOAT2} (its ok-to-decode
+    // gate requires one of the two, above), so this draw's texcoordType is already guaranteed to
+    // be one of them here - the else branch below guards against that gate changing under this
+    // code later, not a path this build can currently reach.
+    IDirect3DVertexBuffer9* uvBuf = nullptr;
+    const bool needsUv = (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2);
+    if (needsUv) {
+        uvBuf = UvBufferFor(dev);
+        if (!uvBuf) {
+            g_skinFFRefuseWhy = "uv side-stream conversion failed";
+            ++g_skinFFRefuseSideBuffer;
+            return false;
+        }
+    } else if (g_curLayout.texcoordType != D3DDECLTYPE_FLOAT2) {
+        g_skinFFRefuseWhy = "texcoord is a type this path does not convert";
+        ++g_skinFFRefuseSideBuffer;
+        return false;
+    }
+    const UINT uvOffset = g_uvBindOffset;   // UvBufferFor's own out-param, read immediately - nothing between here and its use below calls it again
+
+    IDirect3DVertexBuffer9* sideBuf = SkinFFBufferFor(dev, singleBone);
+    if (!sideBuf) {
+        g_skinFFRefuseWhy = "weight/index side-stream conversion failed";
+        ++g_skinFFRefuseSideBuffer;
+        return false;
+    }
+    const UINT sideOffset = g_skinFFBindOffset;   // FIX 2: SkinFFBufferFor's own out-param, read immediately for the same reason as uvOffset above
+
+    // ---- everything needed is in hand: stage the palette, bind the streams, enable blending ----
+    //
+    // MULTIPLICATION ORDER, and how it was determined: this file's own row-vector convention is
+    // v' = v*M (see TransformPoint, used everywhere a position is placed), under which
+    // Multiply(a, b) composes "apply a, then apply b" - v*(a*b) = (v*a)*b - which is exactly how
+    // the decal-pull code above already uses it (`world = Multiply(world, pull)` applies the pull
+    // AFTER the object placement). FromRegisters reads a bone's raw c52.. registers into a
+    // D3DMATRIX in that SAME convention (it is the identical call objTM itself is built with, a
+    // few lines below), so the CPU blend's own arithmetic - posObject = posBind * Bone[i], then
+    // BeginFFP's ApplyTransforms posts posWorld = posObject * objTM - composes to a single matrix
+    // as Multiply(Bone[i], objTM): bone first, object second. g_appliedWorld is reused directly
+    // for "objTM" rather than re-deriving it from g_vsConst, because ApplyTransforms already
+    // computed and applied EXACTLY this draw's placement there (objTM register read, instance
+    // stream, or identity, whichever this draw actually uses) before this function ever runs.
+    const D3DMATRIX objTM = g_appliedWorld;
+    unsigned long long meshKey = SkinMeshKey(g_stream0, g_stream0Offset, g_stream0Stride,
+                                             firstVertex, numVertices);
+    // FIX 5, step 4: fold in the shader's own bone register and single/four-bone mode, so two
+    // consecutive draws of the SAME vertex window through DIFFERENT shaders - one single-bone,
+    // one four-bone, or two with different boneReg - never share a staged palette.
+    if (followInfl) {
+        meshKey ^= (static_cast<unsigned long long>(boneBase) << 1) | (singleBone ? 1ull : 0ull);
+        meshKey *= 1099511628211ull;
+    }
+    const bool sameStage = g_skinFFStageValid && g_skinFFStageMeshKey == meshKey &&
+                           g_skinFFStageFrame == g_frames &&
+                           g_skinFFStageBoneDraw == g_lastBoneUploadDraw &&
+                           Same(g_skinFFStageObjTM, objTM);
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    if (!sameStage) {
+        for (unsigned b = 0; b < static_cast<unsigned>(kBonesMax); ++b) {
+            if (!(drawUsedBones & (1ull << b))) continue;
+            const D3DMATRIX bone = FromRegisters(&g_vsConst[boneBase + b * kRegsPerBone][0], 3);
+            const D3DMATRIX staged = Multiply(bone, objTM);
+            g_origSetTransform(dev, D3DTS_WORLDMATRIX(b), &staged);
+            ++g_skinFFTransforms;
+        }
+        g_skinFFStageMeshKey = meshKey;
+        g_skinFFStageFrame = g_frames;
+        g_skinFFStageBoneDraw = g_lastBoneUploadDraw;
+        g_skinFFStageObjTM = objTM;
+        g_skinFFStageValid = true;
+    } else {
+        ++g_skinFFPaletteReused;
+        // FIX 1 (skinFFRestageBone0): WORLDMATRIX(0) IS D3DTS_WORLD. The staging loop above
+        // overwrites it with Bone[0]*objTM for any mesh using bone 0, and UnbindSkinFF restores it
+        // to plain objTM after every draw (see UnbindSkinFF's own comment) - so THIS branch, which
+        // restages nothing, left WORLDMATRIX(0) at the PREVIOUS draw's restored objTM instead of
+        // THIS mesh's Bone[0]*objTM for every vertex weighted to bone 0. SUSPECTED (source-read,
+        // not yet measured) behind the stretched bracelet and glasses lens of 2026-09-21. g_internal is
+        // already true here, set just above before this branch runs.
+        if (g_settings.skinFFRestageBone0 && (drawUsedBones & 1ull)) {
+            const D3DMATRIX bone0 = FromRegisters(&g_vsConst[boneBase + 0 * kRegsPerBone][0], 3);
+            const D3DMATRIX staged0 = Multiply(bone0, objTM);
+            g_origSetTransform(dev, D3DTS_WORLDMATRIX(0), &staged0);
+            ++g_skinFFTransforms;
+            ++g_skinFFBone0Restaged;
+        }
+    }
+
+    g_origSetVertexDeclaration(dev, decl);
+    // FIX 2: bind at sideOffset, not always 0 - see SkinFFBufferFor's own comment on phase/base.
+    g_origSetStreamSource(dev, g_skinFFStream, sideBuf, sideOffset, kSkinFFBytesPerVertex);
+    if (needsUv) g_origSetStreamSource(dev, g_uvStream, uvBuf, uvOffset, kUvBytesPerVertex);
+    // THE SHAPE BAKE: stream 0 is normally left exactly as the game bound it (the whole point of
+    // hardware skinning); a successful bake replaces it, here, with the baked whole-buffer copy -
+    // same offset and stride, since the bake preserves the source's own addressing exactly.
+    if (bakedVb) {
+        g_origSetStreamSource(dev, 0, bakedVb, g_stream0Offset, g_stream0Stride);
+        g_skinFFBakeBound = true;
+        ++g_morphBakeDraws;
+    }
+    g_internal = false;
+
+    // D3DVBF_3WEIGHTS: three EXPLICIT weights (our BLENDWEIGHT float3) plus one implicit
+    // (1 - their sum), which is FOUR bones per vertex - matching this shim's own four-influence
+    // CPU blend exactly, and matching the normalisation above: since w0+w1+w2+w3 was made to sum
+    // to 1, the implicit 1-w0-w1-w2 already equals w3.
+    ShadowSetRS(dev, D3DRS_VERTEXBLEND, D3DVBF_3WEIGHTS);
+    ShadowSetRS(dev, D3DRS_INDEXEDVERTEXBLENDENABLE, TRUE);
+
+    // Only on the dump frame - see g_dumpSkin's own reset, above SkinAndBind's identical pattern
+    // for the CPU path (RecordFrameDraw reads these into the frame log's ffskin= annotation).
+    g_dumpSkinFF = g_frameLog && !g_frameDumpDone && (g_frames + 1 == g_frameDumpTarget);
+    if (g_dumpSkinFF) {
+        g_dumpSkinFFReuse = sameStage;
+        g_dumpSkinFFSingle = singleBone;
+        g_dumpSkinFFBone0 = (drawUsedBones & 1ull) != 0;
+        g_dumpSkinFFBones = BonesUsedCount(drawUsedBones);
+        g_dumpSkinFFHighBone = drawMaxBone;
+        g_dumpSkinFFLowBone = 0;
+        for (unsigned b = 0; b < static_cast<unsigned>(kBonesMax); ++b)
+            if (drawUsedBones & (1ull << b)) { g_dumpSkinFFLowBone = b; break; }
+        g_dumpSkinFFSideOffset = sideOffset;
+        g_dumpSkinFFUvOffset = needsUv ? uvOffset : 0;
+        g_dumpSkinFFBake = bakedVb ? g_morphBakeLastOutcome : 0;   // THE SHAPE BAKE
+    }
+
+    // Measured whether or not skinFFHonourStreamOffset is on - see g_skinFFNonZeroOffset's own
+    // comment, above the struct it is declared beside.
+    if (g_stream0Offset != 0) {
+        ++g_skinFFNonZeroOffset;
+        if ((g_stream0Offset % g_stream0Stride) != 0) ++g_skinFFNonZeroOffsetPhase;
+    }
+
+    if (singleBone) ++g_skinFFSingleBoneDraws;
+    ++g_skinFFConverted;
+    g_skinFFVertsConverted += numVertices;
+    return true;
 }
 
 unsigned g_shapeReports = 0;
@@ -13113,6 +18976,7 @@ bool BakeShaderReady(IDirect3DDevice9* dev) {
     const std::vector<DWORD> code = BuildUvBakeVs(7);
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     const HRESULT hr = dev->CreateVertexShader(code.data(), &g_bakeVs);
     g_internal = wasInternal;
     if (FAILED(hr) || !g_bakeVs) {
@@ -13168,6 +19032,7 @@ bool BakeTargetsReady(IDirect3DDevice9* dev) {
     if (g_bakeTex && g_bakeSurf && g_bakeSys) return true;
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
     bool ok = true;
     if (!g_bakeTex &&
         FAILED(dev->CreateTexture(kBakeSize, kBakeSize, 1, D3DUSAGE_RENDERTARGET,
@@ -13231,6 +19096,7 @@ const char* BakeSlotAlbedo(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT bas
 
     const bool wasInternal = g_internal;
     g_internal = true;
+    g_internalThread = GetCurrentThreadId();
 
     IDirect3DSurface9* oldRt = nullptr;
     IDirect3DSurface9* oldDs = nullptr;
@@ -13354,6 +19220,7 @@ void RemixCollectCharacterSlot(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT
     if (!P.ibHave) {
         IDirect3DIndexBuffer9* ib = nullptr;
         g_internal = true;
+        g_internalThread = GetCurrentThreadId();
         const HRESULT hr = dev->GetIndices(&ib);
         g_internal = false;
         if (FAILED(hr) || !ib) return;
@@ -13419,6 +19286,7 @@ void RemixCollectCharacterSlot(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT
         IDirect3DPixelShader9* ps = nullptr;
         const bool wi = g_internal;
         g_internal = true;
+        g_internalThread = GetCurrentThreadId();
         if (SUCCEEDED(dev->GetPixelShader(&ps)) && ps) {
             bool seen = false;
             for (unsigned k = 0; k < g_psDumped; ++k)
@@ -13900,6 +19768,324 @@ bool TextureToBgra(IDirect3DBaseTexture9* base, std::vector<unsigned char>& out,
     return ok;
 }
 
+// ---------------------------------------------------------------- decal probe
+//
+// Building decals - the sign/logo/poster quads named by a "Decal" sampler at the shader's lowest
+// register - render as a flat quad showing a fine repeating stripe pattern instead of their
+// image. Two fixes have already shipped (decalUvFromDeclaredSet, decalAlphaFromTexture) and
+// neither changed how it looks. Depth, blinking, albedo churn, the alpha path, the texcoord SET
+// these shaders read (set 0, which is what is converted) and the tiling lookup have all been
+// measured and ruled out. What has NEVER been measured is the only thing left that decides what
+// appears on the quad: which texture is actually bound as albedo, and what coordinate range is
+// fed to it. This probe measures exactly those two things and changes no render state.
+
+// Dump the bound albedo's top mip beside the shim's other DDS dumps, reusing TextureToBgra (which
+// decodes each format's OWN alpha channel - see its DXT3/DXT5 branches) and WriteBgraDds (which
+// writes that alpha through unchanged). An earlier version of WriteBgraDds fabricated alpha 255
+// and hid a real cutout finding for a whole day; this path never does that.
+void DumpDecalProbeTexture(IDirect3DBaseTexture9* tex, unsigned n) {
+    std::vector<unsigned char> bgra;
+    UINT w = 0, h = 0;
+    if (TextureToBgra(tex, bgra, w, h)) {
+        char dir[MAX_PATH] = {0};
+        GetModuleFileNameA(GetModuleHandleW(nullptr), dir, MAX_PATH);
+        if (char* slash = strrchr(dir, '\\')) *(slash + 1) = 0;
+        char path[MAX_PATH];
+        sprintf_s(path, "%ssr3-remix-decalprobe-%u-%ux%u.dds", dir, n, w, h);
+        if (WriteBgraDds(path, w, h, bgra.data()))
+            Log("    dumped albedo #%u -> %s (%ux%u, real alpha channel)", n, path, w, h);
+        else
+            Log("    decal probe #%u: WriteBgraDds FAILED for %s", n, path);
+        return;
+    }
+    // TextureToBgra failed either because the lock itself failed or because the format is one it
+    // does not decode (only A8R8G8B8/X8R8G8B8/DXT1/DXT3/DXT5 are handled) - say which, with the
+    // real HRESULT, instead of failing silently.
+    HRESULT hr = E_FAIL;
+    if (tex && tex->GetType() == D3DRTYPE_TEXTURE) {
+        IDirect3DTexture9* t2 = static_cast<IDirect3DTexture9*>(tex);
+        D3DLOCKED_RECT lr{};
+        hr = t2->LockRect(0, &lr, nullptr, D3DLOCK_READONLY);
+        if (SUCCEEDED(hr)) t2->UnlockRect(0);
+    }
+    if (SUCCEEDED(hr))
+        Log("    decal probe #%u: could not dump albedo - LockRect succeeded (hr=0x%08lX) but "
+            "TextureToBgra does not decode this format", n, static_cast<unsigned long>(hr));
+    else
+        Log("    decal probe #%u: could not dump albedo - LockRect FAILED, hr=0x%08lX", n,
+            static_cast<unsigned long>(hr));
+}
+
+// STRICT TARGET, 2026-09-18: the ORIGINAL arming test (decal-named albedo, the winning
+// sampler by AlbedoRank, which is also the lowest register whenever nothing outranks it - see
+// CHANGE 2, 2026-09-18, for why arming was rewritten to scan every sampler the shader names
+// instead) let through the wrong population. The run this was written against reported 8
+// identical blocks, all the same
+// particle billboard: verts=20 prims=10 at(0.00 0.00 0.00), usesObjTM=0, and then "REFUSED:
+// stream 0 is DYNAMIC - not safe to read-lock" for every one of them. A particle's corners are
+// computed on the CPU into a buffer the game rewrites every frame and sit at the origin before
+// any object transform - there is nothing here this probe could ever read. The target, a
+// BUILDING decal, is the opposite on every count: STATIC, INDEXED, and placed by objTM away
+// from the origin (historically v=28336 p=2|4 at a real world position). Testing for that
+// shape - not just the sampler name - is what actually reaches it.
+//
+// Counted separately rather than folded into one bucket, because a guard that refuses silently
+// is this project's most repeated failure: if the probe goes back to reporting nothing, these
+// counters say which test is doing the excluding instead of costing another session of
+// guessing. Reported periodically in the PROFILE block below (search DECAL PROBE ARMING).
+unsigned g_decalProbeCandidates = 0;         // passed the sampler test - would have armed under the OLD test alone
+unsigned g_decalProbeRejectDynamic = 0;      // stream 0 is a DYNAMIC buffer (particles, overwhelmingly)
+unsigned g_decalProbeRejectNotIndexed = 0;   // not an indexed draw
+unsigned g_decalProbeRejectOrigin = 0;       // no object transform, or objTM places it AT the origin
+
+void ProbeDecalDraw() {
+    if (!g_settings.decalProbe || g_decalProbeReports >= 8) return;
+    // CHANGE 2, 2026-09-18: this used to arm only when the CHOSEN albedo sampler (the
+    // AlbedoRank winner) named "Decal", which is the Decal map on just 19 of the 230
+    // decal-material draws in the reference capture - AlbedoRank scores Diffuse 100 against
+    // Decal_Map's 90, so the Diffuse map wins the albedo slot on the other 211 (175
+    // rank=100 low='Diffuse_MapSampler'@0, 36 more @1) and this probe never saw them. Every
+    // report this probe had ever produced came from the 19, in practice one car probed
+    // twice. Arm instead on whether the shader NAMES a Decal sampler ANYWHERE, using the
+    // reflected per-stage sampler list (samplerName[]) rather than the chosen albedo, so the
+    // 211 draws where Diffuse won are reached too.
+    int decalStage = -1;
+    for (int st = 0; st < 8; ++st) {
+        if (g_curPS.samplerName[st][0] && StrStrIA(g_curPS.samplerName[st], "Decal")) {
+            decalStage = st;
+            break;
+        }
+    }
+    if (decalStage < 0) return;
+    if (!g_lastEffectiveAlbedo) return;   // nothing bound - a different, already-counted fault
+    ++g_decalProbeCandidates;
+    // A candidate must also LOOK LIKE a world decal, not merely name one. decalProbeStrictTarget
+    // is ON by default; OFF restores the old, permissive arming test (candidates are still
+    // counted either way, but nothing is rejected below when it is OFF).
+    if (g_settings.decalProbeStrictTarget) {
+        // Same guard ProbeShapes/ProbeHudDraw/ProbeSkyDraw/GetBaseMesh already apply before a
+        // read-lock: a DYNAMIC buffer is not safe to read, and this is exactly the class of
+        // draw (particles) that buffer usage identifies.
+        if (IsDynamicVB(g_stream0)) { ++g_decalProbeRejectDynamic; return; }
+        if (!g_curDrawIndexed) { ++g_decalProbeRejectNotIndexed; return; }
+        // Same fields the neighbouring "DECAL/PARTICLE" log line already prints (usesObjTM and
+        // the world translation from g_lastWorld, stashed by BeginFFP for this exact draw): a
+        // draw with no object transform at all, or whose objTM still places it exactly at the
+        // origin, is not placed in the world - which is what a particle billboard looks like
+        // and a building decal never does.
+        if (!g_curVS.usesObjTM ||
+            (g_lastWorld._41 == 0.0f && g_lastWorld._42 == 0.0f && g_lastWorld._43 == 0.0f)) {
+            ++g_decalProbeRejectOrigin;
+            return;
+        }
+    }
+    ++g_decalProbeReports;
+    const unsigned n = g_decalProbeReports;
+    IDirect3DBaseTexture9* albedo = g_lastEffectiveAlbedo;
+
+    // ---- 1: identity ----
+    // CHANGE 2, 2026-09-18: also print which texture actually WON the albedo (already
+    // named above by albedoSampler/stage) against which register the Decal-named sampler
+    // this draw armed on actually sits at, so the report itself says whether this is one of
+    // the 211 draws where Diffuse won the albedo or one of the 19 where Decal did.
+    char idLine[320];
+    _snprintf_s(idLine, _TRUNCATE,
+                "albedoSampler='%s' lowest='%s'@%d stage=%d | decalSampler='%s'@%d %s | "
+                "verts=%u prims=%u at(%.2f %.2f %.2f) | bound=%p",
+                g_curPS.albedoSampler, g_curPS.lowestSampler, g_curPS.lowestSamplerReg,
+                g_lastEffectiveAlbedoStage, g_curPS.samplerName[decalStage], decalStage,
+                (decalStage == g_lastEffectiveAlbedoStage) ? "(WON the albedo)"
+                                                            : "(albedo went to a different sampler)",
+                g_curDrawVertexCount, g_curDrawPrimCount,
+                g_lastWorld._41, g_lastWorld._42, g_lastWorld._43, static_cast<void*>(albedo));
+
+    // ---- 2: the texture, from GetLevelDesc on the bound albedo ----
+    char texLine[192];
+    D3DSURFACE_DESC d{};
+    if (albedo->GetType() == D3DRTYPE_TEXTURE &&
+        SUCCEEDED(static_cast<IDirect3DTexture9*>(albedo)->GetLevelDesc(0, &d))) {
+        const char* fmtName = (d.Format == D3DFMT_A8R8G8B8) ? "A8R8G8B8"
+                             : (d.Format == D3DFMT_X8R8G8B8) ? "X8R8G8B8"
+                             : (d.Format == D3DFMT_DXT1)     ? "DXT1"
+                             : (d.Format == D3DFMT_DXT3)     ? "DXT3"
+                             : (d.Format == D3DFMT_DXT5)     ? "DXT5" : "?";
+        _snprintf_s(texLine, _TRUNCATE,
+                    "%ux%u fmt=%u(%s) mips=%u pool=%u(0=DEFAULT 1=MANAGED 2=SYSTEMMEM 3=SCRATCH) "
+                    "usage=%#lx",
+                    d.Width, d.Height, static_cast<unsigned>(d.Format), fmtName,
+                    static_cast<unsigned>(albedo->GetLevelCount()), static_cast<unsigned>(d.Pool),
+                    static_cast<unsigned long>(d.Usage));
+    } else {
+        _snprintf_s(texLine, _TRUNCATE, "GetLevelDesc FAILED (type=%d)",
+                    static_cast<int>(albedo->GetType()));
+    }
+
+    // ---- 3: the scale actually applied, published by SetupTextureStages for this exact draw ----
+    char scaleLine[96];
+    _snprintf_s(scaleLine, _TRUNCATE, "su=%.6f sv=%.6f transformflags=%s",
+                g_decalProbeSu, g_decalProbeSv, g_decalProbeCount2 ? "COUNT2" : "DISABLE");
+
+    // ---- 4 & 5: raw source coordinates and the resulting UV, over the vertices the draw
+    // ACTUALLY INDEXES - not the [g_curDrawFirstVertex, +g_curDrawVertexCount) window, which can
+    // hold 28,336 vertices while the draw itself indexes only 2-4 triangles out of it. That
+    // distinction - window versus what is actually indexed - is the whole point of this probe.
+    char rawLine[288] = "index buffer unavailable, not indexed, or texcoord is not SHORT2";
+    char uvLine[192] = "";
+    // 2026-09-18 AUDIT FIX: this gate used to test set 0 only (g_curLayout.texcoordType), so
+    // every FIX A set-1 draw (decalonly/fauxinterior - exactly the population this probe exists
+    // to measure) printed the generic "texcoord is not SHORT2" default and was never probed. Same
+    // set decision SetupTextureStages and UvBufferFor already make.
+    const int decalUvSet = DecalUvSourceSet();
+    const int decalSrcType =
+        (decalUvSet == 1) ? g_curLayout.texcoord1Type : g_curLayout.texcoordType;
+    const int decalSrcOffset =
+        (decalUvSet == 1) ? g_curLayout.texcoord1Offset : g_curLayout.texcoordOffset;
+    const bool decalShapeOk = g_curDrawIndexed && g_curIB && g_curDrawPrimCount && g_stream0 &&
+        g_stream0Stride &&
+        (g_curDrawPrimType == D3DPT_TRIANGLELIST || g_curDrawPrimType == D3DPT_TRIANGLESTRIP) &&
+        decalSrcType == D3DDECLTYPE_SHORT2 && decalSrcOffset >= 0 &&
+        VertexRangeFits(g_stream0, g_stream0Offset, g_curDrawFirstVertex, g_curDrawVertexCount,
+                        g_stream0Stride);
+    // Same two guards ProbeShapes, ProbeHudDraw, ProbeSkyDraw and GetBaseMesh all apply before
+    // reading a vertex buffer back, and the same stride check UvBufferFor applies before
+    // trusting a texcoord offset - this probe had neither. A DYNAMIC buffer is not safe to
+    // read-lock (the driver may still be mid-write, or the read stalls the pipeline), and an
+    // offset within 4 bytes of the end of the stride reads past the vertex into the next one.
+    // Named here rather than folded into a silent refusal: this project has been bitten
+    // repeatedly by a guard that refuses without saying why.
+    D3DVERTEXBUFFER_DESC decalVbd{};
+    const bool decalDynamic = decalShapeOk && SUCCEEDED(g_stream0->GetDesc(&decalVbd)) &&
+        (decalVbd.Usage & D3DUSAGE_DYNAMIC) != 0;
+    const bool decalTexcoordFits = !decalShapeOk ||
+        (decalSrcOffset + 4 <= static_cast<int>(g_stream0Stride));
+    if (decalShapeOk && decalDynamic) {
+        strcpy_s(rawLine, "REFUSED: stream 0 is DYNAMIC - not safe to read-lock (same guard as "
+                          "ProbeShapes/ProbeHudDraw/ProbeSkyDraw/GetBaseMesh)");
+    } else if (decalShapeOk && !decalTexcoordFits) {
+        _snprintf_s(rawLine, _TRUNCATE,
+                    "REFUSED: texcoordOffset(%d)+4 exceeds stride %u (same check as "
+                    "UvBufferFor)", decalSrcOffset, g_stream0Stride);
+    } else if (decalShapeOk) {
+        const UINT nIdx = (g_curDrawPrimType == D3DPT_TRIANGLESTRIP) ? g_curDrawPrimCount + 2
+                                                                      : g_curDrawPrimCount * 3;
+        std::vector<unsigned> raw;
+        {
+            const bool wasInt = g_internal;
+            g_internal = true;
+            g_internalThread = GetCurrentThreadId();
+            D3DINDEXBUFFER_DESC ibd{};
+            if (SUCCEEDED(g_curIB->GetDesc(&ibd)) && ibd.Size) {
+                const UINT isz = (ibd.Format == D3DFMT_INDEX32) ? 4 : 2;
+                void* im = nullptr;
+                if (static_cast<unsigned long long>(g_curDrawStartIndex) * isz +
+                            static_cast<unsigned long long>(nIdx) * isz <=
+                        ibd.Size &&
+                    SUCCEEDED(g_curIB->Lock(g_curDrawStartIndex * isz, nIdx * isz, &im,
+                                            D3DLOCK_READONLY)) &&
+                    im) {
+                    try {
+                        raw.resize(nIdx);
+                        for (UINT i = 0; i < nIdx; ++i)
+                            raw[i] = (isz == 4) ? static_cast<const unsigned*>(im)[i]
+                                                : static_cast<const unsigned short*>(im)[i];
+                    } catch (...) { raw.clear(); }
+                    g_curIB->Unlock();
+                }
+            }
+            g_internal = wasInt;
+        }
+
+        if (raw.empty()) {
+            strcpy_s(rawLine, "index buffer lock failed");
+        } else {
+            int rMinU = 32767, rMaxU = -32768, rMinV = 32767, rMaxV = -32768;
+            long long sumU = 0, sumV = 0;
+            unsigned used = 0;
+            short f4u[4] = {0, 0, 0, 0}, f4v[4] = {0, 0, 0, 0};
+            unsigned f4n = 0;
+            const bool wasInt = g_internal;
+            g_internal = true;
+            g_internalThread = GetCurrentThreadId();
+            void* vm = nullptr;
+            if (SUCCEEDED(g_stream0->Lock(g_stream0Offset + g_curDrawFirstVertex * g_stream0Stride,
+                                          g_curDrawVertexCount * g_stream0Stride, &vm,
+                                          D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK)) &&
+                vm) {
+                const unsigned char* vb = static_cast<const unsigned char*>(vm);
+                for (UINT i = 0; i < nIdx; ++i) {
+                    // Indices are relative to baseVertex, the way minIndex is - same arithmetic
+                    // OcclMeshFor uses. The locked buffer holds only the window starting at
+                    // g_curDrawFirstVertex, so rel is this index's offset into THAT window.
+                    const long long rel = static_cast<long long>(g_curDrawBaseVertex) +
+                                         static_cast<long long>(raw[i]) -
+                                         static_cast<long long>(g_curDrawFirstVertex);
+                    if (rel < 0 || rel >= static_cast<long long>(g_curDrawVertexCount)) continue;
+                    const short* uv = reinterpret_cast<const short*>(
+                        vb + static_cast<size_t>(rel) * g_stream0Stride +
+                        decalSrcOffset);
+                    if (uv[0] < rMinU) rMinU = uv[0];
+                    if (uv[0] > rMaxU) rMaxU = uv[0];
+                    if (uv[1] < rMinV) rMinV = uv[1];
+                    if (uv[1] > rMaxV) rMaxV = uv[1];
+                    sumU += uv[0];
+                    sumV += uv[1];
+                    ++used;
+                    if (f4n < 4) { f4u[f4n] = uv[0]; f4v[f4n] = uv[1]; ++f4n; }
+                }
+                g_stream0->Unlock();
+            }
+            g_internal = wasInt;
+
+            if (!used) {
+                strcpy_s(rawLine, "every index fell outside its own vertex window");
+            } else {
+                char f4Txt[96] = "";
+                int off = 0;
+                for (unsigned i = 0; i < f4n && off >= 0 && off < 90; ++i) {
+                    const int wn = _snprintf_s(f4Txt + off, sizeof(f4Txt) - off, _TRUNCATE,
+                                               "%s(%d,%d)", i ? " " : "", f4u[i], f4v[i]);
+                    if (wn < 0) break;
+                    off += wn;
+                }
+                _snprintf_s(rawLine, _TRUNCATE,
+                            "%u/%u indices in-window | u %d..%d (mean %.1f)  v %d..%d (mean "
+                            "%.1f) | first4 %s",
+                            used, nIdx, rMinU, rMaxU, static_cast<double>(sumU) / used, rMinV,
+                            rMaxV, static_cast<double>(sumV) / used, f4Txt);
+
+                // Raw * the applied scale. su/sv are the 1/1024-and-tiling scale SetupTextureStages
+                // computed above - always positive in every case this shim builds them from - so
+                // multiplying preserves min/max order without needing a sort.
+                const float uMinF = rMinU * g_decalProbeSu, uMaxF = rMaxU * g_decalProbeSu;
+                const float vMinF = rMinV * g_decalProbeSv, vMaxF = rMaxV * g_decalProbeSv;
+                char f4uv[128] = "";
+                off = 0;
+                for (unsigned i = 0; i < f4n && off >= 0 && off < 120; ++i) {
+                    const int wn = _snprintf_s(f4uv + off, sizeof(f4uv) - off, _TRUNCATE,
+                                               "%s(%.4f,%.4f)", i ? " " : "",
+                                               f4u[i] * g_decalProbeSu, f4v[i] * g_decalProbeSv);
+                    if (wn < 0) break;
+                    off += wn;
+                }
+                _snprintf_s(uvLine, _TRUNCATE,
+                            "u %.4f..%.4f  v %.4f..%.4f | first4 %s | spans %.2f x %.2f texture "
+                            "repeats",
+                            uMinF, uMaxF, vMinF, vMaxF, f4uv, uMaxF - uMinF, vMaxF - vMinF);
+            }
+        }
+    }
+
+    Log("DECAL PROBE #%u:\n"
+        "    identity: %s\n"
+        "    texture:  %s\n"
+        "    scale:    %s\n"
+        "    raw:      %s\n"
+        "    uv:       %s",
+        n, idLine, texLine, scaleLine, rawLine, uvLine[0] ? uvLine : "(not computed)");
+
+    if (g_settings.decalProbeDumpTexture) DumpDecalProbeTexture(albedo, n);
+}
+
 // The device, kept for work that happens at Present rather than inside a draw. The character
 // builds drain from Present and had no device to hand, which is why the CPU baker could only ever
 // write a FILE - and a file is no use to the game's own converted draw, which needs a bound
@@ -14226,6 +20412,7 @@ const char* CpuBakeCloth(const std::vector<RemixHardcodedVertex>& verts,
         IDirect3DTexture9* baked = nullptr;
         const bool wasInternal = g_internal;
         g_internal = true;
+        g_internalThread = GetCurrentThreadId();
         if (SUCCEEDED(g_presentDevice->CreateTexture(kCpuBakeSize, kCpuBakeSize, 1, 0,
                                                      D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
                                                      &staging, nullptr)) && staging) {
@@ -15024,17 +21211,711 @@ void RemixBuildCharacter() {
             "a partial capture", g_apiOutOfRange, g_apiCharTriangles * 3);
 }
 
+// ---------------------------------------------------------------- asset hash probe
+//
+// THE QUESTION: in Remix's "Geometry Hash" debug view, building decals flicker while the camera
+// is static, and an NPC already on screen changes colour (hash) when a new character walks into
+// view - the player's own character does not. Remix computes that hash (rtx.conf:
+// geometryAssetHashRuleString = indices,texcoords,geometrydescriptor) from three things this
+// shim controls the input to: the index range [StartIndex, StartIndex+indexCount) read from the
+// bound index buffer and rebased by its own minimum; a geometry descriptor built from indexCount
+// and vertexCount = (maxIndex-minIndex+1) computed FROM THE INDICES, not from the draw's own
+// MinVertexIndex/NumVertices; and the TEXCOORD0 values at the UNIQUE vertices those indices
+// reference. This probe replicates all three, per converted draw, across a short burst armed by
+// the existing F9 capture key, and reports whether/what actually changes draw to draw - so the
+// flicker can be attributed to a real per-frame hash change (and to WHICH component) rather than
+// guessed at from a colour on screen.
+//
+// READ-ONLY: every buffer this touches is locked D3DLOCK_READONLY, or read from the existing
+// snoop copy (SnoopCopy) for a dynamic source - never a direct Lock of a dynamic buffer, the same
+// hard rule TightenConvertedWindow/UvBufferFor already honour. It binds nothing, issues no draw
+// and changes no render state or pixel. With assetHashProbe off, ArmAssetHashProbe still runs
+// (called unconditionally from RearmCaptures) but leaves g_hashProbeActive false, and the per-draw
+// hook (ProbeAssetHash) returns on its first line - so the switch genuinely gates all of it.
+
+// FNV-1a 64: same offset basis/prime this file already uses for UvKey/SkinMeshKey (see their own
+// comments) - kept as a byte-wise primitive here because the index and texcoord components are
+// naturally byte/float streams, not a handful of scalars to XOR together.
+inline unsigned long long AssetHashFnv1a(const void* data, size_t len,
+                                         unsigned long long h = 1469598103934665603ull) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    for (size_t i = 0; i < len; ++i) { h ^= p[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+// A converted UV pair. Not std::array - this file has no <array> include, and a plain POD with
+// no padding hashes exactly like the two floats it holds.
+struct AssetHashUv2 { float u, v; };
+
+// Identity: the same game draw across frames - deliberately NOT including minIndex/numVertices
+// (TightenConvertedWindow can legitimately change those run to run for the same object) or
+// anything about the pose. Exactly the tuple the task spec names.
+struct AssetHashIdentity {
+    IDirect3DIndexBuffer9* ib;
+    UINT startIndex;
+    UINT primitiveCount;
+    IDirect3DVertexBuffer9* vb;
+    UINT streamOffset;
+    INT baseVertex;
+    bool operator==(const AssetHashIdentity& o) const {
+        return ib == o.ib && startIndex == o.startIndex && primitiveCount == o.primitiveCount &&
+               vb == o.vb && streamOffset == o.streamOffset && baseVertex == o.baseVertex;
+    }
+};
+struct AssetHashIdentityHash {
+    size_t operator()(const AssetHashIdentity& k) const {
+        size_t h = reinterpret_cast<size_t>(k.ib) * 0x9E3779B1u;
+        h ^= reinterpret_cast<size_t>(k.vb) * 0xC2B2AE35u;
+        h ^= (static_cast<size_t>(k.startIndex) * 0x85EBCA6Bu) ^
+             (static_cast<size_t>(k.primitiveCount) * 0x27D4EB2Fu);
+        h ^= (static_cast<size_t>(k.streamOffset) * 0x165667B1u) ^
+             (static_cast<size_t>(static_cast<unsigned>(k.baseVertex)) * 0xD3A2646Cu);
+        return h;
+    }
+};
+
+// Secondary key: catches the game rebuilding a draw (a new IB/VB/StartIndex for what is visibly
+// the same object), per the task spec - bound albedo pointer, objTM translation to the cm,
+// primitiveCount.
+struct AssetHashSecondaryKey {
+    IDirect3DBaseTexture9* albedo;
+    int cx, cy, cz;   // world translation, rounded to 0.01 (i.e. cm)
+    UINT primitiveCount;
+    bool operator==(const AssetHashSecondaryKey& o) const {
+        return albedo == o.albedo && cx == o.cx && cy == o.cy && cz == o.cz &&
+               primitiveCount == o.primitiveCount;
+    }
+};
+struct AssetHashSecondaryHash {
+    size_t operator()(const AssetHashSecondaryKey& k) const {
+        size_t h = reinterpret_cast<size_t>(k.albedo) * 0x9E3779B1u;
+        h ^= (static_cast<size_t>(k.cx) * 0x85EBCA6Bu) ^ (static_cast<size_t>(k.cy) * 0xC2B2AE35u) ^
+             (static_cast<size_t>(k.cz) * 0x27D4EB2Fu);
+        h ^= static_cast<size_t>(k.primitiveCount) * 0x165667B1u;
+        return h;
+    }
+};
+
+// One point sampled for the detailed flip report: which GLOBAL vertex (baseVertex + raw index
+// value), and its converted uv. Capped per identity so a large skinned mesh cannot grow this
+// without bound - the cap only limits how far into a big mesh the "first differing vertex" detail
+// can reach; the HASH above always covers every unique vertex regardless.
+struct AssetHashUvSample { UINT gv; float u, v; };
+constexpr unsigned kHashProbeUvSampleCap = 64;
+
+struct AssetHashComponents {
+    bool indexOk = false;   unsigned long long indexHash = 0; UINT indexLo = 0, indexHi = 0;
+    bool descOk = false;    unsigned long long descHash = 0;
+    bool convOk = false;    unsigned long long convHash = 0;   // texcoords the shim INTENDS Remix to read
+    bool srcOk = false;     unsigned long long srcHash = 0;    // raw source texcoords, pre-conversion
+    // uvStatic/uvDynamic/native/skinRingCPU/skinFF/raw-short2-fallback/not-reproducible
+    char path[24] = "";
+    const char* refuseWhy = nullptr;   // set on the INDEX component only ("dynamic IB, not read", etc.)
+};
+
+struct AssetHashState {
+    AssetHashComponents last;
+    bool hasLast = false;
+    bool everFlipped = false;
+    unsigned lastDrawFrame = 0xFFFFFFFFu;
+    int cls = 0;   // 0 decal-named, 1 skinned-CPU, 2 skinned-FF
+    std::vector<AssetHashUvSample> uvSample;   // last draw's converted uv, ascending global vertex
+};
+
+struct AssetHashDetailRecord {
+    int cls;
+    char ps[28];
+    UINT numVerts, primCount;
+    void* ib; UINT startIndex; UINT primitiveCount; void* vb; UINT streamOffset; INT baseVertex;
+    float at[3];
+    bool indexDiff, descDiff, convDiff, srcDiff, pathDiff;
+    unsigned long long oldIndexHash, newIndexHash, oldDescHash, newDescHash, oldConvHash, newConvHash,
+        oldSrcHash, newSrcHash;
+    char oldPath[24], newPath[24];
+    char uvDetail[160];   // "first differing vertex N: (u0,v0) -> (u1,v1)", or "" if not available
+    bool sameFrame;       // true: a same-frame duplicate with a different hash, not a cross-frame flip
+};
+
+struct AssetHashExample {   // shared shape for churn examples and same-frame-duplicate examples
+    int cls;
+    char ps[28];
+    float at[3];
+    UINT primCount;
+    char note[96];
+};
+
+constexpr size_t kHashProbeIdentityCap = 4096;
+constexpr size_t kHashProbeSecondaryCap = 8192;
+constexpr unsigned kHashProbeDetailCap = 30;
+constexpr unsigned kHashProbeExampleCap = 10;
+
+std::unordered_map<AssetHashIdentity, AssetHashState, AssetHashIdentityHash> g_hashProbeIdentities;
+std::unordered_map<AssetHashSecondaryKey, AssetHashIdentity, AssetHashSecondaryHash> g_hashProbeSecondary;
+std::vector<AssetHashDetailRecord> g_hashProbeDetail;
+std::vector<AssetHashExample> g_hashProbeDupExamples;
+std::vector<AssetHashExample> g_hashProbeChurnExamples;
+
+unsigned g_hashProbeIdentitiesSeen[3] = {0, 0, 0};
+unsigned g_hashProbeIdentitiesFlipped[3] = {0, 0, 0};
+// component order: 0 index, 1 descriptor, 2 texcoord-conversion, 3 texcoord-source
+unsigned g_hashProbeFlipsByComponent[3][4] = {};
+unsigned g_hashProbeFlipsByPath[3] = {0, 0, 0};
+unsigned g_hashProbeChurnCount[3] = {0, 0, 0};
+unsigned g_hashProbeDupSameFrame[3] = {0, 0, 0};
+unsigned g_hashProbeIdentityOverflow = 0, g_hashProbeSecondaryOverflow = 0;
+
+bool g_hashProbeActive = false;
+unsigned g_hashProbeArmFrame = 0, g_hashProbeEndFrame = 0;
+double g_hashProbeMs = 0.0;
+
+void ResetAssetHashProbeBurst() {
+    g_hashProbeIdentities.clear();
+    g_hashProbeSecondary.clear();
+    g_hashProbeDetail.clear();
+    g_hashProbeDupExamples.clear();
+    g_hashProbeChurnExamples.clear();
+    for (int c = 0; c < 3; ++c) {
+        g_hashProbeIdentitiesSeen[c] = 0;
+        g_hashProbeIdentitiesFlipped[c] = 0;
+        for (int k = 0; k < 4; ++k) g_hashProbeFlipsByComponent[c][k] = 0;
+        g_hashProbeFlipsByPath[c] = 0;
+        g_hashProbeChurnCount[c] = 0;
+        g_hashProbeDupSameFrame[c] = 0;
+    }
+    g_hashProbeIdentityOverflow = 0;
+    g_hashProbeSecondaryOverflow = 0;
+    g_hashProbeMs = 0.0;
+}
+
+void LogAssetHashProbeSummary() {
+    g_hashProbeActive = false;
+    const unsigned framesCovered = (g_frames > g_hashProbeArmFrame)
+                                       ? (g_frames - g_hashProbeArmFrame)
+                                       : static_cast<unsigned>(g_settings.assetHashProbeFrames);
+    static const char* kClsName[3] = {"decal-named", "skinned-CPU", "skinned-FF "};
+    unsigned totalSeen = 0, totalFlipped = 0;
+    for (int c = 0; c < 3; ++c) {
+        totalSeen += g_hashProbeIdentitiesSeen[c];
+        totalFlipped += g_hashProbeIdentitiesFlipped[c];
+    }
+    Log("ASSET HASH PROBE summary: burst armed at frame %u, %u frames covered | %.3f ms total, "
+        "%.4f ms/frame | %u identities tracked (cap %u, %u overflow) | %u secondary keys (cap "
+        "%u, %u overflow) | %u of %u identities flipped at least once",
+        g_hashProbeArmFrame, framesCovered, g_hashProbeMs,
+        framesCovered ? g_hashProbeMs / framesCovered : 0.0, totalSeen,
+        static_cast<unsigned>(kHashProbeIdentityCap), g_hashProbeIdentityOverflow,
+        static_cast<unsigned>(g_hashProbeSecondary.size()),
+        static_cast<unsigned>(kHashProbeSecondaryCap), g_hashProbeSecondaryOverflow, totalFlipped,
+        totalSeen);
+    for (int c = 0; c < 3; ++c) {
+        if (!g_hashProbeIdentitiesSeen[c] && !g_hashProbeChurnCount[c] && !g_hashProbeDupSameFrame[c])
+            continue;
+        Log("    class %s: identities=%u flipped=%u (%.1f%%) | flips by component: index=%u "
+            "descriptor=%u texcoord-conversion=%u texcoord-source=%u | draws whose PATH changed=%u "
+            "| identity churn (same secondary key, different identity)=%u | same identity drawn "
+            "more than once this frame with a different hash=%u",
+            kClsName[c], g_hashProbeIdentitiesSeen[c], g_hashProbeIdentitiesFlipped[c],
+            g_hashProbeIdentitiesSeen[c]
+                ? 100.0 * g_hashProbeIdentitiesFlipped[c] / g_hashProbeIdentitiesSeen[c]
+                : 0.0,
+            g_hashProbeFlipsByComponent[c][0], g_hashProbeFlipsByComponent[c][1],
+            g_hashProbeFlipsByComponent[c][2], g_hashProbeFlipsByComponent[c][3],
+            g_hashProbeFlipsByPath[c], g_hashProbeChurnCount[c], g_hashProbeDupSameFrame[c]);
+    }
+    unsigned shown = 0;
+    for (const auto& d : g_hashProbeDetail) {
+        if (shown >= kHashProbeDetailCap) break;
+        ++shown;
+        Log("    %s #%u [%s]: ps='%s' v=%u p=%u | ib=%p start=%u prims=%u vb=%p off=%u baseVtx=%d | "
+            "at(%.2f %.2f %.2f) | index %s(%llx->%llx) desc %s(%llx->%llx) texConv %s(%llx->%llx) "
+            "texSrc %s(%llx->%llx) | path '%s'->'%s'%s%s",
+            d.sameFrame ? "SAME-FRAME DUP" : "FLIP", shown,
+            d.cls == 0 ? "decal-named" : (d.cls == 1 ? "skinned-CPU" : "skinned-FF"), d.ps,
+            d.numVerts, d.primCount, d.ib, d.startIndex, d.primitiveCount, d.vb, d.streamOffset,
+            d.baseVertex, d.at[0], d.at[1], d.at[2], d.indexDiff ? "CHANGED" : "same",
+            d.oldIndexHash, d.newIndexHash, d.descDiff ? "CHANGED" : "same", d.oldDescHash,
+            d.newDescHash, d.convDiff ? "CHANGED" : "same", d.oldConvHash, d.newConvHash,
+            d.srcDiff ? "CHANGED" : "same", d.oldSrcHash, d.newSrcHash, d.oldPath, d.newPath,
+            d.uvDetail[0] ? " | " : "", d.uvDetail);
+    }
+    unsigned shownDup = 0;
+    for (const auto& e : g_hashProbeDupExamples) {
+        if (shownDup >= kHashProbeExampleCap) break;
+        ++shownDup;
+        Log("    DUP EXAMPLE #%u [%s]: ps='%s' at(%.2f %.2f %.2f) prims=%u | %s", shownDup,
+            e.cls == 0 ? "decal-named" : (e.cls == 1 ? "skinned-CPU" : "skinned-FF"), e.ps,
+            e.at[0], e.at[1], e.at[2], e.primCount, e.note);
+    }
+    unsigned shownChurn = 0;
+    for (const auto& e : g_hashProbeChurnExamples) {
+        if (shownChurn >= kHashProbeExampleCap) break;
+        ++shownChurn;
+        Log("    CHURN EXAMPLE #%u [%s]: ps='%s' at(%.2f %.2f %.2f) prims=%u | %s", shownChurn,
+            e.cls == 0 ? "decal-named" : (e.cls == 1 ? "skinned-CPU" : "skinned-FF"), e.ps,
+            e.at[0], e.at[1], e.at[2], e.primCount, e.note);
+    }
+}
+
+void ArmAssetHashProbe() {
+    if (!g_settings.assetHashProbe || g_settings.assetHashProbeFrames <= 0) {
+        g_hashProbeActive = false;
+        return;
+    }
+    ResetAssetHashProbeBurst();
+    g_hashProbeArmFrame = g_frames;
+    g_hashProbeEndFrame = g_frames + static_cast<unsigned>(g_settings.assetHashProbeFrames) - 1u;
+    g_hashProbeActive = true;
+    Log("ASSET HASH PROBE armed: next %d frames, every CONVERTED draw whose albedo names a Decal "
+        "map or that is skinned - see the ASSET HASH PROBE summary at the end of the burst",
+        g_settings.assetHashProbeFrames);
+}
+
+void TickAssetHashProbeBurst() {
+    if (g_hashProbeActive && g_frames > g_hashProbeEndFrame) LogAssetHashProbeSummary();
+}
+
+// The index component: [startIndex, startIndex+indexCount) from `ib`, rebased by its own
+// minimum, FNV-1a64 over the rebased values as raw bytes in the buffer's own index width. Reuses
+// GetTightIbShape (TightenConvertedWindow's own helper) for the dynamic/size/format check, so
+// this costs no extra GetDesc bridge round trip beyond what TightenConvertedWindow already paid
+// for the very same index buffer a few lines earlier in the caller, for a rigid draw. Never locks
+// a DYNAMIC index buffer - refuses and says so, exactly the hard rule.
+struct AssetHashIndexResult {
+    bool ok = false;
+    unsigned long long hash = 0;
+    UINT lo = 0, hi = 0, nIdx = 0;
+    int indexWidth = 0;
+    const char* refuseWhy = nullptr;
+    std::vector<UINT> uniqueRaw;   // sorted, de-duplicated raw index VALUES (relative to baseVertex)
+};
+AssetHashIndexResult ComputeAssetHashIndexComponent(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type,
+                                                    UINT startIndex, UINT primitiveCount) {
+    AssetHashIndexResult r;
+    if (!ib) { r.refuseWhy = "no index buffer"; return r; }
+    if (type != D3DPT_TRIANGLELIST && type != D3DPT_TRIANGLESTRIP && type != D3DPT_TRIANGLEFAN) {
+        r.refuseWhy = "primitive type not an indexed triangle list/strip/fan";
+        return r;
+    }
+    const UINT nIdx = VertsForPrimitives(type, primitiveCount);
+    if (!nIdx) { r.refuseWhy = "empty draw"; return r; }
+    const TightIbShape* shape = GetTightIbShape(ib);
+    if (!shape) { r.refuseWhy = "GetDesc failed"; return r; }
+    if (shape->dynamic) { r.refuseWhy = "dynamic IB, not read"; return r; }
+    const UINT isz = (shape->format == D3DFMT_INDEX32) ? 4 : 2;
+    if (static_cast<unsigned long long>(startIndex) * isz + static_cast<unsigned long long>(nIdx) * isz >
+        shape->size) {
+        r.refuseWhy = "index slice runs past the buffer";
+        return r;
+    }
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* m = nullptr;
+    const HRESULT hr = ib->Lock(startIndex * isz, nIdx * isz, &m, D3DLOCK_READONLY);
+    if (FAILED(hr) || !m) {
+        g_internal = wasInt;
+        r.refuseWhy = "index buffer lock failed";
+        return r;
+    }
+    std::vector<UINT> vals;
+    try { vals.resize(nIdx); }
+    catch (...) { ib->Unlock(); g_internal = wasInt; r.refuseWhy = "OOM"; return r; }
+    UINT lo = 0xFFFFFFFFu, hi = 0;
+    for (UINT i = 0; i < nIdx; ++i) {
+        const UINT v = (isz == 4) ? static_cast<const unsigned*>(m)[i]
+                                  : static_cast<const unsigned short*>(m)[i];
+        vals[i] = v;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    ib->Unlock();
+    g_internal = wasInt;
+
+    r.lo = lo; r.hi = hi; r.nIdx = nIdx; r.indexWidth = static_cast<int>(isz);
+    if (isz == 4) {
+        std::vector<unsigned> rebased(nIdx);
+        for (UINT i = 0; i < nIdx; ++i) rebased[i] = vals[i] - lo;
+        r.hash = AssetHashFnv1a(rebased.data(), rebased.size() * sizeof(unsigned));
+    } else {
+        std::vector<unsigned short> rebased(nIdx);
+        for (UINT i = 0; i < nIdx; ++i) rebased[i] = static_cast<unsigned short>(vals[i] - lo);
+        r.hash = AssetHashFnv1a(rebased.data(), rebased.size() * sizeof(unsigned short));
+    }
+    // unique, sorted raw values - shared with the texcoord component so the index buffer is
+    // locked exactly once per draw for this whole probe.
+    try {
+        r.uniqueRaw = vals;
+        std::sort(r.uniqueRaw.begin(), r.uniqueRaw.end());
+        r.uniqueRaw.erase(std::unique(r.uniqueRaw.begin(), r.uniqueRaw.end()), r.uniqueRaw.end());
+    } catch (...) { r.uniqueRaw.clear(); }
+    r.ok = true;
+    return r;
+}
+
+// The texcoord component. `uniqueRaw` holds the draw's unique index VALUES, relative to
+// baseVertex (per the D3D9 semantics TightenConvertedWindow's own comment works out) - so the
+// GLOBAL vertex a value `v` addresses is baseVertex + v. Determines and reproduces the path the
+// shim actually takes for THIS draw's texcoords, tags it, and fills both the conversion hash
+// (what the shim intends Remix to read) and the source hash (the raw bytes before any
+// conversion) - identical for every path except skinRingCPU, where the cloth tile shift is the
+// only transform this shim ever applies to a texcoord.
+struct AssetHashUvResult {
+    bool convOk = false; unsigned long long convHash = 0;
+    bool srcOk = false;  unsigned long long srcHash = 0;
+    char path[24] = "";
+    std::vector<AssetHashUvSample> sample;   // first kHashProbeUvSampleCap unique verts, ascending
+};
+
+// Static source: read-lock stream 0 for exactly the [lo,hi] byte span the unique vertices need
+// (never the whole buffer) - same D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK flags and g_internal guard
+// UvBufferFor's own static branch and ProbeDecalDraw both use. Dynamic source: SnoopCopy the same
+// span from the game's own writes, exactly as UvBufferFor's ring path does - never a direct Lock.
+bool ReadRigidTexcoordsRaw(const std::vector<UINT>& globalVerts, int srcType, int srcOffset,
+                           UINT stride, bool dynamicSrc, std::vector<AssetHashUv2>* out) {
+    if (globalVerts.empty() || !g_stream0 || !stride) return false;
+    const UINT lo = globalVerts.front(), hi = globalVerts.back();
+    const UINT span = hi - lo + 1;
+    if (span == 0 || span > 2000000) return false;
+    out->resize(globalVerts.size());
+    if (dynamicSrc) {
+        std::vector<unsigned char> staging;
+        try { staging.resize(static_cast<size_t>(span) * stride); } catch (...) { return false; }
+        bool fresh = false;
+        if (!SnoopCopy(g_stream0, g_stream0Offset + lo * stride, staging.data(),
+                       static_cast<UINT>(staging.size()), &fresh) ||
+            !fresh)
+            return false;
+        for (size_t i = 0; i < globalVerts.size(); ++i) {
+            const UINT rel = globalVerts[i] - lo;
+            const unsigned char* p = staging.data() + static_cast<size_t>(rel) * stride + srcOffset;
+            if (srcType == D3DDECLTYPE_FLOAT2) {
+                const float* f = reinterpret_cast<const float*>(p);
+                (*out)[i] = AssetHashUv2{f[0], f[1]};
+            } else {
+                const short* s = reinterpret_cast<const short*>(p);
+                (*out)[i] = AssetHashUv2{static_cast<float>(s[0]), static_cast<float>(s[1])};
+            }
+        }
+        return true;
+    }
+    if (!VertexRangeFits(g_stream0, g_stream0Offset, lo, span, stride)) return false;
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* m = nullptr;
+    const HRESULT hr = g_stream0->Lock(g_stream0Offset + lo * stride, span * stride, &m,
+                                       D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK);
+    if (FAILED(hr) || !m) { g_internal = wasInt; return false; }
+    const unsigned char* base = static_cast<const unsigned char*>(m);
+    for (size_t i = 0; i < globalVerts.size(); ++i) {
+        const UINT rel = globalVerts[i] - lo;
+        const unsigned char* p = base + static_cast<size_t>(rel) * stride + srcOffset;
+        if (srcType == D3DDECLTYPE_FLOAT2) {
+            const float* f = reinterpret_cast<const float*>(p);
+            (*out)[i] = AssetHashUv2{f[0], f[1]};
+        } else {
+            const short* s = reinterpret_cast<const short*>(p);
+            (*out)[i] = AssetHashUv2{static_cast<float>(s[0]), static_cast<float>(s[1])};
+        }
+    }
+    g_stream0->Unlock();
+    g_internal = wasInt;
+    return true;
+}
+
+AssetHashUvResult ComputeAssetHashUvComponent(const std::vector<UINT>& uniqueRaw, INT baseVertex,
+                                              UINT minIndex, UINT numVertices, bool skinnedLocal,
+                                              bool skinnedFFLocal, const FFPScope& scope) {
+    AssetHashUvResult r;
+    if (uniqueRaw.empty()) { strcpy_s(r.path, "not-reproducible"); return r; }
+
+    auto fillSample = [&](const std::vector<AssetHashUv2>& uv, const std::vector<UINT>& gvList) {
+        const unsigned n =
+            static_cast<unsigned>(min(gvList.size(), static_cast<size_t>(kHashProbeUvSampleCap)));
+        try {
+            r.sample.resize(n);
+            for (unsigned i = 0; i < n; ++i) r.sample[i] = AssetHashUvSample{gvList[i], uv[i].u, uv[i].v};
+        } catch (...) { r.sample.clear(); }
+    };
+
+    if (skinnedLocal) {
+        // THE CPU RING (SkinAndBind): out[i].uv = mesh->verts[i].uv + (cloth shift, if any). `i`
+        // there is the LOCAL index into the mesh - v - minIndex, per SkinAndBind's own indices-
+        // relative-to-baseVertex arithmetic (ProbeIndexWindow's own comment states it too:
+        // "indices are relative to baseVertex, as minIndex is").
+        const long long fv = static_cast<long long>(baseVertex) + static_cast<long long>(minIndex);
+        strcpy_s(r.path, "skinRingCPU");
+        if (fv < 0) return r;
+        const BaseMesh* mesh = GetBaseMesh(static_cast<UINT>(fv), numVertices);
+        if (!mesh || mesh->verts.size() != numVertices) return r;
+        std::vector<AssetHashUv2> src(uniqueRaw.size()), conv(uniqueRaw.size());
+        std::vector<UINT> gv;
+        try { gv.reserve(uniqueRaw.size()); } catch (...) {}
+        size_t k = 0;
+        for (const UINT v : uniqueRaw) {
+            if (v < minIndex || v >= minIndex + numVertices) continue;   // outside this mesh's window
+            const UINT local = v - minIndex;
+            const BaseVertex& b = mesh->verts[local];
+            const float shift = (g_clothRemap && local < g_clothRemap->shiftRaw.size())
+                                    ? g_clothRemap->shiftRaw[local]
+                                    : 0.0f;
+            src[k] = AssetHashUv2{b.uv[0], b.uv[1]};
+            conv[k] = AssetHashUv2{b.uv[0] + shift, b.uv[1]};
+            try { gv.push_back(static_cast<UINT>(baseVertex) + v); } catch (...) {}
+            ++k;
+        }
+        if (!k) return r;
+        src.resize(k); conv.resize(k);
+        r.srcHash = AssetHashFnv1a(src.data(), src.size() * sizeof(AssetHashUv2));
+        r.convHash = AssetHashFnv1a(conv.data(), conv.size() * sizeof(AssetHashUv2));
+        r.srcOk = r.convOk = true;
+        fillSample(conv, gv);
+        return r;
+    }
+
+    // Global vertex numbers, ascending (uniqueRaw is already sorted) - baseVertex can be
+    // negative, so this is signed arithmetic clamped to >=0 exactly like every other read site in
+    // this file (SkinAndBind's own "first < 0" guard, etc.).
+    std::vector<UINT> gv;
+    try { gv.reserve(uniqueRaw.size()); } catch (...) {}
+    for (const UINT v : uniqueRaw) {
+        const long long g = static_cast<long long>(baseVertex) + static_cast<long long>(v);
+        if (g < 0 || g > 0xFFFFFFFFll) continue;
+        try { gv.push_back(static_cast<UINT>(g)); } catch (...) {}
+    }
+    if (gv.empty()) { strcpy_s(r.path, "not-reproducible"); return r; }
+
+    const UINT stride = g_stream0Stride;
+    if (skinnedFFLocal) {
+        // Hardware skin (SkinViaFixedFunction): stream 0 is left exactly as the game bound it -
+        // InstallFloatUV always refuses a skinned draw (g_curLayout.skinned true), so whatever
+        // type TEXCOORD0 declares is what reaches the device unconverted.
+        if (g_curLayout.texcoordStream != 0 || g_curLayout.texcoordOffset < 0 || !stride) {
+            strcpy_s(r.path, "not-reproducible");
+            return r;
+        }
+        const bool isFloat2 = (g_curLayout.texcoordType == D3DDECLTYPE_FLOAT2);
+        const bool isShort2 = (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2);
+        if (!isFloat2 && !isShort2) { strcpy_s(r.path, "not-reproducible"); return r; }
+        // A SHORT2 TEXCOORD0 IS converted here, just not by InstallFloatUV: SkinViaFixedFunction
+        // binds UvBufferFor's float2 stream itself and SkinFFDeclarationFor retargets TEXCOORD0
+        // onto it - the same unscaled widening, so the values hashed below are what Remix reads.
+        // Tagged apart from native FLOAT2 so the two populations can still be told apart.
+        strcpy_s(r.path, isFloat2 ? "skinFF" : "skinFFuv");
+        const bool dynamicSrc = IsDynamicVB(g_stream0);
+        std::vector<AssetHashUv2> uv;
+        if (!ReadRigidTexcoordsRaw(gv, g_curLayout.texcoordType, g_curLayout.texcoordOffset, stride,
+                                   dynamicSrc, &uv))
+            return r;
+        r.srcHash = r.convHash = AssetHashFnv1a(uv.data(), uv.size() * sizeof(AssetHashUv2));
+        r.srcOk = r.convOk = true;
+        fillSample(uv, gv);
+        return r;
+    }
+
+    // Rigid, non-skinned: the same set/type decision InstallFloatUV/UvBufferFor make for this
+    // exact draw (DecalUvSourceSet, texcoord vs texcoord1).
+    const int uvSet = DecalUvSourceSet();
+    const int srcType = (uvSet == 1) ? g_curLayout.texcoord1Type : g_curLayout.texcoordType;
+    const int srcOffset = (uvSet == 1) ? g_curLayout.texcoord1Offset : g_curLayout.texcoordOffset;
+    const int srcStream = (uvSet == 1) ? g_curLayout.texcoord1Stream : g_curLayout.texcoordStream;
+    if (srcStream != 0 || srcOffset < 0 || !stride || srcOffset + 4 > static_cast<int>(stride)) {
+        strcpy_s(r.path, "not-reproducible");
+        return r;
+    }
+    const bool dynamicSrc = IsDynamicVB(g_stream0);
+    if (srcType == D3DDECLTYPE_SHORT2) {
+        // scope.uvStream: did InstallFloatUV actually convert THIS draw? If so the shim's own
+        // conversion is exactly "widen unscaled" (UvBufferFor's own comment: "RAW short values
+        // widened to float, NOT scaled") - numerically identical to reading the raw source, so
+        // conv==src for every rigid draw; only skinRingCPU's cloth shift ever makes them differ.
+        // When the shim did NOT convert, Remix receives the original SHORT2 declaration on stream
+        // 0 and discards it (see InstallFloatUV's own comment) - hashed anyway for comparison,
+        // tagged apart so that is visible.
+        strcpy_s(r.path, scope.uvStream ? (dynamicSrc ? "uvDynamic" : "uvStatic")
+                                        : "raw-short2-fallback");
+    } else if (srcType == D3DDECLTYPE_FLOAT2) {
+        strcpy_s(r.path, "native");
+    } else {
+        strcpy_s(r.path, "not-reproducible");
+        return r;
+    }
+    std::vector<AssetHashUv2> uv;
+    if (!ReadRigidTexcoordsRaw(gv, srcType, srcOffset, stride, dynamicSrc, &uv)) return r;
+    r.srcHash = r.convHash = AssetHashFnv1a(uv.data(), uv.size() * sizeof(AssetHashUv2));
+    r.srcOk = r.convOk = true;
+    fillSample(uv, gv);
+    return r;
+}
+
+// Round a world-space coordinate to the centimetre, for the secondary key - matches the task
+// spec's "objTM translation rounded to 0.01".
+inline int AssetHashRoundCm(float v) { return static_cast<int>(std::lround(v * 100.0f)); }
+
+void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex, UINT minIndex,
+                     UINT numVertices, UINT startIndex, UINT primitiveCount, bool skinnedLocal,
+                     bool skinnedFFLocal, const FFPScope& scope) {
+    if (!g_settings.assetHashProbe || !g_hashProbeActive) return;
+    const bool decalNamed = g_curPS.isPixelShader && g_curPS.albedoSampler[0] &&
+                            StrStrIA(g_curPS.albedoSampler, "Decal") != nullptr;
+    const bool isSkinned = g_curLayout.skinned;
+    if (!decalNamed && !isSkinned) return;
+
+    const LONGLONG t0 = Now();
+    // A skinned draw that took neither skin path never reaches here as Disp::Convert (the caller
+    // falls back to Disp::PassThrough before this hook runs) - so isSkinned true implies exactly
+    // one of skinnedLocal/skinnedFFLocal is true. Folding an impossible combination into class 0
+    // rather than asserting costs nothing.
+    const int cls = isSkinned ? (skinnedLocal ? 1 : (skinnedFFLocal ? 2 : 0)) : 0;
+
+    AssetHashIdentity key{g_curIB, startIndex, primitiveCount, g_stream0, g_stream0Offset, baseVertex};
+    auto it = g_hashProbeIdentities.find(key);
+    if (it == g_hashProbeIdentities.end()) {
+        if (g_hashProbeIdentities.size() >= kHashProbeIdentityCap) {
+            ++g_hashProbeIdentityOverflow;
+            g_hashProbeMs += MsSince(t0);
+            return;
+        }
+        try { it = g_hashProbeIdentities.emplace(key, AssetHashState{}).first; }
+        catch (...) { g_hashProbeMs += MsSince(t0); return; }
+        it->second.cls = cls;
+        ++g_hashProbeIdentitiesSeen[cls];
+    }
+    AssetHashState& st = it->second;
+
+    const AssetHashIndexResult idx =
+        ComputeAssetHashIndexComponent(g_curIB, type, startIndex, primitiveCount);
+    AssetHashComponents cur;
+    cur.indexOk = idx.ok; cur.indexHash = idx.hash; cur.indexLo = idx.lo; cur.indexHi = idx.hi;
+    cur.refuseWhy = idx.refuseWhy;
+    if (idx.ok) {
+        struct DescPacked { UINT indexCount, vertexCount; int primType, indexWidth; };
+        const DescPacked dp{idx.nIdx, idx.hi - idx.lo + 1u, static_cast<int>(type), idx.indexWidth};
+        cur.descHash = AssetHashFnv1a(&dp, sizeof(dp));
+        cur.descOk = true;
+    }
+    const AssetHashUvResult uv = ComputeAssetHashUvComponent(
+        idx.uniqueRaw, baseVertex, minIndex, numVertices, skinnedLocal, skinnedFFLocal, scope);
+    cur.convOk = uv.convOk; cur.convHash = uv.convHash;
+    cur.srcOk = uv.srcOk; cur.srcHash = uv.srcHash;
+    strcpy_s(cur.path, uv.path);
+
+    const bool sameFrame = (st.lastDrawFrame == g_frames);
+    if (st.hasLast) {
+        const bool indexDiff = cur.indexOk && st.last.indexOk && cur.indexHash != st.last.indexHash;
+        const bool descDiff = cur.descOk && st.last.descOk && cur.descHash != st.last.descHash;
+        const bool convDiff = cur.convOk && st.last.convOk && cur.convHash != st.last.convHash;
+        const bool srcDiff = cur.srcOk && st.last.srcOk && cur.srcHash != st.last.srcHash;
+        const bool pathDiff = strcmp(cur.path, st.last.path) != 0;
+        if (indexDiff || descDiff || convDiff || srcDiff || pathDiff) {
+            if (sameFrame) {
+                ++g_hashProbeDupSameFrame[cls];
+                if (g_hashProbeDupExamples.size() < kHashProbeExampleCap) {
+                    AssetHashExample e{};
+                    e.cls = cls;
+                    strncpy_s(e.ps, g_curPS.albedoSampler, _TRUNCATE);
+                    e.at[0] = g_lastWorld._41; e.at[1] = g_lastWorld._42; e.at[2] = g_lastWorld._43;
+                    e.primCount = primitiveCount;
+                    _snprintf_s(e.note, _TRUNCATE, "%s%s%s%schanged within the same frame",
+                                indexDiff ? "index " : "", descDiff ? "descriptor " : "",
+                                (convDiff || srcDiff) ? "texcoord " : "", pathDiff ? "path " : "");
+                    try { g_hashProbeDupExamples.push_back(e); } catch (...) {}
+                }
+            } else {
+                if (!st.everFlipped) { st.everFlipped = true; ++g_hashProbeIdentitiesFlipped[cls]; }
+                if (indexDiff) ++g_hashProbeFlipsByComponent[cls][0];
+                if (descDiff) ++g_hashProbeFlipsByComponent[cls][1];
+                if (convDiff) ++g_hashProbeFlipsByComponent[cls][2];
+                if (srcDiff) ++g_hashProbeFlipsByComponent[cls][3];
+                if (pathDiff) ++g_hashProbeFlipsByPath[cls];
+                if (g_hashProbeDetail.size() < kHashProbeDetailCap) {
+                    AssetHashDetailRecord d{};
+                    d.cls = cls;
+                    strncpy_s(d.ps, g_curPS.albedoSampler, _TRUNCATE);
+                    d.numVerts = numVertices; d.primCount = primitiveCount;
+                    d.ib = g_curIB; d.startIndex = startIndex; d.primitiveCount = primitiveCount;
+                    d.vb = g_stream0; d.streamOffset = g_stream0Offset; d.baseVertex = baseVertex;
+                    d.at[0] = g_lastWorld._41; d.at[1] = g_lastWorld._42; d.at[2] = g_lastWorld._43;
+                    d.indexDiff = indexDiff; d.descDiff = descDiff; d.convDiff = convDiff;
+                    d.srcDiff = srcDiff; d.pathDiff = pathDiff;
+                    d.oldIndexHash = st.last.indexHash; d.newIndexHash = cur.indexHash;
+                    d.oldDescHash = st.last.descHash; d.newDescHash = cur.descHash;
+                    d.oldConvHash = st.last.convHash; d.newConvHash = cur.convHash;
+                    d.oldSrcHash = st.last.srcHash; d.newSrcHash = cur.srcHash;
+                    strncpy_s(d.oldPath, st.last.path, _TRUNCATE);
+                    strncpy_s(d.newPath, cur.path, _TRUNCATE);
+                    d.uvDetail[0] = '\0';
+                    d.sameFrame = false;
+                    if (convDiff || srcDiff) {
+                        // First differing unique vertex between the retained sample (last draw)
+                        // and this one - both capped at kHashProbeUvSampleCap entries in the same
+                        // ascending order, so a mesh larger than that can miss a difference that
+                        // lands past the sampled window; the HASH above already caught the flip
+                        // regardless of whether this detail can locate it.
+                        const size_t n = min(st.uvSample.size(), uv.sample.size());
+                        for (size_t i = 0; i < n; ++i) {
+                            if (st.uvSample[i].gv != uv.sample[i].gv) break;   // sample sets diverged
+                            if (st.uvSample[i].u != uv.sample[i].u || st.uvSample[i].v != uv.sample[i].v) {
+                                _snprintf_s(d.uvDetail, _TRUNCATE,
+                                            "first differing vertex %u: (%.4f,%.4f) -> (%.4f,%.4f)",
+                                            uv.sample[i].gv, st.uvSample[i].u, st.uvSample[i].v,
+                                            uv.sample[i].u, uv.sample[i].v);
+                                break;
+                            }
+                        }
+                    }
+                    try { g_hashProbeDetail.push_back(d); } catch (...) {}
+                }
+            }
+        }
+    }
+    st.last = cur;
+    st.hasLast = true;
+    st.lastDrawFrame = g_frames;
+    st.uvSample = uv.sample;
+
+    // Secondary key: same visible object, different identity = the game rebuilt the draw.
+    AssetHashSecondaryKey sk{g_lastEffectiveAlbedo, AssetHashRoundCm(g_lastWorld._41),
+                             AssetHashRoundCm(g_lastWorld._42), AssetHashRoundCm(g_lastWorld._43),
+                             primitiveCount};
+    auto sit = g_hashProbeSecondary.find(sk);
+    if (sit == g_hashProbeSecondary.end()) {
+        if (g_hashProbeSecondary.size() < kHashProbeSecondaryCap) {
+            try { g_hashProbeSecondary.emplace(sk, key); } catch (...) {}
+        } else {
+            ++g_hashProbeSecondaryOverflow;
+        }
+    } else if (!(sit->second == key)) {
+        ++g_hashProbeChurnCount[cls];
+        if (g_hashProbeChurnExamples.size() < kHashProbeExampleCap) {
+            AssetHashExample e{};
+            e.cls = cls;
+            strncpy_s(e.ps, g_curPS.albedoSampler, _TRUNCATE);
+            e.at[0] = g_lastWorld._41; e.at[1] = g_lastWorld._42; e.at[2] = g_lastWorld._43;
+            e.primCount = primitiveCount;
+            strcpy_s(e.note, "same albedo/position/prim-count, different (ib/vb/start/baseVertex) identity");
+            try { g_hashProbeChurnExamples.push_back(e); } catch (...) {}
+        }
+        sit->second = key;
+    }
+
+    g_hashProbeMs += MsSince(t0);
+}
+
 HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type,
                                          INT baseVertex, UINT minIndex, UINT numVertices,
                                          UINT startIndex, UINT primitiveCount) {
     const LONGLONG tShim = Now();
     ++g_drawsTotal;
     ++g_drawIndexThisFrame;
-    NoteCommandBlock();
+    if (OcclusionProxyDraw(dev, primitiveCount, numVertices,
+                           static_cast<UINT>(max(0, baseVertex + static_cast<INT>(minIndex)))))
+        return D3D_OK;
+    { const LONGLONG t0 = Now(); NoteCommandBlock(); g_phaseMs[PH_ENTRY_CMD] += MsSince(t0); }
     // Before anything takes a pointer into the caches these would erase from.
-    DrainPendingInvalidations();
+    { const LONGLONG t0 = Now(); DrainPendingInvalidations(); g_phaseMs[PH_ENTRY_DRAIN] += MsSince(t0); }
     CreateSkinBuffer(dev);
-    ProbeSkyOrder(dev, numVertices, primitiveCount);
+    { const LONGLONG t0 = Now(); ProbeSkyOrder(dev, numVertices, primitiveCount); g_phaseMs[PH_ENTRY_SKY] += MsSince(t0); }
     g_meshKeyBaseVertex = static_cast<unsigned>(baseVertex) + minIndex;
     g_curDrawFirstVertex = static_cast<UINT>(max(0, baseVertex + static_cast<INT>(minIndex)));
     g_curDrawVertexCount = numVertices;
@@ -15044,9 +21925,53 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     g_curDrawStartIndex = startIndex;
     g_curDrawPrimCount = primitiveCount;
     g_curDrawPrimType = type;
-    EmitLight(dev);
+    NoteIfFinalComposite(dev);   // injectProbe/injectControl PART 1/2: before Classify runs
+    { const LONGLONG t0 = Now(); EmitLight(dev); g_phaseMs[PH_ENTRY_LIGHT] += MsSince(t0); }
+    LONGLONG tP = tShim;
+    PhaseAdd(PH_ENTRY, tP);
     FFPScope scope;
     Disp d = BeginFFP(dev, scope);
+    tP = Now();
+    // Fresh-buffer deferral (see g_recentWrites). SKIPPED, not hidden: a Hide draw still goes
+    // to the bridge, under an identity projection, which is itself a way to make a stretched
+    // quad. Skinned draws are exempt - they render from our own ring, decoded after the write.
+    int freshAge = -1;
+    if (d == Disp::Convert && !g_curLayout.skinned && g_stream0 && g_stream0Stride) {
+        const UINT b0 = g_stream0Offset + g_curDrawFirstVertex * g_stream0Stride;
+        freshAge = FramesSinceWrite(g_stream0, b0, b0 + numVertices * g_stream0Stride,
+                                    static_cast<unsigned>(max(0, g_settings.deferFreshFrames)));
+        if (freshAge >= 0 && IsDynamicVB(g_stream0)) freshAge = -1;   // rewritten every frame by design
+        if (freshAge >= 0) {
+            ++g_freshSeen;
+            if (g_settings.deferFreshStaticDraws) {
+                ++g_deferredFresh;
+                EndFFP(dev, scope);
+                scope = FFPScope{};
+                d = Because("fresh: its static buffer range was written within deferFreshFrames - skipped this frame", Disp::Skip);
+            }
+        }
+    }
+    // Occluder candidates: rigid, non-instanced converted draws - the world. Opaque means no
+    // blend, no alpha test and no shader cutout; a fence's holes must never occlude.
+    if (d == Disp::Convert && !g_curLayout.skinned) {
+        ++g_occlCandDraws;
+        if (g_instancedDraw) ++g_occlCandInstanced;
+        g_occlCandTris += primitiveCount;
+        if (primitiveCount > 1000) ++g_occlCandBig; else if (primitiveCount > 100) ++g_occlCandMid;
+        // The blend FLAG is not the blend; the FACTORS are. SR3 leaves ALPHABLENDENABLE on with
+        // ONE/ZERO for opaque draws (measured: the control garment drew src=2 dst=1).
+        const bool blend = g_rsShadow[D3DRS_ALPHABLENDENABLE] != 0 &&
+                           !(g_rsShadow[D3DRS_SRCBLEND] == D3DBLEND_ONE && g_rsShadow[D3DRS_DESTBLEND] == D3DBLEND_ZERO);
+        const bool atest = g_rsShadow[D3DRS_ALPHATESTENABLE] != 0 && g_rsShadow[D3DRS_ALPHAREF] > 0;
+        const bool texkill = g_curPS.isPixelShader && g_curPS.alphaThresholdReg >= 0;
+        if (blend) ++g_occlCandBlend;
+        if (atest) ++g_occlCandATest;
+        if (texkill) ++g_occlCandTexkill;
+        if (!blend && !atest && !texkill) {
+            ++g_occlCandOpaque;
+            RecordOccluder(dev, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount);
+        }
+    }
 
     // An EXACT duplicate: same buffer, same vertex range, same index range, same triangle count,
     // already converted earlier in this frame. The rasteriser blends such passes into one
@@ -15054,6 +21979,7 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // twice" looks like. Only the first is converted - the rest are hidden, not skipped, because
     // the engine still needs them for its own buffers.
     bool skinned = false;
+    bool skinnedFF = false;   // took the hardware (fixed-function) skin path instead - see SkinViaFixedFunction
     // Skinned draws need the pose in the key; rigid ones do not have one. Everything else about
     // the test is identical, and the duplicates measured on 2026-08-27 were overwhelmingly NOT
     // skinned - 25 world draws against 4 character draws in one frame - so restricting this to
@@ -15158,7 +22084,20 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // T-posed statue instead of a stuttering character. So the substitution has to succeed
     // before the conversion is allowed to stand, and if it fails the draw goes back to passing
     // through exactly as it did before.
+    PhaseAdd(PH_DEDUP, tP);
     if (d == Disp::Convert && g_curLayout.skinned) {
+        ProbeIndexWindow(g_curIB, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount);
+        // Hardware skinning first, when the switch is on: fixed-function indexed vertex
+        // blending stages the bone palette as D3DTS_WORLDMATRIX(0..63) and leaves stream 0
+        // untouched - see SkinViaFixedFunction, above the shape probe. It refuses (and says
+        // why, counted) for anything it cannot yet handle - cloth, morph, a declaration
+        // missing weights/indices, a bone beyond what it staged - and CPU skinning below is
+        // the fallback for every one of those, exactly as it already is for a plain
+        // SkinAndBind refusal. OFF by default: with the switch off this call is skipped
+        // entirely and nothing below it changes.
+        if (g_settings.skinViaFixedFunction)
+            skinnedFF = SkinViaFixedFunction(dev, baseVertex, minIndex, numVertices);
+        if (!skinnedFF) {
         skinned = SkinAndBind(dev, baseVertex, minIndex, numVertices);
         if (!skinned) {
             ++g_skinnedRefused;
@@ -15197,10 +22136,12 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
             scope = FFPScope{};
             d = Because("skinned, but the bind pose could not be read", Disp::PassThrough);
         }
+        }
     }
 
     // Population of the deferred G-buffer pass, measured against what is actually converted.
     // Purely observational until the numbers say what hiding it would cost.
+    PhaseAdd(PH_SKIN, tP);
     if (g_curPS.isPixelShader && g_curPS.rtCount > 1) {
         ++g_mrtWouldHide;
         if (d == Disp::Convert) {
@@ -15225,6 +22166,8 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
         Trace('D');
         MeasureShortUVs(minIndex, numVertices);
         MeasureWorldExtent(minIndex, numVertices);
+        // Diagnostic only - see g_convertedNonZeroStreamOffset's own comment, above.
+        if (g_stream0Offset != 0) ++g_convertedNonZeroStreamOffset;
     } else {
         Trace(d == Disp::Hide ? 'h' : (d == Disp::Mark ? 'm' : 'x'));
     }
@@ -15238,6 +22181,36 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     ProbeBoundAlbedo(d);
     ProbeAtlasComposite(dev, numVertices, primitiveCount, d);
     RecordFrameDraw(dev, numVertices, primitiveCount, d);
+    RingRecordDraw(numVertices, primitiveCount, d, freshAge);
+
+    // TIGHTEN WINDOW: rigid (non-skinned) converted draws only - a skinned draw is re-issued from
+    // the shim's own ring at its true part size already (see SkinAndBind's "vertex 0 must land on
+    // index minIndex" note, above) and must not be touched here. Always computed and measured,
+    // whether or not tightenConvertedWindow is on, so the report line states the size of the
+    // prize before anyone flips the switch; only APPLIED to the actual draw when the switch is
+    // on, and tightMinIndex/tightNumVertices otherwise stay identical to the game's own values.
+    UINT tightMinIndex = minIndex, tightNumVertices = numVertices;
+    if (ffp && !skinned && !skinnedFF) {
+        const bool albedoIsDecal = g_curPS.isPixelShader && g_curPS.albedoSampler[0] &&
+                                   StrStrIA(g_curPS.albedoSampler, "Decal") != nullptr;
+        UINT tMin = minIndex, tNum = numVertices;
+        if (TightenConvertedWindow(g_curIB, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount,
+                                   albedoIsDecal, &tMin, &tNum) &&
+            g_settings.tightenConvertedWindow) {
+            tightMinIndex = tMin;
+            tightNumVertices = tNum;
+        }
+    }
+
+    // ASSET HASH PROBE: after tighten-window, so a rigid draw's tightMinIndex/tightNumVertices
+    // (if applied) are already final - though the probe deliberately uses the ORIGINAL
+    // minIndex/numVertices/startIndex/primitiveCount throughout, per its own spec (the index
+    // range read from the bound IB is [StartIndex, StartIndex+indexCount) regardless of any
+    // vertex-window tightening). Only CONVERTED draws are eligible; the function itself gates
+    // further on the burst being active and on the decal-named/skinned class filter, and costs
+    // nothing when assetHashProbe is off.
+    if (ffp) ProbeAssetHash(dev, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount,
+                            skinned, skinnedFF, scope);
 
     // Skip: never reaches the device, so Remix cannot capture it. Reporting success is correct -
     // the engine ignores the return value of a draw, and pretending it failed could send it down
@@ -15257,6 +22230,18 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
         g_worldWrittenSinceDraw = false;
         return D3D_OK;
     }
+    // A pass-through draw with a vertex shader bound is one Remix drops with capture off. The
+    // census above has already counted it; the bridge round trip is all that is saved here.
+    if (d == Disp::PassThrough) {
+        if (g_settings.skipDeclinedPassThrough && g_lastVS) {
+            ++g_declinedPassSkipped;
+            EndFFP(dev, scope);
+            g_shimMsThisFrame += MsSince(tShim);
+            g_worldWrittenSinceDraw = false;
+            return D3D_OK;
+        }
+        ++g_passForwarded;
+    }
     const bool ui = ffp ? false : BeginUIDemote(dev, d == Disp::Hide);
     const unsigned marked = (d == Disp::Mark) ? BeginMark(dev, g_markClearAllStages) : 0u;
     // Everything up to here is ours; the draw call itself is not, so the timer stops before it
@@ -15264,24 +22249,48 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     g_shimMsThisFrame += MsSince(tShim);
     // A tiled cloth draw: the same mesh as a triangle list over originals + seam duplicates.
     // The game's index buffer is put back the moment the draw returns.
+    PhaseAdd(PH_PROBES, tP);
+    // The bridge's vertex shader, for THIS draw: null for a converted one (BeginFFP already
+    // did it), the game's own for a raw pass-through that is still forwarded.
+    SyncBridgeVS(dev, ffp ? nullptr : g_lastVS);
+    // injectProbe/injectControl PART 1/2: covers BOTH branches below (the cloth-remap one and
+    // the ordinary one) in one call, since the site/hasVS/rhw this draw carries is decided by
+    // `d` alone and is identical whichever branch actually issues it - a cloth remap only
+    // ever runs when `skinned` is true, which only ever happens when d == Disp::Convert.
+    const InjectSuppression injectSup = BeforeShimDraw(dev, d, primitiveCount);
     HRESULT hr;
     if (skinned && g_clothRemap && g_clothRemap->ib && g_clothRemap->tris) {
-        IDirect3DIndexBuffer9* gameIB = nullptr;
+        // g_curIB already holds what the game last bound (see its declaration comment: "what
+        // the game last bound; no bridge call to ask") - GetIndices would only read the same
+        // pointer back across the bridge, a synchronous round trip, plus an AddRef/Release pair
+        // on it. Safe here because the only thing that ever moves the DEVICE's index buffer
+        // without going through Hook_SetIndices (which is what keeps g_curIB current) is this
+        // very swap, and it always restores the game's own binding before returning below - so
+        // at this point, before the swap, the device's index buffer is exactly g_curIB.
+        IDirect3DIndexBuffer9* const gameIB = g_curIB;
         g_internal = true;
-        dev->GetIndices(&gameIB);
+        g_internalThread = GetCurrentThreadId();
         g_origSetIndices(dev, g_clothRemap->ib);
         g_internal = false;
         hr = g_origDrawIndexedPrimitive(dev, D3DPT_TRIANGLELIST, baseVertex, minIndex,
                                         numVertices + static_cast<UINT>(g_clothRemap->dupSrc.size()),
                                         0, g_clothRemap->tris);
         g_internal = true;
+        g_internalThread = GetCurrentThreadId();
         g_origSetIndices(dev, gameIB);
         g_internal = false;
-        if (gameIB) gameIB->Release();
     } else {
-        hr = g_origDrawIndexedPrimitive(dev, type, baseVertex, minIndex, numVertices,
+        // minIndex/numVertices become tightMinIndex/tightNumVertices only for a rigid converted
+        // draw with tightenConvertedWindow on and a safe tight range computed above; every other
+        // draw through this branch (a pass-through, or a converted draw where tightening was
+        // refused or is disabled) keeps them identical to the game's own declared window, because
+        // tightMinIndex/tightNumVertices were seeded from minIndex/numVertices and only
+        // overwritten in that one case.
+        hr = g_origDrawIndexedPrimitive(dev, type, baseVertex, tightMinIndex, tightNumVertices,
                                         startIndex, primitiveCount);
     }
+    AfterShimDrawSite(dev, injectSup);
+    PhaseAdd(PH_DRAW, tP);
     const LONGLONG tShim2 = Now();
     // AFTER the draw, not before it.
     //
@@ -15313,6 +22322,7 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
         break;
     }
     if (skinned) UnbindSkinned(dev);
+    else if (skinnedFF) UnbindSkinFF(dev);
     EndMark(dev, marked);
     EndUIDemote(dev, ui);
     EndFFP(dev, scope);
@@ -15326,7 +22336,7 @@ HRESULT WINAPI Hook_SetRenderTarget(IDirect3DDevice9* dev, DWORD index,
     // GetDesc below is a bridge round trip, so this hook is a candidate for the hitch even
     // though it runs only on a target CHANGE. Timed for that reason.
     const LONGLONG tRT = Now();
-    if (!g_internal && index < kMaxRTSlots) {
+    if (!InternalHere() && index < kMaxRTSlots) {
         // ONE GetDesc, feeding both questions. Two would double the bridge round trips on the
         // hook this file already names as a hitch candidate.
         D3DSURFACE_DESC d{};
@@ -15352,6 +22362,314 @@ HRESULT WINAPI Hook_SetRenderTarget(IDirect3DDevice9* dev, DWORD index,
 }
 
 void ProbeRenderTargetContents(IDirect3DDevice9* dev);
+// ================================================================== orphan sweep
+// See the Settings comment above orphanSweep for why this exists. Tally -> probe -> release, in
+// that order, and within release: ERASE EVERY CACHE ENTRY FIRST, RELEASE THE REFERENCE LAST - the
+// same rule every invalidation function in this file already follows, because it is what keeps
+// the pointer-reuse guarantee every cache above depends on. If a released object's address were
+// handed to a brand-new one before the stale cache entry naming it were gone, the new object
+// would inherit the old one's cached data.
+struct OrphanTally { unsigned refs = 0; char kind = 0; };   // kind: 'V' 'I' 'T' 'D' 'S'
+
+// One pass over every cache that takes a reference (see the AddRef inventory each cache's own
+// comment documents), building a per-pointer tally of how many of THOSE references target each
+// object. Three declaration caches (g_layouts, g_uvDecls[0/1], g_skinFFDecls) and four texture
+// caches (g_rtTextures, g_rtCopies, g_clothCache, g_meshAlbedo) can each independently hold a
+// share of the SAME pointer, and this deliberately sums them all onto one entry - an object is
+// only ever an orphan when NOTHING outside the shim holds it, which means every one of the
+// shim's own shares has to be accounted for at once, not cache by cache.
+std::unordered_map<IUnknown*, OrphanTally> TallyOrphans() {
+    std::unordered_map<IUnknown*, OrphanTally> t;
+    auto bump = [&](void* p, char kind) {
+        if (!p) return;
+        OrphanTally& e = t[reinterpret_cast<IUnknown*>(p)];
+        ++e.refs;
+        e.kind = kind;
+    };
+    // 'V' vertex buffers: UvBufferFor (ring and static both), SkinFFBufferFor (every entry, ok
+    // or failed - the map key IS the source vb, so one bump per vector entry), GetBaseMesh,
+    // RegisterSnoop.
+    for (const auto& kv : g_uvBuffers) bump(kv.second.src, 'V');
+    for (const auto& kv : g_skinFFBuffers)
+        for (size_t i = 0; i < kv.second.size(); ++i) bump(kv.first, 'V');
+    for (const auto& kv : g_baseMeshes) bump(kv.second.owner, 'V');
+    // THE SHAPE BAKE: one bump per AddRef the bake cache holds - src AND morphVb, one each per
+    // entry, exactly the two AddRef calls MorphBakeFor makes when it inserts a new entry. The
+    // baked copy itself is shim-owned and never tallied - nothing outside this shim ever
+    // references it, so it is never an orphan candidate the way its two inputs are.
+    for (const auto& kv : g_morphBakes) { bump(kv.second.src, 'V'); bump(kv.second.morphVb, 'V'); }
+    {
+        // g_instCache is the one cache the game's own threads also touch (Hook_VBLock and
+        // Hook_VBUnlock, both under SnoopGuard - Unlock can even insert), so it is walked
+        // under the same lock, never bare.
+        SnoopGuard guard;
+        for (const auto& kv : g_instCache) bump(kv.first, 'V');
+    }
+    // 'I' index buffers: GetTightIbShape only takes a reference when the pin switch is on, and
+    // that switch is fixed for the process lifetime (LoadSettings runs once) - so either every
+    // entry here holds one, or none do.
+    if (g_settings.tightenWindowPinIndexBuffers)
+        for (const auto& kv : g_tightIbShapes) bump(kv.first, 'I');
+    // 'T' textures: g_rtTextures (every entry), g_rtCopies (isRT entries only), g_clothCache
+    // (pattern/dobTex, one ref per cache entry - several outfits can share one pattern),
+    // g_meshAlbedo (inert today at cacheMeshAlbedo=0, tallied anyway in case it is ever turned on).
+    for (IDirect3DBaseTexture9* p : g_rtTextures) bump(p, 'T');
+    for (const auto& kv : g_rtCopies) if (kv.second.isRT) bump(kv.first, 'T');
+    for (const auto& kv : g_clothCache) if (kv.second.pattern) bump(kv.second.pattern, 'T');
+    for (const auto& kv : g_meshAlbedo) if (kv.second) bump(kv.second, 'T');
+    // 'D' declarations: the SOURCE declaration is the key everywhere; the clone each cache also
+    // stores is owned outright by the shim (fresh from CreateVertexDeclaration) and is never
+    // itself an orphan candidate.
+    for (const auto& kv : g_layouts) bump(kv.first, 'D');
+    for (const auto& kv : g_uvDecls[0]) bump(kv.first, 'D');
+    for (const auto& kv : g_uvDecls[1]) bump(kv.first, 'D');
+    for (const auto& kv : g_skinFFDecls) bump(kv.first, 'D');
+    // 'S' shaders: g_shaders holds both VS and PS under one void*-keyed map.
+    for (const auto& kv : g_shaders) bump(kv.first, 'S');
+    return t;
+}
+
+// Release everything this shim holds pinned to a VERTEX BUFFER that turned out to be an orphan.
+// Reuses the existing per-cache invalidation functions - each already erases its own entries and
+// releases its own share in one step - plus the one cache (g_instCache) that never had an
+// invalidation path at all because nothing used to erase it.
+void ForgetInstanceStream(IDirect3DVertexBuffer9* vb) {
+    if (!vb) return;
+    InvalidateUvBuffers(vb);
+    InvalidateBaseMeshes(vb);
+    InvalidateSkinFFBuffers(vb);
+    InvalidateMorphBakes(vb);   // THE SHAPE BAKE (src OR morphVb role)
+    InvalidateOccluders(vb);
+    g_recentWrites.erase(vb);
+    SnoopGuard guard;
+    const auto it = g_instCache.find(vb);
+    if (it != g_instCache.end()) {
+        // Mirrors Hook_VBUnlock's own addition (g_snoopBytes += add * 2, data and fresh grown
+        // together) exactly, using the sizes actually reached rather than re-deriving the growth.
+        const size_t rel = it->second.data.size() + it->second.fresh.size();
+        g_snoopBytes -= (rel <= g_snoopBytes) ? rel : g_snoopBytes;
+        if (g_pendingLock.vb == vb) g_pendingLock = {};
+        g_instCache.erase(it);
+        vb->Release();
+    }
+}
+
+// Release everything this shim holds pinned to a TEXTURE that turned out to be an orphan. Mirrors
+// g_rtTextures/g_rtCopies/g_clothCache/g_meshAlbedo's own AddRef sites, plus the no-ref
+// pointer-keyed caches (g_albedoFormatCache, g_albedoColourlessTextures) that must not outlive it.
+void ForgetTexture(IDirect3DBaseTexture9* t) {
+    if (!t) return;
+    if (g_rtTextures.erase(t)) t->Release();
+    {
+        const auto it = g_rtCopies.find(t);
+        if (it != g_rtCopies.end()) {
+            if (it->second.isRT) t->Release();
+            if (it->second.copy) it->second.copy->Release();
+            g_rtCopies.erase(it);
+        }
+    }
+    // Full teardown of one entry, exactly what ReleaseClothCache does for every entry at once.
+    for (auto it = g_clothCache.begin(); it != g_clothCache.end();) {
+        if (it->second.pattern == t) {
+            if (it->second.generated) {
+                g_clothCutoutTex.erase(it->second.generated);
+                const auto lt = g_clothTileLayout.find(it->second.generated);
+                if (lt != g_clothTileLayout.end()) {
+                    if (lt->second.ib) lt->second.ib->Release();
+                    if (g_clothRemap == &lt->second) g_clothRemap = nullptr;
+                    g_clothTileLayout.erase(lt);
+                }
+                it->second.generated->Release();
+            }
+            it->second.pattern->Release();
+            it = g_clothCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = g_meshAlbedo.begin(); it != g_meshAlbedo.end();) {
+        if (it->second == t) { t->Release(); it = g_meshAlbedo.erase(it); }
+        else ++it;
+    }
+    g_albedoFormatCache.erase(t);
+    g_albedoColourlessTextures.erase(t);
+}
+
+// Release everything this shim holds pinned to a SOURCE DECLARATION that turned out to be an
+// orphan. Up to three caches independently AddRef the same source pointer; each is released here
+// exactly once per cache that actually holds it, mirroring their own AddRef sites.
+void ForgetDeclaration(IDirect3DVertexDeclaration9* d) {
+    if (!d) return;
+    if (g_layouts.erase(static_cast<void*>(d))) d->Release();
+    for (int s = 0; s < 2; ++s) {
+        const auto it = g_uvDecls[s].find(d);
+        if (it != g_uvDecls[s].end()) {
+            if (it->second) it->second->Release();   // our own clone, owned outright
+            d->Release();                             // the source's own share
+            g_uvDecls[s].erase(it);
+        }
+    }
+    const auto it = g_skinFFDecls.find(d);
+    if (it != g_skinFFDecls.end()) {
+        if (it->second) it->second->Release();
+        d->Release();
+        g_skinFFDecls.erase(it);
+    }
+}
+
+// Release everything this shim holds pinned to a SHADER that turned out to be an orphan. `p` is
+// void* because g_shaders holds both vertex and pixel shaders under one untyped key.
+void ForgetShader(void* p) {
+    if (!p) return;
+    if (g_shaders.erase(p)) reinterpret_cast<IUnknown*>(p)->Release();
+    g_vfxMaskShaders.erase(reinterpret_cast<IDirect3DPixelShader9*>(p));
+    for (auto it = g_tilingForAlbedoCache.begin(); it != g_tilingForAlbedoCache.end();) {
+        if (reinterpret_cast<void*>(it->first.vs) == p || reinterpret_cast<void*>(it->first.ps) == p)
+            it = g_tilingForAlbedoCache.erase(it);
+        else
+            ++it;
+    }
+}
+
+// Release every INDEX BUFFER in `orphans` in one pass over each cache that names one, rather than
+// one pass per buffer - g_tightWin/g_idxWin/g_occlMeshes have no by-IB index the way the VB caches
+// have g_uvByVB/g_baseMeshByVB/g_occlMeshByVB, so this is the batched equivalent.
+void ForgetIndexBuffers(const std::unordered_set<IDirect3DIndexBuffer9*>& orphans) {
+    if (orphans.empty()) return;
+    for (auto it = g_tightWin.begin(); it != g_tightWin.end();)
+        if (orphans.count(it->first.ib)) it = g_tightWin.erase(it); else ++it;
+    for (auto it = g_idxWin.begin(); it != g_idxWin.end();)
+        if (orphans.count(it->first.ib)) it = g_idxWin.erase(it); else ++it;
+    bool touchedOccl = false;
+    for (auto it = g_occlMeshes.begin(); it != g_occlMeshes.end();)
+        if (orphans.count(it->first.ib)) { it = g_occlMeshes.erase(it); touchedOccl = true; }
+        else ++it;
+    if (touchedOccl) OcclMeshIndexRebuild();
+    for (IDirect3DIndexBuffer9* ib : orphans)
+        if (g_tightIbShapes.erase(ib)) ib->Release();
+}
+
+// Diagnostic-only: how many bytes an orphan texture holds, approximating the whole mip chain
+// (4/3 of the top level). GetLevelDesc is answered LOCALLY on this bridge build (no IPC), and
+// this only ever runs for a confirmed orphan, never for every live texture in the tally.
+double OrphanTextureApproxMB(IDirect3DBaseTexture9* t) {
+    if (!t || t->GetType() != D3DRTYPE_TEXTURE) return 0.0;
+    D3DSURFACE_DESC d{};
+    if (FAILED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d))) return 0.0;
+    return (static_cast<double>(d.Width) * d.Height * 4.0 * 4.0 / 3.0) / (1024.0 * 1024.0);
+}
+
+unsigned g_orphanSweeps = 0;
+unsigned long long g_orphanReleasedObjects = 0;
+double g_orphanReleasedMB = 0.0;
+unsigned g_orphanLastReleased = 0;
+double g_orphanLastReleasedMB = 0.0;
+bool g_orphanBookkeepingBroken = false;
+
+// Runs on the render thread, from Hook_Present, every orphanSweepFrames frames.
+void SweepOrphans() {
+    if (!g_settings.orphanSweep || g_orphanBookkeepingBroken) return;
+    const unsigned cadence = static_cast<unsigned>(max(1, g_settings.orphanSweepFrames));
+    if (g_frames % cadence != 0) return;
+
+    const LONGLONG t0 = Now();
+    std::unordered_map<IUnknown*, OrphanTally> tally = TallyOrphans();
+    if (tally.empty()) return;
+
+    // Currently bound is never an orphan, whatever the tally says - and skipping it here means
+    // it is never even probed.
+    std::unordered_set<IUnknown*> bound;
+    auto mark = [&](void* p) { if (p) bound.insert(reinterpret_cast<IUnknown*>(p)); };
+    mark(g_stream0);
+    for (int i = 0; i < kMaxStreams; ++i) mark(g_streamVB[i]);
+    mark(g_curIB);
+    for (int i = 0; i < 8; ++i) mark(g_curTexture[i]);
+    mark(g_curDecl);
+    mark(g_lastVS);
+    mark(g_lastPS);
+    mark(g_lastBoundAlbedo);
+
+    unsigned probed = 0;
+    std::vector<IDirect3DVertexBuffer9*> vOrphans;
+    std::unordered_set<IDirect3DIndexBuffer9*> iOrphans;
+    std::vector<IDirect3DBaseTexture9*> tOrphans;
+    std::vector<IDirect3DVertexDeclaration9*> dOrphans;
+    std::vector<void*> sOrphans;
+
+    for (auto& kv : tally) {
+        IUnknown* p = kv.first;
+        if (bound.count(p)) continue;
+        ++probed;
+        const unsigned pub = static_cast<unsigned>(p->AddRef() - 1);
+        p->Release();
+        if (pub < kv.second.refs) {
+            // The bookkeeping safety valve: the shim believes it holds more references than the
+            // bridge's own public count says exist, which means the tally itself is wrong - and
+            // releasing on top of a wrong tally risks releasing a reference the shim does not
+            // actually hold. Stop releasing for the rest of the process; log it once.
+            g_orphanBookkeepingBroken = true;
+            Log("ORPHAN SWEEP: BOOKKEEPING OVER-COUNT on %p (kind %c) - shim tally says %u, "
+                "bridge public refcount says %u. Releasing NOTHING this sweep and NEVER AGAIN "
+                "this process.",
+                static_cast<void*>(p), kv.second.kind, kv.second.refs, pub);
+            break;
+        }
+        if (pub > kv.second.refs) continue;   // the game still holds it
+        switch (kv.second.kind) {
+            case 'V': vOrphans.push_back(reinterpret_cast<IDirect3DVertexBuffer9*>(p)); break;
+            case 'I': iOrphans.insert(reinterpret_cast<IDirect3DIndexBuffer9*>(p)); break;
+            case 'T': tOrphans.push_back(reinterpret_cast<IDirect3DBaseTexture9*>(p)); break;
+            // See orphanSweepShadersDecls: pinned unless explicitly switched on.
+            case 'D': if (g_settings.orphanSweepShadersDecls) dOrphans.push_back(reinterpret_cast<IDirect3DVertexDeclaration9*>(p)); break;
+            case 'S': if (g_settings.orphanSweepShadersDecls) sOrphans.push_back(p); break;
+            default: break;
+        }
+    }
+    if (g_orphanBookkeepingBroken) return;
+
+    const unsigned total = static_cast<unsigned>(vOrphans.size() + iOrphans.size() +
+                                                  tOrphans.size() + dOrphans.size() + sOrphans.size());
+    if (!total) return;
+
+    // Bytes, computed only for confirmed orphans - diagnostic only, never a release decision.
+    double mbV = 0.0, mbI = 0.0, mbT = 0.0;
+    for (IDirect3DVertexBuffer9* vb : vOrphans) {
+        const auto d = g_vbDescCache.find(vb);
+        if (d != g_vbDescCache.end()) mbV += d->second.Size / (1024.0 * 1024.0);
+    }
+    for (IDirect3DIndexBuffer9* ib : iOrphans) {
+        const auto s = g_tightIbShapes.find(ib);
+        if (s != g_tightIbShapes.end()) mbI += s->second.size / (1024.0 * 1024.0);
+    }
+    for (IDirect3DBaseTexture9* tex : tOrphans) mbT += OrphanTextureApproxMB(tex);
+    const double totalMB = mbV + mbI + mbT;
+
+    if (!g_settings.orphanSweepReportOnly) {
+        for (IDirect3DVertexBuffer9* vb : vOrphans) ForgetInstanceStream(vb);
+        ForgetIndexBuffers(iOrphans);
+        for (IDirect3DBaseTexture9* tex : tOrphans) ForgetTexture(tex);
+        for (IDirect3DVertexDeclaration9* d : dOrphans) ForgetDeclaration(d);
+        for (void* s : sOrphans) ForgetShader(s);
+        g_orphanReleasedObjects += total;
+        g_orphanReleasedMB += totalMB;
+    }
+    g_orphanLastReleased = total;
+    g_orphanLastReleasedMB = totalMB;
+    ++g_orphanSweeps;
+
+    const double ms = MsSince(t0);
+    Log("ORPHAN SWEEP #%u (frame %u): %u resources / %.1f MB kept alive only by the shim, %s - "
+        "VB %u/%.1f MB, IB %u/%.1f MB, tex %u/%.1f MB, decl %u, shader %u | probed %u pinned "
+        "objects in %.2f ms | cumulative %llu objects / %.1f MB",
+        g_orphanSweeps, g_frames, total, totalMB,
+        g_settings.orphanSweepReportOnly ? "WOULD be released (report-only)" : "released",
+        static_cast<unsigned>(vOrphans.size()), mbV,
+        static_cast<unsigned>(iOrphans.size()), mbI,
+        static_cast<unsigned>(tOrphans.size()), mbT,
+        static_cast<unsigned>(dOrphans.size()), static_cast<unsigned>(sOrphans.size()),
+        probed, ms, g_orphanReleasedObjects, g_orphanReleasedMB);
+}
+
 
 // Set before anything Present-time runs, so the cloth baker can register its result as a real
 // texture instead of only a file on disk.
@@ -15359,6 +22677,11 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                             const RGNDATA* dirty) {
     g_presentDevice = dev;
     ++g_frames;
+    TickAssetHashProbeBurst();   // ASSET HASH PROBE: end the burst and log its summary, if due
+    if ((g_frames % 300) == 0) PruneRecentWrites();
+    KickOcclusionJob();
+    SweepTightWin();
+    SweepOrphans();
     // One render-target read per frame, on the render thread, after the scene is drawn.
     if (g_settings.rtContentProbe) ProbeRenderTargetContents(dev);
     if (g_settings.bakeShaderAlbedo) BakeShaderReady(dev);
@@ -15373,7 +22696,7 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
     if (g_qpcFreq.QuadPart && g_lastPresent.QuadPart) {
         const double ms = static_cast<double>(tPresentEntry - g_lastPresent.QuadPart) * 1000.0 /
                           static_cast<double>(g_qpcFreq.QuadPart);
-        if (ms < 10000.0) {   // ignore alt-tab and loading pauses
+        if (ms < 10000.0 && !g_heldSinceLastPresent) {   // ignore alt-tab, loading pauses and frame-step holds
             g_frameMsAccum += ms;
             g_shimMsAccum += g_shimMsThisFrame;
             g_otherMsAccum += g_otherMsThisFrame;
@@ -15403,21 +22726,134 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         }
     }
     g_lastPresent.QuadPart = tPresentEntry;
+    g_heldSinceLastPresent = false;
     // The skinning ring restarts every frame. DISCARD on the first lock of a frame tells the
     // driver the old contents are dead, so it can hand back fresh memory instead of waiting
     // for the GPU to finish reading last frame's vertices.
     g_skinRingPos = 0;
     g_skinRingFresh = true;
     g_skinFrameKeyCount = 0;
+    // THE SHAPE BAKE: per-frame build/rebuild budgets and the once-per-frame churn log latch.
+    g_morphBakeBuildsThisFrame = 0;
+    g_morphBakeRebuildsThisFrame = 0;
+    g_morphBakeChurnLoggedThisFrame = false;
+    g_frameWindowSeen.clear();
+    // albedoChurnProbe: this frame's identities become "last frame" for the next comparison.
+    g_albedoIdentityLastFrame.swap(g_albedoIdentityThisFrame);
+    g_albedoIdentityThisFrame.clear();
     g_shimMsThisFrame = 0.0;
     g_otherMsThisFrame = 0.0;
     g_shadersCreatedThisFrame = 0;
     g_texturesCreatedThisFrame = 0;
+    g_inOcclusionQuery = false;
     if (g_frames == 60 || g_frames % 600 == 0) {
         const double f = static_cast<double>(g_frames);
         Log("frame %u | draws %.0f/frame | FFP converted %.0f/frame (%.1f%%)",
             g_frames, g_drawsTotal / f, g_ffpConverted / f,
             g_drawsTotal ? 100.0 * g_ffpConverted / g_drawsTotal : 0.0);
+        Log("    NOT FORWARDED: occlusion proxies %.1f/frame skipped of %.1f seen inside queries "
+            "(%.1f <=%d prims, %.1f larger and forwarded) | Issue calls skipped %.1f/frame | "
+            "declined pass-through (VS bound, Remix drops them with capture off) skipped %.1f/frame, "
+            "%.1f/frame still forwarded",
+            g_occlDrawsSkipped / f, g_occlDrawsSeen / f, g_occlDrawsSmall / f,
+            g_settings.occlusionProxyMaxPrims, g_occlDrawsLarge / f, g_occlIssueSkipped / f,
+            g_declinedPassSkipped / f, g_passForwarded / f);
+        Log("    RASTERIZED-FRAME INVARIANT (blockEngineOutputToScreen=%d): %.2f/frame blocked - "
+            "classify(indexed) pass %.2f skip %.2f, classify(non-indexed) pass %.2f skip %.2f, "
+            "DrawPrimitiveUP pass %.2f skip %.2f, DrawIndexedPrimitiveUP pass %.2f skip %.2f | "
+            "g_rtTextures-missed fallback hits %.2f/frame",
+            g_settings.blockEngineOutputToScreen,
+            (g_rtInvariantIndexedPass + g_rtInvariantIndexedSkip + g_rtInvariantDrawPass +
+             g_rtInvariantDrawSkip + g_rtInvariantUPPass + g_rtInvariantUPSkip +
+             g_rtInvariantIndexedUPPass + g_rtInvariantIndexedUPSkip) / f,
+            g_rtInvariantIndexedPass / f, g_rtInvariantIndexedSkip / f,
+            g_rtInvariantDrawPass / f, g_rtInvariantDrawSkip / f,
+            g_rtInvariantUPPass / f, g_rtInvariantUPSkip / f,
+            g_rtInvariantIndexedUPPass / f, g_rtInvariantIndexedUPSkip / f,
+            g_rtInvariantFallbackHits / f);
+        Log("    INJECT PROBE/CONTROL (injectProbe=%d injectControl=%d): %.0f frames measured - "
+            "trigger preceded the final composite %.3f%% of frames (THE BUG), followed it (correct) "
+            "%.3f%%, no shim trigger seen (Remix's own Present fallback injects) %.3f%%",
+            g_settings.injectProbe, g_settings.injectControl, static_cast<double>(g_injectFramesTotal),
+            g_injectFramesTotal ? 100.0 * g_injectFramesTriggerBeforeComposite / g_injectFramesTotal : 0.0,
+            g_injectFramesTotal ? 100.0 * g_injectFramesTriggerAfterComposite / g_injectFramesTotal : 0.0,
+            g_injectFramesTotal ? 100.0 * g_injectFramesNoShimTrigger / g_injectFramesTotal : 0.0);
+        Log("        counts: before-composite %llu, after-composite %llu, no-trigger %llu | PART 2(a) "
+            "suppressed (RHW, forced off-identity) %llu, reported-only (satisfied, NOT RHW, left "
+            "unaltered) %llu | PART 2(b) deliberate quad issued %llu, failed %llu (last hr 0x%08lX)",
+            g_injectFramesTriggerBeforeComposite, g_injectFramesTriggerAfterComposite,
+            g_injectFramesNoShimTrigger, g_injectSuppressedRHW, g_injectReportedNonRHW,
+            g_deliberateQuadsIssued, g_deliberateQuadsFailed,
+            static_cast<unsigned long>(g_deliberateQuadLastFail));
+        {
+            const double fr = static_cast<double>(g_frames - g_phaseFramesPrev);
+            double d2[PH_COUNT];
+            for (int i = 0; i < PH_COUNT; ++i) { d2[i] = (g_phaseMs[i] - g_phaseMsPrev[i]) / (fr > 0 ? fr : 1); g_phaseMsPrev[i] = g_phaseMs[i]; }
+            g_phaseFramesPrev = g_frames;
+            Log("    PROFILE ms/frame (indexed draw path, since the last report): entry %.2f (of which command-block %.2f, lights %.2f, drain %.2f, sky-probe %.2f) | "
+                "BeginFFP: classify %.2f transforms %.2f uv %.2f apply %.2f stages %.2f albedo %.2f "
+                "bind %.2f | dedup %.2f | skin %.2f | probes %.2f | tighten %.2f | draw(bridge) %.2f",
+                d2[PH_ENTRY], d2[PH_ENTRY_CMD], d2[PH_ENTRY_LIGHT], d2[PH_ENTRY_DRAIN], d2[PH_ENTRY_SKY], d2[PH_CLASSIFY], d2[PH_TRANSFORMS], d2[PH_UV], d2[PH_APPLY],
+                d2[PH_STAGES], d2[PH_ALBEDO], d2[PH_BIND], d2[PH_DEDUP], d2[PH_SKIN],
+                d2[PH_PROBES], d2[PH_TIGHTEN], d2[PH_DRAW]);
+            Log("    SKIN split ms/frame: pre-loop %.2f (mesh, palette provenance, ring lock) | "
+                "loop %.2f | post %.2f (api collect, dump, bind) | fast-path draws %u, threaded %u",
+                d2[PH_SKIN_PRE], d2[PH_SKIN_LOOP], d2[PH_SKIN_POST], g_skinFastDraws, g_skinFastThreaded);
+            Log("    BRIDGE CALLS/frame (what the game asked for): vsConst %.0f (%.0f float4s, %.0f KB) "
+                "dropped %.0f | psConst %.0f (%.0f float4s) | setVS %.0f dropped %.0f, bridge syncs %.0f "
+                "| setPS %.0f | setTexture %.0f | renderState %.0f | tss %.0f | sampler %.0f | "
+                "stream %.0f | decl %.0f | transform %.0f",
+                g_callVsConst / f, g_callVsConstRegs / f, g_callVsConstRegs * 16.0 / 1024.0 / f,
+                g_dietVsConstDropped / f, g_callPsConst / f, g_callPsConstRegs / f,
+                g_callSetVS / f, g_dietVsBindDropped / f, g_bridgeVsSyncs / f, g_callSetPS / f,
+                g_callSetTex / f, g_callRS / f, g_callTSS / f, g_callSS / f, g_callStream / f,
+                g_callDecl / f, g_callTransform / f);
+            Log("    OCCLUSION PLAN: proxies %.0f/frame (%.0f placed by objTM, %.0f not; %u distinct "
+                "proxy vertex buffers) | occluder candidates %.0f/frame rigid converted draws (%.0f "
+                "instanced), %.0f opaque [blend %.0f, alpha-test %.0f, shader cutout %.0f], %.0f "
+                "triangles/frame (%.0f draws >1000 tris, %.0f draws 100-1000)",
+                g_occlDrawsSeen / f, g_occlProxyObjTM / f, g_occlProxyNoObjTM / f, g_occlProxyVBCount,
+                g_occlCandDraws / f, g_occlCandInstanced / f, g_occlCandOpaque / f, g_occlCandBlend / f,
+                g_occlCandATest / f, g_occlCandTexkill / f, g_occlCandTris / f, g_occlCandBig / f,
+                g_occlCandMid / f);
+            {
+                std::lock_guard<std::mutex> lk(g_occlMu);
+                const double j = g_occlJobsRun ? static_cast<double>(g_occlJobsRun) : 1.0;
+                Log("    OCCLUSION CULL (%s): jobs %llu run, %llu dropped (worker busy) | per job: %.0f "
+                    "boxes tested, %.0f occluders rasterised (%.0f tris), %.1f ms on the worker | "
+                    "%.0f boxes/job OCCLUDED (%.1f%%), %.0f visible at the near plane, %.0f within %d units "
+                    "(never culled), %.0f partly off screen | answered 0 pixels %.0f/frame | mesh cache %u "
+                    "(%llu unreadable) | budget-skipped occluders %.0f/job | "
+                    "occluders offered %.0f/frame: no mesh yet %.0f, off screen %.0f, taken %.0f -> %.0f per job",
+                    g_settings.occlusionDryRun ? "DRY RUN - answers still visible" : "LIVE",
+                    g_occlJobsRun, g_occlJobsDropped, g_occlTested / j, g_occlOccluders / j,
+                    g_occlTrisRaster / j, g_occlWorkerMs / j, g_occlCulled / j,
+                    g_occlTested ? 100.0 * g_occlCulled / g_occlTested : 0.0, g_occlNearVisible / j,
+                    g_occlNearDistVisible / j, g_settings.occlusionMinDistance,
+                    g_occlOffscreenVisible / j, g_occlAnswered0 / f,
+                    static_cast<unsigned>(g_occlMeshes.size()), g_occlMeshBad, g_occlSkippedBudget / j,
+                    g_occlRecOffered / f, g_occlRecNoMesh / f, g_occlRecOffscreen / f, g_occlRecTaken / f,
+                    g_occlJobOccluders / j);
+                const double sj = g_occlStillJobs ? static_cast<double>(g_occlStillJobs) : 1.0;
+                Log("    OCCLUSION FLICKER: camera-still jobs %llu | verdict flips: to visible %llu (own object %llu, "
+                    "pixel unwritten %llu, inside margin %llu, farther %llu), to culled %llu | pool churn while still: "
+                    "used +%.1f/-%.1f, offered +%.1f/-%.1f per job | self id found for %.0f of %.0f boxes/job | "
+                    "own geometry outside its box %.1f boxes/job (max poke %.2f u) | query->object remaps %.1f/frame | "
+                    "render offset max %.1f | keyed by %s, self tolerance %d cm",
+                    g_occlStillJobs, g_occlFlipVis, g_occlFlipSelf, g_occlFlipUnwritten, g_occlFlipMargin, g_occlFlipFarther,
+                    g_occlFlipCull, g_occlChurnUsedAdd / sj, g_occlChurnUsedRem / sj, g_occlChurnOffAdd / sj, g_occlChurnOffRem / sj,
+                    g_occlSelfFound / j, g_occlTested / j, g_occlPokeBoxes / j, g_occlPokeMax, g_occlQueryRemaps / f,
+                    g_occlRenderOffsetMax, g_settings.occlusionKeyByObject ? "object" : "query pointer",
+                    g_settings.occlusionSelfToleranceCm);
+                Log("    OCCLUSION POOL: unwritten-pixel flips by the writer's fate: not offered %llu, offered-not-used %llu, "
+                    "used-not-covering %llu | cap-skipped %.0f/job, sticky kept past the cap %.0f/job | occluder meshes "
+                    "invalidated/frame: whole-buffer %.1f, range-hit %.1f, range-spared %.1f (%s)",
+                    g_occlFlipNotOffered, g_occlFlipNotUsed, g_occlFlipUsedNotCov, g_occlCapSkipped / j, g_occlStickyKept / j,
+                    g_occlMeshInvWhole / f, g_occlMeshInvRange / f, g_occlMeshInvSpared / f,
+                    g_settings.occlusionRangeInvalidation ? "range-aware" : "whole-buffer only");
+                g_occlFlipExplained = 0;
+            }
+        }
         Log("    not converted: screen-space %.0f  skinned %.0f  ortho %.0f  "
             "vertex-format %.0f  untextured %.0f  instanced %.0f  mirrored %.0f  other-camera "
             "%.0f  no camera %.0f  other %.0f (per frame)",
@@ -15451,10 +22887,18 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         Log("        of which: %.1f draws/frame had a non-colour target at slot 0 but a COLOUR "
             "target bound elsewhere (the MRT G-buffer pass - these must NOT be hidden)",
             g_mrtColourElsewhere / f);
-        Log("        DEDUP: %.1f draws/frame hidden as exact duplicates already converted this "
+        // What a duplicate's disposition WORD actually is - mirrors HiddenDisp(true) without
+        // calling it (that would tick g_markRefused from the report path). hiddenPassMode=2,
+        // the deployed default, resolves to Skip: these draws are SKIPPED, not hidden.
+        const char* dedupDispWord =
+            g_settings.hiddenPassMode == 0 ? "passed through" :
+            g_settings.hiddenPassMode == 1 ? "demoted to UI overlay" :
+            g_settings.hiddenPassMode == 2 ? "SKIPPED" :
+            (g_marker ? "marked" : "passed through (marker unavailable)");
+        Log("        DEDUP: %.1f draws/frame %s as exact duplicates already converted this "
             "frame (%.0f keys held, %.1f/frame did not fit - non-zero means duplicates were "
             "MISSED) | skinned %s, all %s",
-            g_skinRepeatHidden / f, static_cast<double>(g_skinFrameKeyCount),
+            g_skinRepeatHidden / f, dedupDispWord, static_cast<double>(g_skinFrameKeyCount),
             g_dedupKeyOverflow / f,
             g_settings.dedupSkinned ? "ON" : "OFF", g_settings.dedupAll ? "ON" : "OFF");
         Log("        DEDUP declined on %.1f draws/frame: instanced, and their placement could "
@@ -15492,15 +22936,52 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         Log("        VB LOCK HOOK: %u invalidations deferred to the render thread, %u "
             "coalesced (the game locks vertex buffers from more than one thread - see the "
             "2026-08-28 crash) | snoop holds %.1f MB of %d MB, %u writes refused on budget, "
-            "%u allocations failed",
+            "%u allocations failed, %u copies REFUSED (stale/unmapped source or an exception "
+            "during the copy - the atlas snoop already had this guard; this buffer never did "
+            "until now)",
             g_deferredInvalidations, g_invalidationsCoalesced, g_snoopBytes / 1048576.0,
             static_cast<int>(kMaxSnoopBytes >> 20), g_snoopBudgetRefusals,
-            g_snoopAllocFailures);
+            g_snoopAllocFailures, g_vbCopyRefused);
         Log("        MORPH APPLIED: %.1f draws/frame skinned WITH the delta | %u draws found "
-            "no snooped buffer, %u stride refusals, %.0f vertices/frame fell back (not "
-            "written yet)",
+            "no snooped buffer, %u stride refusals, %.2f draws/frame with a non-fresh block",
             g_morphAppliedDraws / f, g_morphNotSnooped, g_morphNoStride,
-            g_morphStaleVerts / f);
+            g_morphStaleDraws / f);
+        if (g_settings.morphProbe) {
+            unsigned blockStatic = 0, blockChanged = 0, changesSum = 0;
+            for (const auto& kv : g_morphProbeBlocks) {
+                if (kv.second.hashChanges == 0) ++blockStatic;
+                else { ++blockChanged; changesSum += kv.second.hashChanges; }
+            }
+            unsigned medianGap = 0, minGap = 0, maxGap = 0;
+            if (!g_morphProbeGaps.empty()) {
+                std::vector<unsigned> gaps = g_morphProbeGaps;
+                std::sort(gaps.begin(), gaps.end());
+                medianGap = gaps[gaps.size() / 2];
+                minGap = gaps.front();
+                maxGap = gaps.back();
+            }
+            Log("        MORPH PROBE (morphProbe=ON): morph VB writes %.2f/frame (%.2f DISCARD/frame, "
+                "%.1f KB/frame) | blocks seen %u: %u STATIC (hash never changed while seen), %u "
+                "CHANGED (%.1f changes/block, median gap %u frames, min %u, max %u) | %u changes "
+                "landed after a DISCARD (repack), %u in place | draws with a non-fresh block %.2f/frame",
+                g_morphVbWrites / f, g_morphVbDiscards / f, (g_morphVbBytes / 1024.0) / f,
+                static_cast<unsigned>(g_morphProbeBlocks.size()), blockStatic, blockChanged,
+                blockChanged ? static_cast<double>(changesSum) / blockChanged : 0.0,
+                medianGap, minGap, maxGap,
+                g_morphProbeChangesAfterDiscard, g_morphProbeChangesInPlace,
+                g_morphStaleDraws / f);
+            unsigned shown = 0;
+            for (const auto& kv : g_morphProbeBlocks) {
+                if (shown >= 16) break;
+                ++shown;
+                const MorphProbeBlock& b = kv.second;
+                Log("        MORPH BLOCK #%u: morph vb=%p off=%u verts=%u | s0 vb=%p size=%u stride=%u "
+                    "first=%u | seen %u frames [%u..%u] | hash changes %u, last at frame %u",
+                    shown, static_cast<void*>(b.morphVb), b.morphBase, b.verts,
+                    static_cast<void*>(b.s0vb), b.s0size, b.s0stride, b.firstVertex,
+                    b.framesSeen, b.firstFrame, b.lastFrame, b.hashChanges, b.lastChangeFrame);
+            }
+        }
         Log("    constant-colour materials (no diffuse map, albedo from the shader's own "
             "constant) %.0f/frame | HUD quads demoted to UI %.0f/frame | back-buffer clears "
             "%.0f/frame | sky draws %.0f/frame | UI-pass draws converted %.0f/frame",
@@ -15511,8 +22992,10 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         // and the search continues rather than concluding.
         Log("    USER-POINTER DRAWS (never hooked before 2026-09-04, so never classified, never "
             "in the frame dump): DrawPrimitiveUP %.1f/frame (%u total), DrawIndexedPrimitiveUP "
-            "%.1f/frame (%u total)",
-            g_upDrawsTotal / f, g_upDrawsTotal, g_upIndexedTotal / f, g_upIndexedTotal);
+            "%.1f/frame (%u total) | HUD draws rebuilt as fixed function and NOT also sent raw: %.1f/frame; "
+            "sent raw after a rebuild (uiRawAfterHud): %.1f/frame",
+            g_upDrawsTotal / f, g_upDrawsTotal, g_upIndexedTotal / f, g_upIndexedTotal,
+            g_hudRebuiltOnly / f, g_hudRawAfterRebuild / f);
         Log("      of those, the HUD (screen space + depth test OFF) demoted to a UI overlay "
             "%.1f/frame (%u total); depth-tested in-world quads left alone %.1f/frame (%u total)"
             " - gate %s",
@@ -15595,6 +23078,79 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         Log("        SKIN DISPLACEMENT: %.1f draws/frame at rest, %.1f draws/frame moved >3 units "
             "from their bind pose (worst %.1f units)",
             g_skinAtRest / f, g_skinDisplaced / f, g_skinWorstDisplace);
+        Log("        INDEX WINDOW (skinned draws, each index range scanned once): %.1f draws/frame use indices OUTSIDE "
+            "their declared vertex window (worst overshoot %u vertices) - those triangles read another mesh from our "
+            "ring copy; %.1f/frame inside | %llu ranges scanned, %llu scan failures, %u cached | declared window avg "
+            "%.0f verts -> tight-referenced avg %.0f verts, %.0f verts/frame declared but never indexed (SkinAndBind "
+            "still blends/uploads the whole declared window regardless - see TIGHTEN WINDOW below for what this is "
+            "worth on rigid draws already)",
+            g_idxWinDrawsOut / f, g_idxWinWorstOver, g_idxWinDrawsOk / f, g_idxWinScans, g_idxWinScanFail,
+            static_cast<unsigned>(g_idxWin.size()),
+            (g_idxWinDrawsOut + g_idxWinDrawsOk) ? static_cast<double>(g_idxWinDeclaredSum) / (g_idxWinDrawsOut + g_idxWinDrawsOk) : 0.0,
+            (g_idxWinDrawsOut + g_idxWinDrawsOk) ? static_cast<double>(g_idxWinRefSum) / (g_idxWinDrawsOut + g_idxWinDrawsOk) : 0.0,
+            (static_cast<long long>(g_idxWinDeclaredSum) - static_cast<long long>(g_idxWinRefSum)) / f);
+        Log("        TIGHTEN WINDOW (rigid converted draws, each index range scanned once): %.1f/frame had a tight "
+            "range computed | declared window avg %.0f verts -> referenced range avg %.0f verts, %.0f verts/frame "
+            "removed from what the device is told to process | refused: no IB %.1f/frame, unhandled/empty type "
+            "%.1f/frame, GetDesc failed %.1f/frame, DYNAMIC index buffer %.1f/frame, index slice past buffer end "
+            "%.1f/frame, lock failed %.1f/frame, budget spent %.1f/frame, outside the declared window with "
+            "widenUnderDeclaredWindow OFF %.1f/frame, widen would pass the buffer end %.1f/frame, cache full "
+            "(hard cap) %.1f/frame | cache %u entries, %llu evictions, evict-by-age %s | gate %s, widen %s",
+            g_tightComputed / f,
+            g_tightComputed ? static_cast<double>(g_tightDeclaredSum) / g_tightComputed : 0.0,
+            g_tightComputed ? static_cast<double>(g_tightRefSum) / g_tightComputed : 0.0,
+            g_tightRemoved / f,
+            g_tightRefuseNoIB / f, g_tightRefuseType / f, g_tightRefuseDescFail / f, g_tightRefuseDynamic / f,
+            g_tightRefuseOOB / f, g_tightRefuseLockFail / f, g_tightRefuseBudget / f, g_tightRefuseNotSubset / f,
+            g_tightRefuseWidenBeyondBuffer / f, g_tightRefuseCacheFull / f,
+            static_cast<unsigned>(g_tightWin.size()), g_tightWinEvictions,
+            g_settings.tightWinEvictByAge ? "ON" : "off",
+            g_settings.tightenConvertedWindow ? "ON (draw issued with the tightened window)"
+                                              : "off (measured only, draw unchanged)",
+            g_settings.widenUnderDeclaredWindow ? "ON" : "off");
+        Log("            ...of those, DECAL-NAMED albedo (StrStrIA sampler contains \"Decal\" - the population this "
+            "was written for): %.1f/frame had a tight range computed | declared window avg %.0f verts -> referenced "
+            "range avg %.0f verts, %.0f verts/frame removed",
+            g_tightDecalComputed / f,
+            g_tightDecalComputed ? static_cast<double>(g_tightDecalDeclaredSum) / g_tightDecalComputed : 0.0,
+            g_tightDecalComputed ? static_cast<double>(g_tightDecalRefSum) / g_tightDecalComputed : 0.0,
+            g_tightDecalRemoved / f);
+        Log("        TIGHTEN WINDOW, OUTSIDE THE DECLARED WINDOW (the safety net firing, measured regardless of "
+            "widenUnderDeclaredWindow): %.2f/frame below it, %.2f/frame above it, %.2f/frame both (below+above-both "
+            "is the total) | of those, %.2f/frame WIDENED (avg %.1f verts added to the declared window), %.2f/frame "
+            "refused because the widened window would run past the end of the vertex buffer (worse: the game is "
+            "referencing vertices that do not exist), %.2f/frame refused because widenUnderDeclaredWindow is off",
+            g_tightOutsideBelow / f, g_tightOutsideAbove / f, g_tightOutsideBoth / f,
+            g_tightWidened / f,
+            g_tightWidened ? static_cast<double>(g_tightWidenedAddedSum) / g_tightWidened : 0.0,
+            g_tightRefuseWidenBeyondBuffer / f, g_tightRefuseNotSubset / f);
+        Log("        FRESH BUFFERS: %.2f converted draws/frame read a static stream-0 range written within %d frame(s); "
+            "%.2f/frame skipped for it (deferFreshStaticDraws=%d) | recent-write table %u buffers | rolling record %d frames (F9 writes it)",
+            g_freshSeen / f, g_settings.deferFreshFrames, g_deferredFresh / f, g_settings.deferFreshStaticDraws ? 1 : 0,
+            static_cast<unsigned>(g_recentWrites.size()), g_settings.ringFrames);
+        Log("        OVERLAY OFFSET: %.1f converted draws/frame pulled toward the camera by %d/1000 of their distance. "
+            "By signature: no depth write or ZFUNC=EQUAL %.1f, first sampler is a DECAL map %.1f, truly blended (by the "
+            "FACTORS) %.1f, depth bias set %.1f | LAYERS (same triangles, same placement, drawn again) %.1f/frame, "
+            "%d/1000 per pass | depth-biased draws seen %.1f/frame | stipple-sampling colour draws (LOD fade) %.1f/frame | "
+            "decal map at the LOWEST register %.1f/frame vs merely alphabetically first (the old, wrong test) %.1f/frame%s",
+            g_pulledDraws / f, g_settings.decalOffsetPermille, g_decalOffsetDraws / f, g_decalNamedDraws / f,
+            g_blendedOffsetDraws / f, g_biasOffsetDraws / f, g_layerDraws / f, g_settings.layerOffsetPermille,
+            g_depthBiasDraws / f, g_stippleColourDraws / f, g_decalLowestRegDraws / f, g_decalFirstAlphaDraws / f,
+            // decalPrimaryOffset/biasOffset/blendedOffset/decalByLowestSampler only affect anything
+            // inside `if (g_settings.decalOffsetPermille > 0)`, so at 0 every one of them is inert -
+            // say so plainly rather than let the counters above read as a live test.
+            g_settings.decalOffsetPermille > 0 ? "" : " (pull DISABLED: decalOffsetPermille=0)");
+        // ProbeDecalDraw's own arming test, reported here so a run that again finds nothing
+        // says WHY instead of leaving that to be guessed at. Raw totals, not per-frame - this
+        // is a capped, one-shot-style probe (8 reports and it stops), like the shape/HUD probes
+        // above, not a steady-state rate.
+        Log("        DECAL PROBE ARMING (ProbeDecalDraw, decalProbeStrictTarget=%s): %u "
+            "sampler candidates seen, %u armed (of 8) | rejected: %u DYNAMIC stream 0 (particles, "
+            "overwhelmingly), %u not indexed, %u no object transform or objTM places it AT the "
+            "origin",
+            g_settings.decalProbeStrictTarget ? "ON" : "off", g_decalProbeCandidates,
+            g_decalProbeReports, g_decalProbeRejectDynamic, g_decalProbeRejectNotIndexed,
+            g_decalProbeRejectOrigin);
         // Non-zero means the game DOES refill buffers that bind poses were decoded from, and
         // every one of those was previously served stale geometry - another character's mesh.
         Log("        bind-pose cache invalidated by a game write: %u times (%.2f/frame)",
@@ -15658,6 +23214,62 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             g_skinnedConverted / f, g_skinnedRefused / f, g_skinRepeatHidden / f,
             g_baseMeshDecodes, static_cast<unsigned>(g_baseMeshes.size()),
             g_baseMeshCacheFlushes);
+        // GPU (fixed-function) skinning, gate skinViaFixedFunction - see SkinViaFixedFunction
+        // above the shape probe. "reused" is staging avoided because the previous draw already
+        // left the right palette in WORLDMATRIX(0..63) - the main cost of this approach is the
+        // SetTransform calls, so that number is what paying for it looks like.
+        Log("        GPU SKIN (skinViaFixedFunction=%s): %.1f draws/frame hardware-skinned, "
+            "%.0f vertices/frame skinned on the GPU instead of the CPU | %.1f SetTransform "
+            "(WORLDMATRIX) calls/frame, %.1f draws/frame reused the previous draw's staged "
+            "palette instead of restaging, of those %.1f/frame restaged bone 0 alone "
+            "(skinFFRestageBone0=%s - WORLDMATRIX(0) IS D3DTS_WORLD, and a reused palette left it "
+            "at the WRONG object's placement without this) | stream 0 bound at a non-zero offset "
+            "(skinFFHonourStreamOffset=%s): %.1f/frame, %.1f/frame of those with phase!=0 (not "
+            "just a whole-vertex shift - the side stream decodes the WRONG vertex without this) | "
+            "skinFFFollowShaderInfluences=%s: %.1f/frame single-bone-mode draws (shader reads no "
+            "BLENDWEIGHT - staged from the vertex's own idx[0], not mesh->usedBones)",
+            g_settings.skinViaFixedFunction ? "ON" : "off", g_skinFFConverted / f,
+            g_skinFFVertsConverted / f, g_skinFFTransforms / f, g_skinFFPaletteReused / f,
+            g_skinFFBone0Restaged / f, g_settings.skinFFRestageBone0 ? "ON" : "off",
+            g_settings.skinFFHonourStreamOffset ? "ON" : "off",
+            g_skinFFNonZeroOffset / f, g_skinFFNonZeroOffsetPhase / f,
+            g_settings.skinFFFollowShaderInfluences ? "ON" : "off", g_skinFFSingleBoneDraws / f);
+        Log("        GPU SKIN refused, falls back to CPU skinning: %.1f/frame no free stream "
+            "slot, %.1f/frame cloth remap, %.1f/frame morph delta, %.1f/frame no usable bind "
+            "pose, %.1f/frame mesh uses no bones, %.1f/frame a used bone beyond what the "
+            "shader's register can stage, %.1f/frame declaration clone failed, %.1f/frame a "
+            "side-stream conversion failed, %.1f/frame vertex shader reads no BLENDINDICES, "
+            "%.1f/frame single-bone mode: a blend index beyond safe range, %.1f/frame four-bone "
+            "mode: a vertex with no usable influence | side-stream buffers built: %u ok, %u "
+            "failed (%u bad layout, %u bad desc/dynamic, %u create failed, %u lock failed) | "
+            "declarations: %u made, %u failed",
+            g_skinFFRefuseNoStreams / f, g_skinFFRefuseCloth / f, g_skinFFRefuseMorph / f,
+            g_skinFFRefuseNoMesh / f, g_skinFFRefuseUsedBones / f, g_skinFFRefuseBoneRange / f,
+            g_skinFFRefuseDecl / f, g_skinFFRefuseSideBuffer / f,
+            g_skinFFRefuseNoBoneDecl / f, g_skinFFRefuseSingleBoneRange / f, g_skinFFRefuseNoInfluence / f,
+            g_skinFFBuildOk,
+            g_skinFFBuildFail, g_skinFFBuildFailLayout, g_skinFFBuildFailDesc,
+            g_skinFFBuildFailCreate, g_skinFFBuildFailLock, g_skinFFDeclsMade,
+            g_skinFFDeclFailures);
+        {
+            double liveMB = 0.0;
+            for (const auto& kv : g_morphBakes) liveMB += kv.second.srcSize / (1024.0 * 1024.0);
+            Log("        MORPH BAKE (morphBake=%s, cap %d MB, max %d builds/frame): %.1f draws/frame "
+                "GPU-skinned from a baked morphed copy | bakes %u built, %u REBUILT (MorphBakeKey "
+                "collision - should be ~0 now the key includes the content hash; a moved-but-"
+                "unchanged block just hits), %u evicted, %u live holding %.1f MB | %.1f hits/frame, "
+                "%.2f/frame hash recomputed, %.2f/frame hash served from the per-frame memo | "
+                "refused: %u not fresh, %u budget, %u per-frame limit, %u pooled source, %u lock, "
+                "%u create | bake time %.1f ms total, worst %.2f ms",
+                g_settings.morphBake ? "ON" : "off", g_settings.morphBakeMaxMB,
+                g_settings.morphBakeMaxPerFrame, g_morphBakeDraws / f,
+                g_morphBakeBuilt, g_morphBakeRebuilt, g_morphBakeEvicted,
+                static_cast<unsigned>(g_morphBakes.size()), liveMB,
+                g_morphBakeHits / f, g_morphBakeSeqRehash / f, g_morphBakeHashMemoHits / f,
+                g_morphBakeRefuseNotFresh, g_morphBakeRefuseBudget, g_morphBakeRefusePerFrame,
+                g_morphBakeRefusePooled, g_morphBakeRefuseLock, g_morphBakeRefuseCreate,
+                g_morphBakeMsTotal, g_morphBakeMsWorst);
+        }
         // Zero here means the baseVertex fix is inert and the wrong heads have another cause.
         Log("        skinned draws with a non-zero baseVertex: %u (these decoded the WRONG "
             "window of the shared character buffer before 2026-08-20)", g_skinNonZeroBaseVertex);
@@ -15817,6 +23429,16 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         Log("    ALBEDO: constant-only %.0f/frame, tinted fallback %.0f/frame, genuinely blank "
             "%.0f/frame (of %.0f rank-0 draws/frame)",
             g_constantAlbedo / f, g_tintedAlbedo / f, g_blankAlbedo / f, g_skipNoAlbedo / f);
+        // albedoRejectColourlessTexture: a further cross-cut of the same population above (a
+        // real texture was bound, no constant, no tint fallback) - how many of THOSE draws had
+        // an alpha-only or luminance-only chosen albedo (fewer than 3 colour channels) and so
+        // took TFACTOR instead of the texture for colour. A large number here means this is a
+        // sizeable population and resolving the real per-family constant (Decal_Map_Color and
+        // its siblings) is worth doing next; a small one means it is a curiosity.
+        Log("    ALBEDO: colourless-texture rejected %.0f/frame (%u distinct alpha-only/"
+            "luminance texture(s) seen)",
+            g_albedoColourlessRejected / f,
+            static_cast<unsigned>(g_albedoColourlessTextures.size()));
         // TEXTURE FILL PROBE. The A/B on 2026-08-29 settled that SR3's writes to its character
         // texture land on native D3D9 and do NOT land under the Remix stack - with d3d9.dll
         // renamed away the character is textured correctly. Configuration cannot reach it, so
@@ -15835,9 +23457,17 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             Log("    ATLAS SNOOP (SR3 writes its character texture by locking each mip SURFACE; "
                 "those writes reach native D3D9 but not the image Remix samples, so they are "
                 "taken here and re-uploaded through UpdateTexture): %u captured, %u copies "
-                "uploaded, %u capture failures | %.1f draws/frame bound a snooped copy - gate %s",
-                g_atlasCaptured, g_atlasCopyBuilt, g_atlasCaptureFailed, g_atlasBound / f,
-                g_settings.atlasSnoop ? "ON" : "OFF");
+                "uploaded, %u capture failures, %u PENDING-ENTRY ORPHANS (a second lock on the "
+                "same surface before the first was ever unlocked - THE SEPTEMBER 14 CRASH CAME "
+                "FROM HERE; non-zero means it is still happening, just no longer fatal) | %.1f "
+                "draws/frame bound a snooped copy - gate %s",
+                g_atlasCaptured, g_atlasCopyBuilt, g_atlasCaptureFailed, g_atlasPendingOrphans,
+                g_atlasBound / f, g_settings.atlasSnoop ? "ON" : "OFF");
+            Log("      snoopValidateSource %s: %u source range(s) rejected before copying "
+                "(stale/unmapped pointer, copy skipped), %u exception(s) caught during the "
+                "copy itself (validated but unmapped a moment later)",
+                g_settings.snoopValidateSource ? "ON" : "OFF", g_atlasSrcUnmapped,
+                g_atlasSrcException);
             for (unsigned i = 0; i < g_atlasSnoopCount; ++i)
                 Log("      atlas %u: %ux%u  mean %.1f of 255  <- what the GAME wrote; non-zero "
                     "here proves the pixels exist at this boundary", i + 1,
@@ -15959,6 +23589,14 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             "%.0f/frame",
             g_albedoNullRanked / f, g_albedoNullAfterRT / f, g_skipNoColourPass / f,
             g_skipScreenSpacePass / f, g_skipParticlePass / f);
+        // CHANGE 1, 2026-09-18: the VFX mask rule in Classify, just before its final return.
+        // Distinct shaders is the over-match canary: shader_constants.csv names only four
+        // files in the ir_vfxmask/ir_vfxmasktod family, so a number well past that here means
+        // this test is catching something it should not and needs to be narrowed again.
+        Log("    VFX MASK slabs hidden (opacity lives in a sampler fixed function cannot bind) "
+            "%.0f/frame (%u distinct shaders, skipMaskOnlyVfx=%s)",
+            g_vfxMaskHidden / f, static_cast<unsigned>(g_vfxMaskShaders.size()),
+            g_settings.skipMaskOnlyVfx ? "ON" : "off");
         Log("    SKIPPED entirely %.0f/frame (mode %d) | demoted to UI overlay %.0f/frame | "
             "no-albedo materials left to Remix %.0f/frame",
             g_skippedDraws / f, g_settings.hiddenPassMode, g_demotedToUI / f, g_skipNoAlbedo / f);
@@ -15972,10 +23610,16 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             g_marker ? "created" : "NOT CREATED");
         Log("    albedo: moved off stage 0 %.0f/frame, blanked %.0f/frame, "
             "restored from mesh cache %.0f/frame (%u meshes cached, %u flushes) | "
-            "RT textures known %u | lights %.1f/frame (%u shaders)",
+            "RT textures known %u | lights %.1f/frame (%u shaders) | "
+            "churned to a different texture than last frame %.0f/frame (%u identities tracked) | "
+            "chosen albedo sampler read texcoord set 0 %.0f/frame, a NON-ZERO set %.0f/frame, "
+            "an unknown/computed set %.0f/frame | FIX B decal alpha from texture %.0f/frame",
             g_albedoMoved / f, g_albedoBlanked / f, g_albedoRestored / f,
             static_cast<unsigned>(g_meshAlbedo.size()), g_meshAlbedoFlushes,
-            static_cast<unsigned>(g_rtTextures.size()), g_lightsEmitted / f, g_lightShadersSeen);
+            static_cast<unsigned>(g_rtTextures.size()), g_lightsEmitted / f, g_lightShadersSeen,
+            g_albedoChurnDraws / f, static_cast<unsigned>(g_albedoIdentityLastFrame.size()),
+            g_albedoUvSet0Draws / f, g_albedoUvNonZeroDraws / f, g_albedoUvUnknownDraws / f,
+            g_decalAlphaFromTexture / f);
         Log("    camera %.1f %.1f %.1f | distinct cameras this frame %u (max %u) | "
             "transform writes %.0f/frame | redundant state calls dropped %.0f/frame",
             g_camX, g_camY, g_camZ, g_frameCameraCount, g_maxFrameCameras,
@@ -15990,10 +23634,44 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         // Remix reads. If it is zero while the world is still flat, the swap never fired.
         Log("    SHORT2 texcoords converted to a float2 stream: %.0f draws/frame | "
             "%u buffers converted (%.1f MB held, %u flushes, %u invalidated by the game) | "
-            "%u declarations cloned | failures: %u convert, %u declaration",
+            "%u declarations cloned | failures: %u convert, %u declaration | "
+            "FIX A decal texcoord1 set: %.1f/frame served, %.1f/frame wanted but unavailable, "
+            "%.1f/frame refused for a non-zero stream or unresolved offset, "
+            "%u declarations displaced a colliding texcoord0 element | decalUvScaleFromSet "
+            "corrected the SHORT2 verdict on %.1f/frame draws",
             g_uvStreamDraws / f, g_uvBuffersMade,
             static_cast<double>(g_uvBytesHeld) / (1024.0 * 1024.0), g_uvBufferFlushes,
-            g_uvInvalidations, g_uvDeclsMade, g_uvConvertFailures, g_uvDeclFailures);
+            g_uvInvalidations, g_uvDeclsMade, g_uvConvertFailures, g_uvDeclFailures,
+            g_uvSet1Draws / f, g_uvSet1Unavailable / f, g_uvSet1WrongStream / f,
+            g_uvDeclTexcoord0Displaced, g_decalUvScaleFixChanged / f);
+        // ORPHAN SWEEP: how many of the caches above are holding a game-owned resource that
+        // NOTHING else references any more (see the orphanSweep setting's comment for why this
+        // exists). LIVE sizes let a leak be told apart from a healthy cache that is just large.
+        Log("    ORPHAN SWEEP (on=%d every %d frames, report-only=%d): %u sweeps, released "
+            "%llu objects / %.1f MB total, last sweep %u / %.1f MB, bookkeeping %s",
+            g_settings.orphanSweep ? 1 : 0, max(1, g_settings.orphanSweepFrames),
+            g_settings.orphanSweepReportOnly ? 1 : 0, g_orphanSweeps, g_orphanReleasedObjects,
+            g_orphanReleasedMB, g_orphanLastReleased, g_orphanLastReleasedMB,
+            g_orphanBookkeepingBroken ? "BROKEN - releasing stopped" : "ok");
+        Log("        LIVE: uv buffers %u | skinFF streams %u | base meshes %u | instance "
+            "streams %u | tight IB pins %u | shaders %u | declarations %u",
+            static_cast<unsigned>(g_uvBuffers.size()), static_cast<unsigned>(g_skinFFBuffers.size()),
+            static_cast<unsigned>(g_baseMeshes.size()), static_cast<unsigned>(g_instCache.size()),
+            static_cast<unsigned>(g_tightIbShapes.size()), static_cast<unsigned>(g_shaders.size()),
+            static_cast<unsigned>(g_layouts.size()));
+        // FIX 3: stream 0 may be bound at a non-zero byte offset, the same precondition the
+        // hardware-skin side stream fixes above - and it hits this whole-buffer UV decode too.
+        // Measured whether or not the switch is on.
+        Log("        STREAM-0 OFFSET (uvHonourStreamOffset=%s): %.1f/frame UV conversions "
+            "requested with stream 0 bound at a non-zero offset - %.1f/frame static (whole-buffer "
+            "decode, wrong vertex without this), %.1f/frame dynamic (snooped slice read from the "
+            "wrong byte without this), %.1f/frame of those with phase!=0 (not just a whole-vertex "
+            "shift), %.1f/frame on DECAL-NAMED albedo (StrStrIA sampler contains \"Decal\") | "
+            "%.1f/frame of ALL converted draws (any reason) had a non-zero stream-0 offset",
+            g_settings.uvHonourStreamOffset ? "ON" : "off",
+            (g_uvNonZeroOffsetStatic + g_uvNonZeroOffsetDynamic) / f,
+            g_uvNonZeroOffsetStatic / f, g_uvNonZeroOffsetDynamic / f, g_uvNonZeroOffsetPhase / f,
+            g_uvNonZeroOffsetDecalAlbedo / f, g_convertedNonZeroStreamOffset / f);
         Log("    converted draws de-instanced: %.0f/frame", g_deinstancedDraws / f);
         // Which draws keep their unreadable SHORT2 coordinates, and why. Remix names the format
         // it refused in remix-dxvk.log; this names the reason we could not convert it.
@@ -16084,6 +23762,9 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         Log("sky probe: %u depth-disabled draws in a frame of %u", g_skyReports,
             g_drawIndexThisFrame);
     }
+    // injectProbe/injectControl PART 1/2: settled and reset HERE, before g_drawIndexThisFrame
+    // itself resets below - this IS "the end of the frame" everywhere else in this file.
+    TallyAndResetInjectFrame();
     g_clearedThisFrame = false;
     g_lastFrameDraws = g_drawIndexThisFrame;
     g_drawIndexThisFrame = 0;
@@ -16092,6 +23773,7 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
     if (g_frames % 600 == 0) InstallCrashFilter();
     ShadowInvalidate();
     g_haveAppliedWorld = g_haveAppliedView = g_haveAppliedProj = false;
+    g_appliedU = g_appliedV = 0.0f;   // 2026-09-18 audit fix: see Hook_SetTransform's D3DTS_TEXTURE0 case
     g_lightingSetUp = false;
     DisableUnusedLightSlots(dev);
 
@@ -16101,6 +23783,7 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
     const LONGLONG tRealPresent = Now();
     const HRESULT hr = g_origPresent(dev, src, dst, window, dirty);
     g_presentMsLast = MsSince(tRealPresent);
+    FrameStepHold();   // frozen: waits here with the frame on screen
     return hr;
 }
 
@@ -16121,9 +23804,95 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
 // and not the process.
 LPTOP_LEVEL_EXCEPTION_FILTER g_prevFilter = nullptr;
 
+// dbghelp.dll and MiniDumpWriteDump are resolved once, at device-hook time (see HookDevice),
+// into these two - not inside CrashFilter, where LoadLibraryA would take the loader lock in a
+// process that may already be crashed because of a corrupted heap or a deadlocked loader.
+// WriteMinidump below still falls back to loading them itself if this cache is empty (a crash
+// before HookDevice ever ran, or dbghelp genuinely was not present at hook time), because a
+// dump that occasionally does not need the fallback is worse than a fallback that is not
+// always needed.
+typedef BOOL(WINAPI* WriteDump_t)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE,
+                                  PMINIDUMP_EXCEPTION_INFORMATION, PVOID, PVOID);
+HMODULE g_dbghelpModule = nullptr;
+WriteDump_t g_writeDumpProc = nullptr;
+
+// Shared by CrashFilter and the crashTestDumpAtStart self-test in HookDevice. mei may be
+// null, which MiniDumpWriteDump accepts and simply writes a dump of the process as it
+// currently stands with no exception record - that is how the self-test verifies the writer,
+// the flags and the file handle without waiting for the game to actually crash.
+static bool WriteMinidump(const char* dumpPath, MINIDUMP_EXCEPTION_INFORMATION* mei) {
+    WriteDump_t write = g_writeDumpProc;
+    HMODULE dbghelp = g_dbghelpModule;
+    if (!write) {
+        dbghelp = LoadLibraryA("dbghelp.dll");
+        if (dbghelp)
+            write = reinterpret_cast<WriteDump_t>(GetProcAddress(dbghelp, "MiniDumpWriteDump"));
+    }
+    if (!write) return false;
+
+    // GENERIC_READ | GENERIC_WRITE: the documented dbghelp sample opens the dump file for
+    // both - MiniDumpWriteDump seeks back and re-reads parts of what it has already written to
+    // lay out the directory correctly. Write-only worked often enough that this went unnoticed
+    // until it silently produced a dump some tools refused to parse.
+    const HANDLE file = CreateFileA(dumpPath, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    // A dump written with only MiniDumpWithIndirectlyReferencedMemory had
+    // MINIDUMP_THREAD.Stack.Memory.Rva == 0 for every one of 35 threads - no stack was
+    // recoverable from the dump itself, and the crash that motivated this fix had to be
+    // re-derived from the raw memory list instead. MiniDumpWithThreadInfo was added at the
+    // same time and the empty RVAs went away, but thread stacks actually come from the thread
+    // list stream, which every dump type already writes - so ThreadInfo was very likely never
+    // what fixed it, and the comment that used to live here claimed it was without
+    // re-deriving that. Left in below anyway (removing it has not been tested, and it costs
+    // little); what more plausibly answers "why did the stack look unreadable" is
+    // MiniDumpWithFullMemoryInfo, added here: it carries the VirtualQuery map as of the crash,
+    // which is the direct answer to "was this address mapped" - the question an
+    // apparently-empty stack is really asking.
+    //   MiniDumpWithIndirectlyReferencedMemory - memory pointed TO FROM the stacks/globals
+    //     (locals, this-pointers), so a walked stack does not hit unreadable gaps a debugger
+    //     cannot fill in later.
+    //   MiniDumpWithThreadInfo - emits the THREAD_INFO_LIST stream.
+    //   MiniDumpWithFullMemoryInfo - the VirtualQuery map at crash time.
+    //   MiniDumpWithDataSegs - the shim's own globals (g_pendingSurf, g_pendingLock,
+    //     g_internal, g_internalThread among them), readable straight out of the dump without
+    //     a matching build loaded to point a debugger at them.
+    // Deliberately NOT MiniDumpWithFullMemory - that would dump the entire address space and
+    // defeat the point of keeping this dump small.
+    const MINIDUMP_TYPE dumpType = static_cast<MINIDUMP_TYPE>(
+        MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithThreadInfo |
+        MiniDumpWithFullMemoryInfo | MiniDumpWithDataSegs);
+    const BOOL ok = write(GetCurrentProcess(), GetCurrentProcessId(), file, dumpType, mei,
+                          nullptr, nullptr);
+    CloseHandle(file);
+    return ok != FALSE;
+}
+
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* info) {
+    // Re-entrancy: a fault INSIDE this filter (the heap it walks is what is corrupted, a Log()
+    // call itself faults, dbghelp misbehaves) must not recurse back into it - it must fall
+    // straight through to whatever handled crashes before us.
+    static volatile LONG g_crashEntered;
+    if (InterlockedExchange(&g_crashEntered, 1)) return EXCEPTION_CONTINUE_SEARCH;
     if (!info || !info->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
     const EXCEPTION_RECORD& er = *info->ExceptionRecord;
+
+    // THE DUMP FIRST, before a single Log() call: Log heap-allocates (formatting into a
+    // buffer, then a buffered file write), and if what got us here was heap corruption, that
+    // allocation can itself be what finishes the process before the one piece of evidence that
+    // would have explained the crash ever reaches disk.
+    char path[MAX_PATH]{};
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (char* slash = strrchr(path, '\\')) strcpy_s(slash + 1, 32, "sr3-rtx-crash.dmp");
+    MINIDUMP_EXCEPTION_INFORMATION mei{};
+    mei.ThreadId = GetCurrentThreadId();
+    mei.ExceptionPointers = info;
+    // FALSE: ExceptionPointers points into OUR OWN address space (we are writing the dump from
+    // inside the faulting process's exception filter), not a debugger's foreign memory -
+    // required or dbghelp misreads it.
+    mei.ClientPointers = FALSE;
+    const bool dumped = WriteMinidump(path, &mei);
 
     char module[MAX_PATH] = "?";
     uintptr_t offset = 0;
@@ -16137,6 +23906,7 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* info) {
 
     Log("*** CRASH: code 0x%08lX at %p (%s +0x%IX)", er.ExceptionCode,
         er.ExceptionAddress, module, offset);
+    Log("    minidump %s: %s", dumped ? "written" : "FAILED", path);
     if (er.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && er.NumberParameters >= 2) {
         Log("    access violation %s address %p",
             er.ExceptionInformation[0] ? "WRITING" : "reading",
@@ -16149,29 +23919,6 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* info) {
         static_cast<unsigned>(g_meshAlbedo.size()), static_cast<unsigned>(g_rtTextures.size()),
         static_cast<void*>(g_marker));
 
-    if (HMODULE dbghelp = LoadLibraryA("dbghelp.dll")) {
-        typedef BOOL(WINAPI * WriteDump_t)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE,
-                                           PMINIDUMP_EXCEPTION_INFORMATION, PVOID, PVOID);
-        if (auto write = reinterpret_cast<WriteDump_t>(
-                GetProcAddress(dbghelp, "MiniDumpWriteDump"))) {
-            char path[MAX_PATH]{};
-            GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (char* slash = strrchr(path, '\\')) strcpy_s(slash + 1, 32, "sr3-rtx-crash.dmp");
-            const HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                                            FILE_ATTRIBUTE_NORMAL, nullptr);
-            if (file != INVALID_HANDLE_VALUE) {
-                MINIDUMP_EXCEPTION_INFORMATION mei{};
-                mei.ThreadId = GetCurrentThreadId();
-                mei.ExceptionPointers = info;
-                mei.ClientPointers = FALSE;
-                const BOOL ok = write(GetCurrentProcess(), GetCurrentProcessId(), file,
-                                      MiniDumpWithIndirectlyReferencedMemory, &mei, nullptr,
-                                      nullptr);
-                CloseHandle(file);
-                Log("    minidump %s: %s", ok ? "written" : "FAILED", path);
-            }
-        }
-    }
     return g_prevFilter ? g_prevFilter(info) : EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -16179,8 +23926,18 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* info) {
 // and the Remix bridge both install their own well after we start. Chaining to the previous
 // filter means nobody's handling is lost.
 void InstallCrashFilter() {
+    // g_prevFilter is captured on the FIRST install only. Re-running this every 600 frames used
+    // to reassign it every time - if the game or the bridge installs its OWN filter after us at
+    // some point in the process's life (this runs for the whole of it) and that filter chains
+    // back to whatever was previously installed, a later re-install here could capture THAT
+    // filter as "previous" and build a cycle: ours calls theirs, theirs eventually calls ours
+    // again.
+    static bool installedOnce = false;
     LPTOP_LEVEL_EXCEPTION_FILTER prev = SetUnhandledExceptionFilter(CrashFilter);
-    if (prev != CrashFilter) g_prevFilter = prev;
+    if (!installedOnce) {
+        if (prev != CrashFilter) g_prevFilter = prev;
+        installedOnce = true;
+    }
 }
 
 // ---------------------------------------------------------------- occlusion queries
@@ -16211,8 +23968,24 @@ void InstallCrashFilter() {
 // pacing, and lying about one of those would break synchronisation rather than culling.
 typedef HRESULT(WINAPI* CreateQuery_t)(IDirect3DDevice9*, D3DQUERYTYPE, IDirect3DQuery9**);
 typedef HRESULT(WINAPI* QueryGetData_t)(IDirect3DQuery9*, void*, DWORD, DWORD);
+typedef HRESULT(WINAPI* QueryIssue_t)(IDirect3DQuery9*, DWORD);
 CreateQuery_t g_origCreateQuery = nullptr;
 QueryGetData_t g_origQueryGetData = nullptr;
+QueryIssue_t g_origQueryIssue = nullptr;
+// Tracks whether a draw is being issued inside an occlusion query, and - when the answer is
+// fabricated anyway - does not forward the Issue calls at all. Two bridge round trips per query
+// per frame, for a query nobody will ever read.
+HRESULT WINAPI Hook_QueryIssue(IDirect3DQuery9* self, DWORD flags) {
+    if (self && self->GetType() == D3DQUERYTYPE_OCCLUSION) {
+        if (flags & D3DISSUE_BEGIN) { g_inOcclusionQuery = true; g_curOcclusionQuery = self; }
+        if (flags & D3DISSUE_END) { g_inOcclusionQuery = false; g_curOcclusionQuery = nullptr; }
+        if (g_settings.forceOcclusionVisible && g_settings.skipOcclusionProxies) {
+            ++g_occlIssueSkipped;
+            return D3D_OK;
+        }
+    }
+    return g_origQueryIssue(self, flags);
+}
 
 // A count large enough that no visibility threshold can read it as "occluded". Not 0xFFFFFFFF:
 // an engine that scales a coverage fraction by the count would overflow on that.
@@ -16230,6 +24003,15 @@ HRESULT WINAPI Hook_QueryGetData(IDirect3DQuery9* self, void* data, DWORD size, 
             if (!g_settings.forceOcclusionVisible)
                 return g_origQueryGetData(self, data, size, flags);
             ++g_occlusionForced;
+            // Our own test, when it has an answer: a box entirely behind rasterised opaque
+            // geometry reads "0 pixels" and the engine does not draw the object this frame.
+            if (OcclusionSaysOccluded(self)) {
+                ++g_occlAnswered0;
+                if (!g_settings.occlusionDryRun) {
+                    if (data && size >= sizeof(DWORD)) *static_cast<DWORD*>(data) = 0;
+                    return D3D_OK;
+                }
+            }
             // The real query is deliberately NOT drained. Calling through with the game's flags
             // can carry D3DGETDATA_FLUSH, which stalls on the GPU across the 32-to-64-bit
             // bridge - the same mistake that made the instance-buffer read lock present as a
@@ -16250,6 +24032,8 @@ HRESULT WINAPI Hook_CreateQuery(IDirect3DDevice9* dev, D3DQUERYTYPE type,
         // Every IDirect3DQuery9 shares one vtable, so patching from the first one we are handed
         // covers all of them - the same pattern the vertex-buffer Lock hook uses.
         if (!g_origQueryGetData) {
+            PatchVTable(*returned, kSlotQueryIssue, &Hook_QueryIssue,
+                        reinterpret_cast<void**>(&g_origQueryIssue));
             PatchVTable(*returned, kSlotQueryGetData, &Hook_QueryGetData,
                         reinterpret_cast<void**>(&g_origQueryGetData));
             Log("query vtable patched from the first %s query (GetData slot %d), "
@@ -16313,7 +24097,14 @@ void HookDevice(void* device, const char* origin, const D3DPRESENT_PARAMETERS* p
 
     // After the vtable is patched, so the creation goes through the same path everything else
     // does and Hook_CreateTexture sees it (it only records render targets, which this is not).
-    CreateMarkerTexture(static_cast<IDirect3DDevice9*>(device));
+    //
+    // Gated on hiddenPassMode == 3 as of 2026-09-17: mode 3 ('bind the marker texture') is the
+    // only consumer of g_marker (see HiddenDisp and BeginMark), and the deployed ini runs mode
+    // 2 ('skip'). Building and uploading a 4x4 texture every launch for a mode nobody selects
+    // was pure waste - every use of g_marker is already null-safe, so leaving it uncreated does
+    // no harm and mode 2 now does no marker-related work at all.
+    if (g_settings.hiddenPassMode == 3)
+        CreateMarkerTexture(static_cast<IDirect3DDevice9*>(device));
     {
         IDirect3DDevice9* d = static_cast<IDirect3DDevice9*>(device);
         // How many lights may be lit at once. Asked rather than assumed, because assuming is what
@@ -16343,6 +24134,23 @@ void HookDevice(void* device, const char* origin, const D3DPRESENT_PARAMETERS* p
                 static_cast<unsigned long>(caps.MaxVertexBlendMatrices),
                 static_cast<unsigned long>(caps.MaxVertexBlendMatrixIndex),
                 static_cast<unsigned long>(caps.VertexProcessingCaps));
+            // The weight/index side stream needs ONE more slot beyond the uv conversion's
+            // own, bound alongside stream 0 and the uv stream on the same hardware-skinned
+            // draw. kSkinFFStreamDefault sits one below kUvStreamDefault so the two never
+            // collide on a device with room for both; on one too constrained (MaxStreams <=
+            // 7), clamping would hand them the SAME slot, which is worse than not offering
+            // the feature at all - g_skinFFStreamsOk says whether there was room, and
+            // SkinViaFixedFunction refuses outright (counted, like any other refusal reason)
+            // rather than silently colliding with the uv stream when there was not.
+            if (caps.MaxStreams > 1)
+                g_skinFFStream = min(kSkinFFStreamDefault, static_cast<DWORD>(caps.MaxStreams - 1));
+            g_skinFFStreamsOk = (g_skinFFStream != g_uvStream);
+            Log("device reports MaxStreams = %lu, hardware-skin weights/indices go on stream "
+                "%lu (%s)",
+                static_cast<unsigned long>(caps.MaxStreams),
+                static_cast<unsigned long>(g_skinFFStream),
+                g_skinFFStreamsOk ? "distinct from the uv stream"
+                                  : "COLLIDES with the uv stream - hardware skinning disabled");
         }
         if (SUCCEEDED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_backBufferSurface)))
             Log("back buffer surface %p (cleared once a frame; the composite no longer writes it)",
@@ -16352,12 +24160,35 @@ void HookDevice(void* device, const char* origin, const D3DPRESENT_PARAMETERS* p
     }
     InstallCrashFilter();
 
+    // Preloaded here, once, while the process is healthy - not inside CrashFilter, where
+    // LoadLibraryA would take the loader lock in a process that might already be crashed. See
+    // the note above g_dbghelpModule.
+    if (!g_dbghelpModule) {
+        g_dbghelpModule = LoadLibraryA("dbghelp.dll");
+        if (g_dbghelpModule)
+            g_writeDumpProc = reinterpret_cast<WriteDump_t>(
+                GetProcAddress(g_dbghelpModule, "MiniDumpWriteDump"));
+        Log("dbghelp.dll %s, MiniDumpWriteDump %s",
+            g_dbghelpModule ? "preloaded" : "NOT FOUND (crash dumps will retry LoadLibraryA)",
+            g_writeDumpProc ? "resolved" : "unresolved");
+    }
+    // crashTestDumpAtStart: writes ONE dump with a null exception pointer, so the writer, its
+    // flags and the file handle can be verified on demand instead of waiting for the game to
+    // actually crash. OFF by default - this is a diagnostic, not something to leave running.
+    if (g_settings.crashTestDumpAtStart) {
+        char testPath[MAX_PATH]{};
+        GetModuleFileNameA(nullptr, testPath, MAX_PATH);
+        if (char* slash = strrchr(testPath, '\\')) strcpy_s(slash + 1, 32, "sr3-rtx-test.dmp");
+        const bool testOk = WriteMinidump(testPath, nullptr);
+        Log("crashTestDumpAtStart: wrote %s: %s", testPath, testOk ? "OK" : "FAILED");
+    }
+
     // Captured but not intercepted: called by us, never filtered.
     PatchVTable(device, kSlotGetRenderState, nullptr, reinterpret_cast<void**>(&g_origGetRenderState));
     PatchVTable(device, kSlotSetMaterial, nullptr, reinterpret_cast<void**>(&g_origSetMaterial));
     PatchVTable(device, kSlotSetLight, nullptr, reinterpret_cast<void**>(&g_origSetLight));
     PatchVTable(device, kSlotLightEnable, nullptr, reinterpret_cast<void**>(&g_origLightEnable));
-    PatchVTable(device, kSlotSetIndices, nullptr, reinterpret_cast<void**>(&g_origSetIndices));
+    PatchVTable(device, kSlotSetIndices, &Hook_SetIndices, reinterpret_cast<void**>(&g_origSetIndices));
 }
 
 HRESULT WINAPI Hook_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type, HWND focus,
@@ -16392,6 +24223,7 @@ DWORD WINAPI Init(LPVOID) {
     Log("          rankAlbedo=%d excludeRTAlbedo=%d cacheMeshAlbedo=%d injectLights=%d",
         g_settings.rankAlbedo, g_settings.excludeRTAlbedo, g_settings.cacheMeshAlbedo,
         g_settings.injectLights);
+    Log("          blockEngineOutputToScreen=%d", g_settings.blockEngineOutputToScreen);
 
     // d3d9.dll here is the Remix bridge client. Wait for it if the game has not loaded it yet.
     HMODULE d3d9 = nullptr;
