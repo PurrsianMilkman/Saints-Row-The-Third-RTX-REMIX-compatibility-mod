@@ -1,0 +1,155 @@
+diff --git a/src/d3d9/d3d9_rtx.cpp b/src/d3d9/d3d9_rtx.cpp
+index 3d42e40c..22af124c 100644
+--- a/src/d3d9/d3d9_rtx.cpp
++++ b/src/d3d9/d3d9_rtx.cpp
+@@ -122,7 +122,10 @@ namespace dxvk {
+       // Get our slice of the staging ring buffer
+       result.slice = m_rtStagingData.alloc(CACHE_LINE_SIZE, size);
+ 
+-      // Acquire prevents the staging allocator from re-using this memory
++      // Acquire prevents the staging allocator from re-using this memory. Deliberately left unbalanced
++      // by an entry in m_stagingAcquired here: this lambda is shared by both the memoized and
++      // non-memoized paths below, and only the non-memoized caller may treat the slice as a per-frame
++      // hold (see the two call sites below for why).
+       result.slice.buffer()->acquire(DxvkAccess::Read);
+ 
+       const uint8_t* pBaseIndex = (uint8_t*) indexCtx.indexBuffer.mapPtr + offset;
+@@ -135,7 +138,17 @@ namespace dxvk {
+     };
+ 
+     if (enableIndexBufferMemoization() && indexCtx.ibo != nullptr) {
+-      // If we have an index buffer, we can utilize memoization
++      // If we have an index buffer, we can utilize memoization: memoize() returns a CACHED slice (and
++      // skips calling 'processing' entirely) on a hit, so the slice above can be handed out again on
++      // later frames without re-running 'processing' -- and therefore without a fresh acquire(). Its
++      // single acquire() from the miss that created it is a bounded, deliberate hold for as long as
++      // the memoization entry can still be reused (until D3D9CommonBuffer::remixMemoization invalidates
++      // it), NOT a per-frame hold; it is intentionally never pushed to m_stagingAcquired and must stay
++      // that way, matching upstream's original (unmodified) acquire-forever behavior for this path. Do
++      // not "fix" this by adding tracking here: releasing it at any single frame's EndFrame() would let
++      // RtxStagingDataAlloc recycle memory that a later frame's cache HIT still hands to Remix as this
++      // draw's index data, corrupting it (this previously caused an access violation in the Remix
++      // process during scene load).
+       D3D9CommonBuffer::RemixIboMemoizer& memoization = indexCtx.ibo->remixMemoization;
+       const auto result = memoization.memoize(indexOffset, numIndexBytes, processing);
+       minIndex = result.min;
+@@ -143,10 +156,22 @@ namespace dxvk {
+       return result.slice;
+     }
+ 
+-    // No index buffer (so no memoization) - this could be a DrawPrimitiveUP call (where IB data is passed inline)
++    // No index buffer (so no memoization) - this could be a DrawPrimitiveUP call (where IB data is
++    // passed inline), or memoization is disabled via the option above. Either way 'processing' always
++    // runs here (no caching involved), so this slice is genuinely per-draw, per-frame -- unlike the
++    // memoized path above, it's correct and necessary to track it for EndFrame()'s deferred release.
+     const auto result = processing(indexOffset, numIndexBytes);
+     minIndex = result.min;
+     maxIndex = result.max;
++
++    // Record so EndFrame() can queue a matching release, on the CS thread, once this frame's CS
++    // commands have been processed. Without it, isInUse() never clears and RtxStagingDataAlloc::
++    // alloc() never recycles this buffer (see comment on m_stagingAcquired in d3d9_rtx.h).
++    {
++      std::lock_guard<std::mutex> lock(m_stagingAcquiredMutex);
++      m_stagingAcquired.push_back(result.slice.buffer());
++    }
++
+     return result.slice;
+   }
+ 
+@@ -321,6 +346,14 @@ namespace dxvk {
+             // Acquire prevents the staging allocator from re-using this memory
+             streamCopies[element.Stream].buffer()->acquire(DxvkAccess::Read);
+ 
++            // Record so EndFrame() can queue a matching release, on the CS thread, once this frame's CS
++            // commands have been processed. Without it, isInUse() never clears and RtxStagingDataAlloc::
++            // alloc() never recycles this buffer (see comment on m_stagingAcquired in d3d9_rtx.h).
++            {
++              std::lock_guard<std::mutex> lock(m_stagingAcquiredMutex);
++              m_stagingAcquired.push_back(streamCopies[element.Stream].buffer());
++            }
++
+             memcpy(streamCopies[element.Stream].mapPtr(0), (uint8_t*) ctx.mappedSlice.mapPtr + vertexOffset, numVertexBytes);
+           }
+         }
+@@ -1249,10 +1282,37 @@ namespace dxvk {
+     m_parent->Flush();
+ 
+     // Inform backend of end-frame
+-    m_parent->EmitCs([currentReflexFrameId, targetImage, callInjectRtx](DxvkContext* ctx) { 
+-      static_cast<RtxContext*>(ctx)->endFrame(currentReflexFrameId, targetImage, callInjectRtx); 
++    m_parent->EmitCs([currentReflexFrameId, targetImage, callInjectRtx](DxvkContext* ctx) {
++      static_cast<RtxContext*>(ctx)->endFrame(currentReflexFrameId, targetImage, callInjectRtx);
+     });
+ 
++    // Balance the acquire(DxvkAccess::Read) calls made this frame in processIndexBuffer() and
++    // processVertices() (see m_stagingAcquired's declaration in d3d9_rtx.h).
++    //
++    // This must NOT be done synchronously here: Flush() and EmitCs() only enqueue work for the CS
++    // thread, they do not wait for it, so releasing on the calling thread let RtxStagingDataAlloc::
++    // alloc() recycle a staging block before the CS thread had actually recorded the copy that reads
++    // it, corrupting in-flight geometry (this previously caused an access violation in the Remix
++    // process during scene load). Instead the release is itself queued as a second, later CS command,
++    // so it is guaranteed to execute only after the endFrame command above -- and therefore after
++    // every commitGeometryToRT() CS command this frame, which were all enqueued earlier still (DXVK's
++    // CS thread is a single consumer draining a strict FIFO of chunks, and DxvkCsChunk::push() chains
++    // commands within a chunk in push order, so cross-command ordering on the CS thread always matches
++    // enqueue order; see src/dxvk/dxvk_cs.cpp). By the time this runs, DXVK's own trackResource()
++    // acquire/release around command recording/submission already covers each buffer's real GPU
++    // lifetime, so it's safe for our artificial "don't recycle yet" hold to end here.
++    {
++      std::lock_guard<std::mutex> lock(m_stagingAcquiredMutex);
++      if (!m_stagingAcquired.empty()) {
++        m_parent->EmitCs([buffers = std::move(m_stagingAcquired)](DxvkContext* ctx) {
++          for (const auto& buffer : buffers) {
++            buffer->release(DxvkAccess::Read);
++          }
++        });
++        m_stagingAcquired.clear();
++      }
++    }
++
+     // Reset for the next frame
+     m_rtxInjectTriggered = false;
+     m_drawCallID = 0;
+diff --git a/src/d3d9/d3d9_rtx.h b/src/d3d9/d3d9_rtx.h
+index 1ebafb38..373e8a8a 100644
+--- a/src/d3d9/d3d9_rtx.h
++++ b/src/d3d9/d3d9_rtx.h
+@@ -6,6 +6,7 @@
+ 
+ #include <array>
+ #include <memory>
++#include <mutex>
+ #include <vector>
+ #include <optional>
+ 
+@@ -199,6 +200,28 @@ namespace dxvk {
+     DrawCallState m_activeDrawCallState;
+ 
+     RtxStagingDataAlloc m_rtStagingData;
++
++    // Buffers whose staging-allocator read lock (see the acquire(DxvkAccess::Read) call sites in
++    // processVertices() and in processIndexBuffer()'s non-memoized path) was taken for THIS FRAME's
++    // draw calls only, so it can be released once EndFrame() has queued (on the CS thread, NOT
++    // synchronously -- see EndFrame()) a matching release ordered after this frame's
++    // commitGeometryToRT()/endFrame() CS commands. Without this, RtxStagingDataAlloc::alloc()'s
++    // isInUse() check never goes false and the allocator leaks a fresh MaxBufferSize block every time
++    // the current one fills.
++    //
++    // Deliberately NOT used for processIndexBuffer()'s MEMOIZED acquire (the D3D9CommonBuffer::
++    // RemixIboMemoizer cache hit path): that acquire is a long-lived hold for as long as the memoized
++    // slice may still be handed to a future frame's draw, not a per-frame one, so releasing it here
++    // would let a later frame's cache hit read staging memory this same allocator has already recycled
++    // for something else. See the comment at that acquire() call site for the full explanation.
++    //
++    // Guarded by a mutex: EndFrame() can be invoked from a caller that does not hold the D3D9 device
++    // lock (e.g. D3D9SwapChainEx::Present() calls it before acquiring the lock, and
++    // D3D9SwapChainEx::onWindowMessageEvent() calls it from whatever thread pumps window messages),
++    // so it is not safe to assume it is serialized against a concurrent draw call on another thread.
++    std::mutex m_stagingAcquiredMutex;
++    std::vector<Rc<DxvkBuffer>> m_stagingAcquired;
++
+     D3D9DeviceEx* m_parent;
+ 
+     std::optional<D3DPRESENT_PARAMETERS> m_activePresentParams;

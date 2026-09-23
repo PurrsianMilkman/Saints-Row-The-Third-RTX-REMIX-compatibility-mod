@@ -91,14 +91,52 @@ their own guards and are closed. clothDecalTiles=1.
 3. **Alpha.** Keep it through every stage that rewrites pixels; test it on the converted draw.
 4. **The diffuse texel goes to linear, the product is encoded once.** Two sRGB values
    multiplied and encoded is a different curve and reads dull.
-5. **clothTintScale is `clothAlbedoPercent/100`**, and only the x2 fallback now. Never
-   clothBrightness (already normalised at parse).
+5. **clothTintScale is `clothAlbedoPercent/100`**, read UNCONDITIONALLY in three places -
+   `ClothAlbedo` (the corset/NPC path), `HairAlbedo`, and the API hair path - and GATED in
+   only one, `ClothAlbedoUniform` (behind `!clothColourCurve`; live clothColourCurve=1 means
+   that one path ignores it entirely). So tuning clothAlbedoPercent moves the corset and hair
+   but NOT the player's uniform or decal garments - worth knowing on a page that insists on
+   exactly one generator. Never clothBrightness (already normalised at parse; a separate knob
+   read only by the API character bake).
 6. **A white or grey diffuse map is the detail layer**, shipped to be tinted. Not a bug.
 7. **"Albedo is TEXCOORD0, pattern is TEXCOORD1" is not a rule** - see docs/cloth-uv-map.md.
    On the player family the albedo IS TEXCOORD0*1/1024 (vs[2]: `mul o6.xy, c1.x, v1`) and the
    pattern is TEXCOORD1*Pattern_Map_Tiling/1024 (`mul o2.xy, r2, c1.x`). Measured, per draw.
 8. **The clamp registers are inactive** (ClampU1 = ClampV1 = 0 -> `cmp` takes the unclamped
    coordinate; U window [-512,513]). The game WRAPS. So does the conversion.
+
+# PERFORMANCE AND OCCLUSION, 2026-09-10 - READ BEFORE TOUCHING EITHER
+
+The full account is the worklog entry "PERFORMANCE, AND OCCLUSION CULLING DONE BY THE SHIM".
+The short version:
+
+- **Do not set forceOcclusionVisible=0.** With capture off the depth prepass never runs, the
+  engine's queries read 0 pixels for everything, and 73% of the visible scene disappears.
+- **The shim now does the occlusion test itself** (`occlusionCull=1`, worker thread, boxes from
+  the proxy shader's constants c0/c1/c5-c7/c38/c28-c31, occluders = rigid opaque-by-FACTORS
+  converted draws, 320-wide linear depth with per-pixel owner ids, conservative on every doubt,
+  four-job hysteresis, nothing within `occlusionMinDistance=5` ever culled). It REFINES the
+  fabricated "visible" answer to 0 pixels for a box entirely behind opaque geometry. Verified
+  live: ~200 occluders a job, ~30% of boxes occluded, ~50 objects removed a frame.
+- **The bridge diet**: VS constants and VS binds are shadowed and not forwarded; occlusion
+  proxies and Issue calls are dropped; declined pass-through draws are dropped. All of it is
+  capture-off only - every one of those switches must be 0 if vertex capture returns.
+- **The shim's own time**: skinning fast path (identical output while the four bone policies
+  are off), single-threaded; converted uv ranges from DYNAMIC buffers go through a ring (the
+  per-frame CreateVertexBuffer/Release churn was the "uv" phase) - VERIFIED: 763 conversions a
+  run instead of 103k, uv 0.5 ms; `scanCommandBlocks=0`; cache invalidation goes through a
+  per-buffer index (`indexedInvalidation=1`) - the 1.2 ms "drain" was two full-cache scans per
+  invalidated buffer, ~60 a frame.
+- **Read the PROFILE, BRIDGE CALLS and OCCLUSION CULL lines before changing anything.** Every
+  wrong guess this session was a phase the profile then named correctly.
+
+Open, in order (2026-09-10 evening): residual per-object flicker - the culler now keys its
+hysteresis by OBJECT (`occlusionKeyByObject`), takes any occluder within 50 cm as "self"
+(`occlusionSelfToleranceCm`), and PRINTS every verdict flip while the camera is still with the
+pixel that broke the cull (`OCCL FLIP` lines, `OCCLUSION FLICKER` totals) - read those before
+touching the culler again; skinning is the shim's biggest cost (11-12 ms at 207k skinned
+verts/frame, ~55 ns/vertex - SIMD is the lever); a lazy state layer for the remaining ~12k
+bridge calls a frame (needs a bridge-side shadow).
 
 # STATE, 2026-09-07 - VERTEX CAPTURE IS OFF AND THE CHARACTER WORKS. READ THIS FIRST.
 
@@ -578,12 +616,16 @@ TARGET is not screen-sized (41 draws/frame; the 357 screen-sized ones are untouc
     user.conf    8b361562e85c86ab88ab2fe61495b335
 
     ffp=1  convertSkinned=1  hiddenPassMode=2  forceOcclusionVisible=1  skinRigidSingleBone=1
-    screenSpaceMode=2  compositeToTexturePass=1  rtx.useVertexCapture = True
+    screenSpaceMode=2  rtx.useVertexCapture = True
     <- NO LONGER TRUE. Superseded 2026-09-06: capture is OFF and the character bake works.
        See the STATE section at the top of this file before acting on anything in this block.
     skinRequireBoneDecl=1  applyMorph=1  skipDeferredGBuffer=1  skipNonColourTargets=1
     dedupSkinned=1  dedupAll=1  skinRingMB=24  dumpFrame=60
     generateCloth=1  clothAlbedoPercent=200  diffuseColorProbe=1  compositeToTexturePass=0  rtAlbedoCopy=1
+    <- compositeToTexturePass is the value that stuck: 0 (the 1 shown above, from the
+       original 2026-08-28b snapshot, was superseded within the same session). With the
+       live screenSpaceMode=0 it is also redundant - the narrower gate for the same
+       protection - so there is only one value to act on: 0.
     rejectStaleBones=0  clampBonesToUpload=0  paletteSetupScope=0  vehicleBonesOff=0
     rtx.useVertexCapture = False
     rtx.geometryAssetHashRuleString = indices,texcoords,geometrydescriptor
@@ -787,9 +829,12 @@ pixels. Measured **243.9 queries/frame, all answered**. Only occlusion queries -
 `D3DQUERYTYPE_EVENT` is a frame-pacing fence. The real query is never drained, because
 `D3DGETDATA_FLUSH` would stall across the bridge.
 
-**Consequences:** `hiddenPassMode=2` became viable, which deleted the marker subsystem entirely -
-**3886 marked draws and 14,319 SetTexture calls a frame, and the magenta permanently.** The cost is
-that the game no longer culls anything, so more geometry is submitted than it would normally draw.
+**Consequences:** `hiddenPassMode=2` became viable, which stopped the marker subsystem from ever
+firing - it removed **3886 marked draws and 14,319 SetTexture calls a frame, and the magenta
+permanently.** The subsystem itself was not deleted: `CreateMarkerTexture` still runs at every
+device creation, and `hiddenPassMode=3` (retired - see the ini) is the only disposition that
+ever asks for what it built. The cost is that the game no longer culls anything, so more
+geometry is submitted than it would normally draw.
 
 ## Config layers and precedence
 

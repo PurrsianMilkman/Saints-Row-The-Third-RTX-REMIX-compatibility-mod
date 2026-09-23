@@ -1,0 +1,196 @@
+diff --git a/src/dxvk/rtx_render/rtx_geometry_utils.cpp b/src/dxvk/rtx_render/rtx_geometry_utils.cpp
+index 88de3c94..82f06acd 100644
+--- a/src/dxvk/rtx_render/rtx_geometry_utils.cpp
++++ b/src/dxvk/rtx_render/rtx_geometry_utils.cpp
+@@ -274,12 +274,41 @@ namespace dxvk {
+ 
+     ScopedGpuProfileZone(ctx, "performSkinning");
+ 
++    // Source format: what the game itself declared for this draw call's normal stream
++    // (e.g. Saints Row 3's skinned meshes declare D3DDECLTYPE_UBYTE4N, which surfaces
++    // here as VK_FORMAT_R8G8B8A8_UNORM). This drives the READ side in skinning.h.
+     const auto normalVertexFormat = drawCallState.getGeometryData().normalBuffer.vertexFormat();
++    // Destination format: whatever RtxGeometryUtils::cacheVertexDataOnGPU already decided
++    // for geo.normalBuffer (via processGeometryBuffers/interleaveGeometry). This is NOT
++    // necessarily the same as normalVertexFormat above - e.g. a UBYTE4N source always gets
++    // promoted to a plain float3 destination because R8G8B8A8_UNORM fails
++    // RasterGeometry::areFormatsGpuFriendly() and forces the slow interleave path, whose
++    // output is hardcoded to VK_FORMAT_R32G32B32_SFLOAT regardless of the source format.
++    // This drives the WRITE side in skinning.h and must be read independently of the
++    // source format above.
++    const auto outputNormalVertexFormat = geo.normalBuffer.vertexFormat();
+ 
+     SkinningArgs params {};
+ 
+     // Note: VK_FORMAT_R32_UINT assumed to be 32 bit spherical octahedral normals.
+-    assert(normalVertexFormat == VK_FORMAT_R32G32B32_SFLOAT || normalVertexFormat == VK_FORMAT_R32G32B32A32_SFLOAT || normalVertexFormat == VK_FORMAT_R32_UINT);
++    // VK_FORMAT_R8G8B8A8_UNORM is a D3DDECLTYPE_UBYTE4N-style packed normal (see skinning.h).
++    const bool normalFormatSupported = normalVertexFormat == VK_FORMAT_R32G32B32_SFLOAT ||
++      normalVertexFormat == VK_FORMAT_R32G32B32A32_SFLOAT ||
++      normalVertexFormat == VK_FORMAT_R32_UINT ||
++      normalVertexFormat == VK_FORMAT_R8G8B8A8_UNORM;
++    assert(normalFormatSupported);
++    if (!normalFormatSupported) {
++      // Loud rather than silent in release, where the assert above is compiled out:
++      // without this, skinning.h's fallback silently mis-reads the raw bytes as float3.
++      ONCE(Logger::warn(str::format("[rtx-skinning] Unsupported normal buffer format (", normalVertexFormat, "), falling back to float3 read")));
++    }
++
++    // Destination should always be one of the two formats RaytraceGeometry's normal buffer
++    // can ever actually be constructed with (see processGeometryBuffers overloads above).
++    assert(outputNormalVertexFormat == VK_FORMAT_R32_UINT ||
++           outputNormalVertexFormat == VK_FORMAT_R32G32B32_SFLOAT ||
++           outputNormalVertexFormat == VK_FORMAT_R32G32B32A32_SFLOAT);
++
+     if (!drawCallState.getGeometryData().blendWeightBuffer.defined()) {
+       ONCE(Logger::err("RtxGeometryUtils::dispatchSkinning: draw call has bones but no blend weight buffer, cannot apply skinning"));
+       return;
+@@ -305,7 +334,11 @@ namespace dxvk {
+     params.numVertices = geo.vertexCount;
+     params.useIndices = drawCallState.getGeometryData().blendIndicesBuffer.defined() ? 1 : 0;
+     params.numBones = drawCallState.getGeometryData().numBonesPerVertex;
+-    params.useOctahedralNormals = normalVertexFormat == VK_FORMAT_R32_UINT ? 1 : 0;
++    // WRITE side: must depend on the destination format, not the source format - see the
++    // comments above on outputNormalVertexFormat.
++    params.useOctahedralNormals = outputNormalVertexFormat == VK_FORMAT_R32_UINT ? 1 : 0;
++    // READ side: the source format, decoded in skinning.h independently of the flag above.
++    params.normalFormat = normalVertexFormat;
+ 
+     // If we don't have a mappable vertex buffer then we need to do this on the GPU
+     bool mustUseGPU = drawCallState.getGeometryData().positionBuffer.mapPtr() == nullptr;
+diff --git a/src/dxvk/shaders/rtx/pass/gpu_skinning_binding_indices.h b/src/dxvk/shaders/rtx/pass/gpu_skinning_binding_indices.h
+index ec4e8600..8c6621a1 100644
+--- a/src/dxvk/shaders/rtx/pass/gpu_skinning_binding_indices.h
++++ b/src/dxvk/shaders/rtx/pass/gpu_skinning_binding_indices.h
+@@ -55,5 +55,17 @@ struct SkinningArgs {
+   uint numVertices;
+   uint useIndices;
+   uint numBones;
++
++  // Whether the DESTINATION (geo.normalBuffer, i.e. the RaytraceGeometry the skinning
++  // kernel writes into) uses 32-bit spherical octahedral encoding. This is driven by
++  // RaytraceGeometry's actual output format, which RtxGeometryUtils::interleaveGeometry /
++  // processGeometryBuffers decide independently of the source vertex declaration below -
++  // do NOT derive this from normalFormat.
+   uint useOctahedralNormals;
++
++  // Vulkan format of the SOURCE (drawCallState.getGeometryData().normalBuffer) normal
++  // buffer, i.e. the format the game itself declared (e.g. D3DDECLTYPE_UBYTE4N surfaces
++  // as VK_FORMAT_R8G8B8A8_UNORM). Used only to decode the read side in skinning.h; the
++  // write side is controlled by useOctahedralNormals above, independently.
++  uint normalFormat;
+ };
+\ No newline at end of file
+diff --git a/src/dxvk/shaders/rtx/pass/skinning.h b/src/dxvk/shaders/rtx/pass/skinning.h
+index 3b893529..3d5d4422 100644
+--- a/src/dxvk/shaders/rtx/pass/skinning.h
++++ b/src/dxvk/shaders/rtx/pass/skinning.h
+@@ -22,6 +22,25 @@
+ #pragma once
+ 
+ #include "../utility/cpu_gpu_compat.h"
++// unorm8ToF32, used below to decode a UBYTE4N-style packed normal exactly like
++// interleaver::convert()'s VK_FORMAT_R8G8B8A8_UNORM case does in interleave_geometry.h,
++// lives in cpu_gpu_compat.h rather than being pulled in from interleave_geometry.h /
++// packing_helpers.h directly: packing_helpers.h's GENERIC_FLOAT_TO_NORM macros also
++// generate their own f32ToUnorm16/unorm16ToF32 (a different bit depth), whose names
++// collide with cpu_gpu_compat.h's own hand-written versions of those two (used by
++// encodeNormal/decodeNormal below) the moment both headers land in the same shader
++// translation unit - which they now would, since skinning.h already includes
++// cpu_gpu_compat.h. See unorm8ToF32's definition in cpu_gpu_compat.h for the shared copy.
++
++// Vulkan format values relevant to the normal buffer, mirrored locally because Slang has
++// no access to the Vulkan C headers that define VkFormat (same reason
++// interleaver::SupportedVkFormats in interleave_geometry.h keeps its own copy). Keep these
++// in sync with SkinningArgs::normalFormat, which RtxGeometryUtils::dispatchSkinning fills
++// in directly from a real VkFormat value.
++#define SKINNING_VK_FORMAT_R8G8B8A8_UNORM      37
++#define SKINNING_VK_FORMAT_R32_UINT            98
++#define SKINNING_VK_FORMAT_R32G32B32_SFLOAT    106
++#define SKINNING_VK_FORMAT_R32G32B32A32_SFLOAT 109
+ 
+ // This function can be executed on the CPU or GPU!!
+ #ifdef __cplusplus
+@@ -78,18 +97,43 @@ void skinning(const uint32_t idx,
+                            srcPosition[baseSrcPositionOffset + 1],
+                            srcPosition[baseSrcPositionOffset + 2], 1.f);
+ 
+-  // Read normal
++  // Read normal.
++  // Note: decoded strictly from cb.normalFormat (the SOURCE format), independently of
++  // cb.useOctahedralNormals, which now controls only the write side below - see the
++  // comments on SkinningArgs in gpu_skinning_binding_indices.h.
+   const uint baseSrcNormalOffset = (cb.srcNormalOffset + idx * cb.srcNormalStride) / 4;
+   float4 normal;
+-  if (cb.useOctahedralNormals) {
++  switch (cb.normalFormat) {
++  case SKINNING_VK_FORMAT_R32_UINT: {
++    // 32-bit spherical octahedral encoding.
+     const uint encodedNormal = asuint(srcNormal[baseSrcNormalOffset]);
+     const float3 decodedNormal = decodeNormal(encodedNormal);
+ 
+     normal = float4(decodedNormal.x, decodedNormal.y, decodedNormal.z, 0.f);
+-  } else {
++    break;
++  }
++  case SKINNING_VK_FORMAT_R8G8B8A8_UNORM: {
++    // D3DDECLTYPE_UBYTE4N-style packed normal: 4 unorm bytes in one 32-bit word, X/Y/Z in
++    // the low 3 bytes (W, typically unused, is dropped) - same layout and math as
++    // interleaver::convert()'s VK_FORMAT_R8G8B8A8_UNORM case in interleave_geometry.h.
++    const uint data = asuint(srcNormal[baseSrcNormalOffset]);
++    const float r = unorm8ToF32(uint8_t((data >> 0) & 0xFF));
++    const float g = unorm8ToF32(uint8_t((data >> 8) & 0xFF));
++    const float b = unorm8ToF32(uint8_t((data >> 16) & 0xFF));
++
++    normal = float4(r * 2.f - 1.f, g * 2.f - 1.f, b * 2.f - 1.f, 0.f);
++    break;
++  }
++  case SKINNING_VK_FORMAT_R32G32B32_SFLOAT:
++  case SKINNING_VK_FORMAT_R32G32B32A32_SFLOAT:
++  default:
++    // Also the fallback for any unsupported format: RtxGeometryUtils::dispatchSkinning
++    // has already asserted/warned about it before dispatching, so this stays a safe,
++    // non-crashing default rather than reading uninitialized memory.
+     normal = float4(srcNormal[baseSrcNormalOffset + 0],
+                     srcNormal[baseSrcNormalOffset + 1],
+                     srcNormal[baseSrcNormalOffset + 2], 0.f);
++    break;
+   }
+ 
+   // Do the skinning
+@@ -135,6 +179,13 @@ void skinning(const uint32_t idx,
+   dstPosition[baseDstPositionOffset + 1] = positionOut.y;
+   dstPosition[baseDstPositionOffset + 2] = positionOut.z;
+ 
++  // Write normal.
++  // Note: cb.useOctahedralNormals here is driven by the DESTINATION (geo.normalBuffer)
++  // format, set independently of cb.normalFormat above by
++  // RtxGeometryUtils::dispatchSkinning - see the comments on SkinningArgs in
++  // gpu_skinning_binding_indices.h. The destination can only ever be plain float3
++  // (VK_FORMAT_R32G32B32_SFLOAT/A32_SFLOAT) or 32-bit octahedral (VK_FORMAT_R32_UINT), so
++  // this flag alone is sufficient to pick the right encoding.
+   const uint baseDstNormalOffset = (cb.dstNormalOffset + idx * cb.dstNormalStride) / 4;
+   if (cb.useOctahedralNormals) {
+     const uint encodedNormal = encodeNormal(newNormal);
+diff --git a/src/dxvk/shaders/rtx/utility/cpu_gpu_compat.h b/src/dxvk/shaders/rtx/utility/cpu_gpu_compat.h
+index dfb36e25..82159843 100644
+--- a/src/dxvk/shaders/rtx/utility/cpu_gpu_compat.h
++++ b/src/dxvk/shaders/rtx/utility/cpu_gpu_compat.h
+@@ -95,6 +95,17 @@ float unorm16ToF32(uint x) {
+   return conv;
+ }
+ 
++// Unsigned-normalized 8-bit -> float decode, e.g. for one byte of a D3DDECLTYPE_UBYTE4N-
++// style packed normal (see skinning.h). Mathematically identical to (and copied from, not
++// included from) packing_helpers.h's macro-generated unorm8ToF32, which is also what
++// interleaver::convert()'s VK_FORMAT_R8G8B8A8_UNORM case in interleave_geometry.h uses -
++// see the include comment at the top of skinning.h for why it is a copy here rather than
++// a shared include (packing_helpers.h's own f32ToUnorm16/unorm16ToF32, a different bit
++// depth, would otherwise collide with this file's own versions of those two names above).
++float unorm8ToF32(uint8_t x) {
++  return float(x) / 255.0f;
++}
++
+ uint encodeNormal(float3 n) {
+   const float maxMag = abs(n.x) + abs(n.y) + abs(n.z);
+   const float inverseMag = maxMag == 0.0f ? 0.0f : (1.0f / maxMag);

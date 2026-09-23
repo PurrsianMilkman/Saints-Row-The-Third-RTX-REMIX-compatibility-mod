@@ -1,5 +1,95 @@
 # Changelog
 
+## v0.1.6 — 2026-09-22
+
+**Roughly twice the frame rate, and the game no longer crashes after eight minutes.** The biggest
+release so far, and the first one where two of the fixes are in **RTX Remix itself** rather than in
+this shim.
+
+### Performance: about 2× faster
+
+| | before | after |
+|---|---|---|
+| frame time | 43.5 ms (23 fps) | **28.7 ms (35 fps)** |
+| worst frame | 1201 ms | **44 ms** |
+| skinning | 15 ms | 8.22 ms |
+| morph refusals | 28.7/frame | 0.1/frame |
+| bake rebuilds | 7,699 | 0 |
+
+The user's summary was "about two times". The worst-frame number is the one to look at: a 1.2-second
+stall is a visible hitch, and it is gone.
+
+Three things got it there.
+
+**GPU skinning.** Characters are now skinned by the GPU through fixed-function vertex blending
+rather than on the CPU — a side stream carrying `FLOAT3` weights and `UBYTE4` indices, with the bone
+palette in `WORLDMATRIX(0..255)`. Remix hashes geometry *before* skinning, so the asset identity
+stays stable. `skinViaFixedFunction=1`.
+
+**The shim now does its own occlusion culling.** Earlier releases answered every one of the engine's
+occlusion queries with "visible", which was necessary — the engine has its own draw kill-switch and
+a zero answer stops it submitting — but it meant the path tracer received geometry the game would
+have culled. A worker thread now rasterises a depth buffer from the largest occluders and refines
+that answer to zero pixels for a box entirely behind opaque geometry. `occlusionCull=1`.
+
+**Morph targets are baked and memoised.** The delta block is repacked rather than edited in place —
+8,735 of 8,735 changes followed a `DISCARD` — so a character's block can stay byte-identical for
+~10,000 frames, which is what makes a content-hash key work.
+
+### Two bugs fixed in RTX Remix itself
+
+This project now runs a **patched Remix runtime**. Both bugs are present in NVIDIA's shipped build
+*and* in `origin/main`, and neither is SR3-specific — any game skinning on the GPU through Remix
+will hit both. The patches are in [`remix-fork-patches/`](remix-fork-patches/).
+
+**A staging-buffer memory leak.** Remix acquires a slice of `RtxStagingDataAlloc` and never releases
+it on one path. On SR3 that reached **13.7 GB across 428 × 32 MB blocks** and crashed the game after
+roughly eight minutes. Fixed, plus `rtx.enableIndexBufferMemoization = False`: **5 blocks, 160 MB**,
+host RAM 13.82 GB → 0.60 GB.
+
+**The skinning kernel reads normals as floats only.** Anything supplying normals in a packed format
+gets garbage, which renders as hard, faceted shading on every GPU-skinned character.
+
+The stock runtime still works and you still get everything the mod does — you also get the crash and
+the faceted shading. `remix-fork-patches/README.md` explains the trade and how to build the fixed
+runtime.
+
+### Fixed
+
+- **The overlay.** The game's raster frame would replace the path-traced world and path tracing
+  would stop. It was not an early injection trigger — that was measured at 0 of 2,999 frames.
+  Remix simply had **no valid main camera** on those frames, so it rendered nothing and the raster
+  frame was what remained. `mainCameraScreenSizedOnly=1`.
+- **Stretched bracelets and glasses lenses.** `skinFFRestageBone0=1`.
+- **Car windows and parts floating with player and NPC animation** — a different cause from the
+  v0.1.1 drift, in the new GPU path. `skinFFFollowShaderInfluences=1`.
+- **Rigid attachments on the GPU**: declaration clones went from 3 made / 7 failed to **8 made /
+  0 failed**. `skinFFRigidDecl=1`.
+- **Unreadable texcoords on DYNAMIC vertex buffers** — the ~11 draws/frame that had been open since
+  v0.1.0. A per-draw ring solved it. `convertDynamicUV=1`.
+
+### Changed
+
+- `configs/rtx.conf` now matches what actually runs. The repo's copy had drifted and was missing
+  `rtx.enableIndexBufferMemoization = False`, which is half the memory-leak fix, along with the
+  `rtx.decalTextures` list. `rtx.profiler.memory.enable` is set to `False` for the release; turn it
+  on if you want Remix's memory profiler.
+
+### Known issues
+
+- **Misplaced buildings.** Rare, lasts a few seconds, angle- and location-dependent, seen while
+  flying. The top open correctness bug, and **unattributed** — the shim's own data is correct, and a
+  60-frame ring recording found no object moving. It is not yet known whether the patched runtime is
+  involved; the control run that would settle it has not been done.
+- **Body skin and head colours do not match** on characters. Probably the most visible remaining
+  fault now that shading is fixed.
+- **Decal flicker** in Remix's Geometry Hash view. Proven *not* to be a hash change.
+- Still no **sky** and no **in-game HUD**.
+- First-time per-buffer conversions still run on the game's render thread when content streams in;
+  the worst shim spike was 219 ms. They belong on a worker.
+
+---
+
 ## v0.1.5 — 2026-09-10
 
 **The player's clothing colours are correct on every garment.** Confirmed on screen, piece by
@@ -229,8 +319,8 @@ first texel — so a wrong result can be traced to a wrong input rather than gue
 
 The UV divide has been the literal 1/1024 read out of the disassembly. This reads it instead from
 each vertex shader's own `def` constant, per shader, and reports when the value is ambiguous. It is
-`0` by default because the hardcoded value is correct everywhere measured so far; the switch exists
-so the assumption can be tested rather than trusted.
+set to `0` in the ini because the hardcoded value is correct everywhere measured so far; the
+switch exists so the assumption can be tested rather than trusted.
 
 ### Changed
 
@@ -393,8 +483,9 @@ copies UVs from the bind pose untouched so they never churn.
 ### Changed
 
 - `rtx.conf`: `rtx.enableAlwaysCalculateAABB = True`, `rtx.useBuffersDirectly = False`.
-- New `sr3-rtx.ini` switches, all defaulting to off, kept as one-line A/B tests rather than deleted:
-  `rejectStaleBones`, `clampBonesToUpload`, `paletteSetupScope`, `vehicleBonesOff`.
+- New `sr3-rtx.ini` switches, all shipped at `0` in the ini and kept as one-line A/B tests
+  rather than deleted: `rejectStaleBones`, `clampBonesToUpload`, `paletteSetupScope`,
+  `vehicleBonesOff`.
   `skinRequireBoneDecl=0` restores the old (broken) fallback with no rebuild, which is the A/B for
   the headline fix.
 

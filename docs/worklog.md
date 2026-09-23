@@ -11693,3 +11693,2050 @@ never applied it, and it did not need to.
     sr3-rtx.ini  08450a3d1f807cfb31dec4f7dd2f73a7
     clothCutout=1  clothMeshDecal=1  clothDecalTiles=1  clothColourCurve=1
     (clothAlbedoPercent=200 remains the x2 fallback when clothColourCurve=0)
+
+
+---
+
+# SESSION 2026-09-10 (late) - PERFORMANCE, AND OCCLUSION CULLING DONE BY THE SHIM
+
+Started from "performance is very poor" and "do we have a toggle for forceOcclusionVisible".
+The toggle exists (`forceOcclusionVisible=1`, ini line ~914) and was NOT flipped: with capture
+off Remix never executes the depth prepass, so the engine's queries read 0 pixels for everything
+and it culls 73% of the visible scene. Everything below is what was done instead. Every item is
+behind an ini switch and every number is from the frame report (`frame N | draws`, `TIMING`,
+`PROFILE`, `HITCH`, `BRIDGE CALLS`, `OCCLUSION CULL`).
+
+## How the cost is structured (measured)
+
+    HITCH frame: 40 ms = draws 21 (inside our hooks) + game/bridge 19 (everything else) | 2800 draws
+    later, heavier spot: draws 43.5 / game/bridge 38.9 at 4547 draws; 24 / 43 at 3210
+
+Every D3D9 call is a 32->64-bit bridge crossing. Our draw hooks' time is mostly OUR CPU work;
+"game/bridge" is the game's own calls crossing the bridge plus waiting on it. Async calls are
+cheap until the bridge queue is full, after which every call blocks - which is why phases that
+issue bridge calls (uv, skin post, bind) inflate in heavy scenes. The per-phase PROFILE line
+was added because guessing the hot stage was the wrong move every time; it named skinning first.
+
+## What was removed from the bridge (all switches default ON, capture-off only)
+
+    skipOcclusionProxies      the 12-tri box drawn inside each occlusion query, and both Issue
+                              calls: the count is fabricated, so none of it needs to reach D3D9.
+                              Gated <=12 prims; INSIDE OCCLUSION QUERY lines confirmed boxes.
+                              ~190 draws + 380 Issue calls a frame.
+    skipDeclinedPassThrough   pass-through draws with a vertex shader bound - Remix drops them
+                              with capture off (the invisible HUD was this). ~300-550/frame.
+    dietVsConstants           SetVertexShaderConstantF shadowed, not forwarded: 4-5k calls,
+                              200-260 KB a frame of bone palettes and matrices for shaders that
+                              never run. g_vsConst is the only reader.
+    dietVsBinds               SetVertexShader shadowed; the bridge's binding synced lazily by
+                              SyncBridgeVS only before a forwarded draw (null for converted, the
+                              game's for raw). Every direct bind in the shim goes through it.
+    scanCommandBlocks=0       engine research (docs/engine-map.md); walked every command block
+                              on the draw path. 0.5-1 ms.
+
+What still crosses, per city frame (BRIDGE CALLS line): psConst ~1.7k (7k float4s), setPS ~650,
+setTexture ~1.6k, renderState ~1k, sampler ~2.3k, stream ~4.6k, decl ~400. A lazy state layer
+(shadow everything, flush only before a forwarded draw) is the next lever there; it needs a
+second shadow of the BRIDGE's state, because ShadowSet* compares against the game's.
+
+## The shim's own time
+
+    PROFILE (city): skin 12.27 ms of 27 - 117,984 skinned vertices over 24 draws, ~104 ns each
+
+  - skinFast=1: a straight blend with none of the four per-influence policy checks or six
+    global counters, taken only when rejectStaleBones/paletteSetupScope/vehicleBonesOff/
+    clampBonesToUpload are all 0 (they are), so the output is identical. 12.3 -> ~5 ms.
+  - skinThreads: a persistent pool splitting 2048+ vertex draws. Condition-variable wake
+    latency cost as much as the blending; a spin-wait made it worse (8.5 ms). Set to 1: the
+    single-threaded fast path (~4.7 ms) is as good as any of it. The SKIN split line showed
+    post-loop 2-4 ms = the ring Unlock, i.e. the skinned bytes crossing the bridge - inherent.
+  - uv 4 -> 14 ms in a heavier scene: UvBufferFor. First suspect GetDesc per draw (a sync
+    round trip; cached per buffer - correct but not the cause). The cause was the SHORT2 line:
+    "103,687 buffers converted, 100,980 invalidated by the game" - a DYNAMIC source buffer is
+    rewritten every frame, so its converted copy was recreated every frame: CreateVertexBuffer
+    + Lock + Unlock + Release across the bridge, per draw, per frame. Converted ranges from
+    dynamic sources now go into one persistent 8 MB ring (NOOVERWRITE appends, DISCARD on wrap
+    which drops every ring entry from the cache), bound at an offset - the skin ring's scheme.
+    UNVERIFIED at the end of the session (deployed, unrun).
+  - entry ~6 ms in the heavy scene, of which command-block 0.14 and lights 0.10 - the rest is
+    unexplained; sub-timers for DrainPendingInvalidations and ProbeSkyOrder are deployed.
+
+## Occlusion culling, done here
+
+The user's diagnosis: "we render everything in the view frustum". Correct - forceOcclusionVisible
+answers every query "visible". The engine's test cannot be handed back (no prepass), so the shim
+does it. Everything it needs already passes through:
+
+  - THE BOXES. The proxy drawn inside each query is a unit cube (+-0.5, one shared VB, two
+    distinct buffers seen), and its 22-instruction vertex shader (dumped to
+    sr3-remix-proxy-vs.bin and disassembled) places it as
+        p = v*Scale(c0) + Offset(c1);  world = World_xform(c5..c7) * p - Render_offset(c38);
+        clip = projTM(c28..c31, the full view-projection as dp4 rows) * world
+    World_xform's 12 floats are column-major 3x3 then translation
+    (m00 m10 m20 m01 m11 m21 m02 m12 m22 tx ty tz). usesObjTM is 0 for the proxy; c32 is stale.
+    Verified: a far box projects to a 10x24-pixel rect at view depth 1900.
+  - THE OCCLUDERS. Rigid converted draws (instanced included - SR3 draws the world with
+    instance count 1) that are opaque BY THE FACTORS: ALPHABLENDENABLE is left on with ONE/ZERO
+    for opaque draws, so "blend on" alone said 0 opaque of 260. Alpha test with ref>0 and
+    shader texkill exclude. Geometry read once per mesh (VB + IB locks, 16 new meshes a frame,
+    keyed by buffer/range/index range, invalidated when the game rewrites the buffer, evicted
+    after 900 frames unused - the cache filled at 6000 and stayed full until eviction existed).
+  - THE TEST. At Present the frame's boxes and occluders go to a worker thread. Occluders
+    ranked by screen area, up to 300 within 60k triangles (a cap of 40 filled with the road
+    fragments under the camera - 17,601-vertex chunks of 28-168 triangles - and the buildings
+    never got in). Rasterised into a 320-wide linear-depth buffer, each triangle writing its
+    FARTHEST depth, with a per-pixel OWNER id; faces the game culls are skipped by cull mode
+    (mirrored worlds flip). A box is culled only if every pixel of its dilated rect is owned by
+    another object and nearer by max(3 units, 3%). VISIBLE if: any corner behind the near
+    plane, nearest corner within occlusionMinDistance (5 units - the user's rule), partly off
+    screen, no result, result older than 3 frames, or fewer than 4 consecutive occluded jobs
+    (one visible reading resets). Answers feed GetData as 0 pixels the next frame.
+  - REQUIRES forceOcclusionVisible=1: the culler refines the fabricated answer and is inert
+    otherwise (logged once if misconfigured). The proxy skip records the box before dropping
+    the draw; the Issue skip records the query pointer before dropping the call.
+
+Measured: dry run 29-30% of boxes occluded at 20 occluders, 2.5 ms; live with 203 occluders
+31.5%, 6.9 ms on the worker, 53 objects removed a frame. Flicker of objects in plain view was
+SELF-OCCLUSION - an object's own mesh at its box's depth, cull -> not drawn -> not an occluder
+-> visible -> drawn - fixed by the owner ids; residual edge flicker addressed by the hysteresis.
+At session end the user reports "almost correct, some objects still flicker" - per-object now.
+
+## Method, this stretch
+
+  - Read the refusal. Three guards refused fixes (connectivity, winding, seam-crossing) and each
+    said why; the answer each time was in the log line, not in a new theory.
+  - A cap is a decision. "40 occluders" was silently "the 40 fragments nearest the camera".
+  - A cache that stops accepting is a cache that stops working. Twice now (uv arena, mesh cache).
+  - The flag is not the blend; the factors are. Third time this project has paid for it.
+  - Profile per phase before optimising; the first guess (bridge calls) was a third of it.
+
+## Switches added this session (configs/sr3-rtx.ini)
+
+    skipOcclusionProxies=1  occlusionProxyMaxPrims=12  skipDeclinedPassThrough=1
+    skinFast=1  skinThreads=1  dietVsConstants=1  dietVsBinds=1  scanCommandBlocks=0
+    occlusionCull=1  occlusionDryRun=0  occlusionMaxOccluders=300  occlusionMaxTris=60000
+    occlusionMeshBudget=16  occlusionWidth=320  occlusionMinDistance=5
+
+## Deployed at the end of the session
+
+    sr3-rtx.asi  9e67a5592e164175d8498dbb7ec3af45   UNRUN (uv ring, hysteresis 4, margin 3)
+    sr3-rtx.ini  b3064bcdb2d928bac3774f426fb5b4fa
+    previous confirmed-running: c8aca32149975aea27b1f73e0f2449ab (culler live, 203 occluders)
+
+# SESSION 2026-09-10 (evening) - THE 9e67 RUN READ, THE DRAIN FIXED, THE FLICKER INSTRUMENTED
+
+The build the last entry left as UNRUN (`9e67a559`) had in fact been run (log 11:03-11:05, the
+`drain`/`sky-probe` sub-timers only exist in that build). What it said, from the frame reports:
+
+    TIMING: frame 24-25 ms avg (40-42 fps) in the city, shim 8-9 ms (34-37% of frame)
+    PROFILE: entry 1.7-2.1 (of which drain 1.16-1.27 - DrainPendingInvalidations is the entry
+             cost, not lights or command blocks) | uv 0.16-0.50 | skin 11.3-12.0 | albedo 0.1-2.4
+    SKIN split: loop 8.58 ms, post 1.77 - 207,112 skinned verts/frame (was 118k at the last
+             profile; ~55 ns/vertex on the fast path)
+    SHORT2: 763 buffers converted over the run (was 103,687) - THE UV RING WORKS. uv is 0.5 ms.
+    OCCLUSION CULL (LIVE): 253 boxes/job, 127 occluders rasterised (21.7k tris), 4.3 ms on the
+             worker, 178 boxes/job OCCLUDED (70.3%), answered 0 for 88/frame, 0 jobs dropped
+    OCCLUSION JOB SUMMARY: 893 offered, 300 used, 212 distinct objects
+    BRIDGE CALLS: unchanged shape (vsConst 2570 dropped, psConst 961, setTexture 858, ...)
+    HITCH: 98-262 ms frames with "textures 4-12" - texture generation on the draw path (cloth
+             bakes / albedo work), not this stretch
+
+No user verdict on the flicker for that run yet.
+
+## The drain, explained and fixed
+
+`DrainPendingInvalidations` handles ~63 buffer invalidations a frame (338,350 over 5,400 frames),
+and each one ran `InvalidateUvBuffers` (a scan of all 763 uv entries) and `InvalidateOccluders`
+(a scan of all 1,541 cached meshes). ~145k map-node visits a frame = the 1.2 ms. Both caches now
+keep a per-buffer index (`g_uvByVB`, `g_occlMeshByVB`), maintained at insert, rebuilt on the two
+bulk erasures (uv ring wrap, mesh age eviction). `indexedInvalidation=1`; 0 is the old scan.
+
+## What the code said about the flicker, before any run
+
+Read with the residual flicker in mind, three things in the culler were not robust:
+
+  - **Hysteresis keyed by the query pointer.** `g_occlResults` was keyed by `IDirect3DQuery9*`;
+    if the engine hands a query to a different object next frame, the streak mixes objects and
+    a one-frame answer can go to the wrong one. Now keyed by the OBJECT (quantised translation +
+    box size, `OcclObjKey`), with `g_occlQueryObj` mapping each query to the object it was last
+    issued for. `occlusionKeyByObject=1`. Whether it ever mattered is now MEASURED:
+    "query->object remaps /frame" in the report.
+  - **Self id by exact quantised key.** The box's translation is World_xform(c5-c7) minus
+    Render_offset(c38); the geometry's is ObjTM(c32) or the instance matrix. Float noise across a
+    half-unit floor boundary, or a non-zero Render_offset, breaks the match and the owner
+    protection is silently inert for that object. Now any occluder within
+    `occlusionSelfToleranceCm=50` of the box's translation is "self" (0 = exact key). Measured:
+    "self id found for N of M boxes/job" and "render offset max".
+  - **`g_occlResults.clear()` at 20,000 entries** - a wholesale reset of every streak = a mass
+    pop-in. Never fired with a few hundred query pointers; would fire with object keys. Replaced
+    by age eviction (entries older than 600 frames, checked every 600 jobs).
+
+And one structural fact: self-occlusion is only POSSIBLE when a box does not contain its own
+geometry (geometry inside the box is never nearer than the box's nearest corner). The owner-id
+fix helped, so some boxes must not contain their geometry. That is now measured directly: for
+every box with a self id, the world AABB of each own occluder against the box's world AABB -
+"own geometry outside its box N boxes/job (max poke X u)", with the first five explained
+(`OCCL BOX DOES NOT CONTAIN ITS GEOMETRY`).
+
+## The flicker instrument
+
+The user sees an object vanish and come back. In the culler that is a VERDICT FLIP: culled after
+hysteresis in one job, visible in the next, with the camera still (viewProj bit-identical to the
+previous job's). The worker now keeps the previous job's owner buffer, id table, culled set and
+occluder pools, and for every flip-to-visible names the pixel that broke the cull and what it held:
+
+    OCCL FLIP job J (camera still): object t=(x y z) size (sx sy sz) rect ... -> VISIBLE after
+        being culled: <own object | pixel unwritten | inside margin | farther> - <detail>
+
+  - own object: the box's own geometry owns the pixel (self id matched - the tolerance case)
+  - pixel unwritten: no occluder there now; last job it was id N t=(...), which is
+    "CULLED BY US last job" / "absent from this job's pool" / "in the pool but not covering it"
+    - i.e. the occluder set changed: our own culling removing occluders, the game not drawing
+    it, or the 300 cap boundary moving
+  - inside margin: an occluder is nearer than the box but by less than max(3u, 3%)
+  - farther: the pixel's occluder is behind the box's nearest corner
+
+Totals per category in the new `OCCLUSION FLICKER` report line, plus pool churn while still
+(used +a/-b, offered +c/-d per job). Explained lines capped at `occlusionExplainFlips=40` per
+report window. The categories decide the next fix: "CULLED BY US" -> keep culled objects'
+geometry in the pool; "absent" with "offered" churn -> the game's own draw set moves; "used"
+churn without "offered" churn -> the 300 cap boundary; "own object" or poke > 0 -> boxes are not
+containing and the margin has to grow.
+
+## Also seen
+
+`sr3-engine.asi` (the standalone engine-control plugin, 2026-09-07) IS deployed in the game
+folder and hooks all 74 dispatch entries as an inert census (`sr3-engine.log`). The 09-07 notes
+say it is not deployed by default. Flagged; the user said "move out" - moved (not deleted) with
+its ini and log to `engine-control/removed-from-game-dir-2026-09-10/`. Byte-identical copies are
+in `engine-control/build` and `engine-control/configs`. The next run is the first without it since
+09-07, so any frame-time change against the 9e67 run has this in it too.
+
+## Deployed
+
+    sr3-rtx.asi  625d7575af15619f4717da1ed1f4963a   UNRUN (indexed invalidation; object-keyed
+                                                     hysteresis; self tolerance 50 cm; flicker
+                                                     instrument; results age eviction)
+    sr3-rtx.ini  cab267cc29da65d5b51e6e93dc277a4e
+    added: indexedInvalidation=1 occlusionKeyByObject=1 occlusionSelfToleranceCm=50
+           occlusionExplainFlips=40
+    source backup: sr3rtx.cpp.before-flicker-instrument
+
+# SESSION 2026-09-10 (evening, 2) - THE FLICKER INSTRUMENT'S FIRST RUN, AND THE STABLE POOL
+
+Build `625d7575` ran (log to 17:01, 6,000+ frames, 3,002 camera-still jobs). What it said:
+
+    drain 0.04-0.21 ms (was 1.16-1.27): the indexed invalidation took.
+    query->object remaps 70-177/frame against ~180 boxes/job: THE ENGINE HANDS ALMOST EVERY
+        QUERY TO A DIFFERENT OBJECT EVERY FRAME. Every build before this one keyed the four-job
+        hysteresis by query pointer, so a streak built by other objects could cull a plainly
+        visible one - "objects that do not look occluded get culled and come back". Keyed by
+        object now (occlusionKeyByObject=1). Awaiting the user's eyes on that class.
+    self id found for 10-33 of 73-180 boxes/job (~18%). Baked world geometry shares ONE
+        translation (t=(384,0,0) = -Render_offset; render offset max 1024), so one id covers
+        most of the world and the owner protection is inert for it. Boxes not containing their
+        geometry: 3-12/job; max poke 1398 u is the shared-translation artefact, the explained
+        ones are 0.35-0.46 u on small props (probably loose vertex ranges).
+    verdict flips: 34 to visible in the last window, 358 to culled. ALL 66 explained flips read
+        the same: "pixel unwritten - last job owned by id N, which is in this job's pool but not
+        covering this pixel", camera still. A MESH stopped being rasterised, not a wrong test.
+        Two objects flipped 21 times each at pixel (52,75), period 10-25 jobs; 24 distant ground
+        tiles flipped together once when one occluder lost a horizon pixel.
+    pool churn while still: used +1.7/-0.5, offered +4.0/-2.2 per job.
+    OCCLUSION JOB SUMMARY: 1265-1855 occluders offered, 300 used (the cap), 0 budget-skipped.
+    "no mesh yet 7/frame" in steady state: meshes re-invalidated by the game's locks faster
+        than the 16/frame budget re-reads them.
+    skin 24.6 ms at 355k skinned verts/frame (a crowd): the frame-rate lever now.
+
+Two mechanisms fit the flip signature and both are in the numbers: the cap boundary (rank 300
+of 1,855 moves as the offered set churns) and mesh invalidation on every game lock of the
+buffer (a mesh in a buffer the game appends to blinks out for a frame or more). Same fix
+direction: a STABLE POOL.
+
+## What was built (`sr3rtx.cpp.before-stable-pool`)
+
+  - `occlusionRangeInvalidation=1`: the lock hook queues {vb, offset, size, whole}; whole for
+    DISCARD or size 0, ranges on one buffer coalesce to their hull. Each cached occluder mesh
+    records its byte slice; a lock drops only the meshes it overlaps. uv/bind-pose caches still
+    invalidate per buffer. Report: "occluder meshes invalidated/frame: whole, range-hit,
+    range-spared".
+  - `occlusionMaxOccluders=2000`, `occlusionMaxTris=250000`: the cap no longer binds in the
+    city; the triangle budget is the limit. Watch "ms on the worker" and "dropped".
+  - `occlusionStickyOccluders=1`: an occluder used last job stays in past the cap. Report:
+    "cap-skipped /job, sticky kept /job".
+  - Attribution to the MESH: per-pixel occluder index, last job's occluder table (ident, t,
+    tris, world aabb, used) and last job's culled boxes. An unwritten-pixel flip now says which
+    occluder wrote the pixel last job and its fate this job: NOT OFFERED / offered-not-used /
+    used-not-covering, and whether its centre lies inside a box WE culled last job (the cascade
+    test). Totals in the new OCCLUSION POOL line.
+
+## Deployed
+
+    sr3-rtx.asi  066dd35ec678e5aed29370768c01fe20   UNRUN (stable pool + mesh-level attribution)
+    sr3-rtx.ini  5f4975f1c57a330619a08d7a463d35fd
+    previous, run and read: 625d7575af15619f4717da1ed1f4963a
+
+# SESSION 2026-09-10 (night) - THE STABLE POOL RUN, THE CONFLICT AUDIT, THE INDEX-WINDOW PROBE
+
+Build `066dd35e` ran (log to 19:42, 14,400 jobs, 7,590 camera-still). The user: "the culling is
+better". The instrument agrees:
+
+    verdict flips to visible: 1 in 7,590 camera-still jobs (a "farther" case: the same occluder
+        at a different depth - a mesh swap at one translation), 1,768 to culled.
+    pool churn while still: used +2.4/-2.4 (the world's own draw set moving: doors, LODs).
+    occluder meshes invalidated/frame: whole-buffer 1.1, range-hit 0.0, range-spared 6.4-7.8.
+        Every mesh the game's locks used to drop is spared now: the locks never overlap them.
+    cap-skipped 0/job, sticky 0/job: 388-394 occluders used of 404-409 offered - the cap is gone.
+    worker 6.6-6.8 ms/job, 0 dropped. 54% of boxes occluded, 141-145 objects removed a frame.
+    query->object remaps 280/frame: confirmed again.
+    frame 34.5 ms (29 fps), shim 17.3 ms: skin 11-12.7 ms, albedo 1.4-2.2 (texture work).
+
+## The audit: previous code that could conflict with the culler
+
+Read for anything that could make the culler occlude by geometry Remix never draws, or answer
+the wrong query. Result: nothing found in the shim's own paths.
+
+  - `HiddenDisp` (hiddenPassMode) returns PassThrough / Hide / Skip / Mark, never Convert; the
+    occluder recorder is gated on Convert, so prepass, depth-only and aux-camera draws never
+    become occluders. Sky draws are PassThrough (sky shader family). Mark (marker texture) is
+    not Convert.
+  - After `RecordOccluder`, a non-skinned Convert draw stays Convert to the FFP draw: the only
+    later demotion (bind pose unreadable -> PassThrough) is on the skinned branch, which is
+    excluded from occluders. Dedup hides exact duplicates of a draw that IS converted.
+  - Inside queries: 287/frame draws seen, 287 <=12 prims, 0 larger - every draw inside a query
+    is the box, so the proxy skip removes nothing real.
+  - Boxes and occluders share one viewProj (c28-c31 of the main pass); mirrored and other-camera
+    draws return before the transform stash.
+  - Query answers: Issue skipped consistently with the fabricated GetData; only OCCLUSION
+    queries are touched; dry run off.
+  - The one thing the shim cannot check: Remix's own texture lists in rtx.conf
+    (skyBoxTextures, worldSpaceUiTextures, particleTextures). A converted opaque draw whose
+    texture is on one of those lists is not world geometry in Remix but would be an occluder
+    here. Nothing points at it; noted, not measured.
+
+## The stretched polygons ("not new")
+
+Random stretched polygons popping in and out. Read against the log and the code:
+
+  - SKIN DISPLACEMENT 0, BONE CLAMP 0 outside the palette: not stale bones.
+  - Skin ring: 24 MB, high water 24.00, 0.11 wraps/frame, ~1 discard/frame (the per-frame
+    fresh discard). A mesh that cannot fit is REFUSED (pass-through), never mis-bound. The
+    wraps are the base jumps (write position = firstVertex*stride), not volume.
+  - User-pointer draws: 45/frame. HUD-shaped ones (no projTM, depth off) are demoted to UI;
+    the rest pass through with a VS bound and Remix drops them - invisible, not stretched.
+  - Particle-sized converted draws (<=64 verts, blended) render at their raw positions: a
+    billboard VS's corners would collapse to a point, not stretch.
+  - Vertex formats other than FLOAT3 positions are skipped (87/frame), not mis-decoded.
+  - THE MECHANISM THAT PRODUCES STRETCHED TRIANGLES BY CONSTRUCTION: a skinned draw is served
+    from OUR copy of its declared vertex window [minIndex, minIndex+numVertices) in the ring.
+    An index outside the window reads whatever else is at that ring address - another mesh's
+    vertex, or stale bytes - and the triangle stretches to it for as long as that content
+    lasts. The game's own buffer holds the whole mesh, so a rigid draw with the same indices is
+    fine, which is why the shim never noticed. Now MEASURED: `probeIndexWindow=1` scans each
+    skinned draw's index range once (8 new ranges a frame) and the frame report's INDEX WINDOW
+    line counts draws/frame with out-of-window indices; the first ten are named.
+
+Asked of the user: where the polygons appear (on characters / vehicles / world / effects), and a
+screenshot. If the probe reads non-zero the fix is to widen the ring copy to the scanned index
+range; if zero, the copy is not the cause and the next suspects are on the Remix side.
+
+## Deployed
+
+    sr3-rtx.asi  3114f6ec526af68f8bc9170c8d46c0d3   UNRUN (index-window probe)
+    sr3-rtx.ini  45d071ac17fce4c6ab4a7247d620aa33
+    previous, run and read: 066dd35ec678e5aed29370768c01fe20 (stable pool: 1 flip in 7,590 still jobs)
+    source backup: sr3rtx.cpp.before-idxwin
+
+## 2026-09-10 (night, 2) - the probe's answer, and two symptoms described
+
+Build `3114f6ec` ran (log to 22:05). INDEX WINDOW: **0.0 draws/frame** use indices outside their
+declared vertex window, over 1,107 scanned index ranges, 0 scan failures, 79-95 skinned draws a frame
+inside. The ring copy is NOT the cause of the stretched polygons. Hypothesis killed by measurement.
+
+The user's description of the polygons, verbatim in substance: while MOVING and ROTATING the camera,
+for ONE frame, one or more random polygons appear, typically stretched across the whole scene, then
+vanish; random; rare; hard to screenshot; "not new". Read against the code: a one-draw, one-frame
+fault that self-heals when the camera moves points at STATE that is compared per draw against a
+shadow - the fixed-function transforms (ApplyTransforms writes only when a matrix differs from
+g_appliedWorld/View/Proj) or the lazy vertex-shader binding (SyncBridgeVS / g_bridgeVS) - and at
+Remix rasterising a mis-projected draw as UI. Under investigation (workflow, six lenses + verifiers).
+
+NEW SYMPTOM, reproducible: press Escape. The pause menu's MAP (a large textured square with roads)
+and the three loading dots are rendered as WORLD geometry floating far above the city, tilted in
+perspective; the city renders as a white untextured model from a high camera. The log shows these
+quads as "HUD draw: CONVERT verts=4 target 2560x1440 fmt=21 | stride=80 posType=3 posOffset=0
+positionT=0 elements=6 usage=0x208 | vs proj=1 obj=1 ps='Diffuse_Map_1Sampler'": four-vertex quads
+with a projTM+objTM vertex shader, converted as world geometry with a perspective camera.
+screenSpaceMode=0 and the "ortho" counter reads 0. Related to the parked UI item (HUD invisible,
+sub-menus missing) - the UI is now visible but in the world. Under the same investigation.
+
+# SESSION 2026-09-11 - THE STATE MACHINERY READ FOR THE ONE-FRAME GLITCH; THE MENU DUMP
+
+A six-lens investigation workflow was launched for both symptoms and died at the session limit
+with nothing returned (1.2M tokens, no conclusions). The investigation was redone inline.
+
+## What the code says about the one-frame stretched polygons (symptom B)
+
+Every mechanism that could send ONE converted draw out with the wrong state was traced:
+
+  - Fixed-function transforms: ApplyTransforms writes only when a matrix differs from
+    g_appliedWorld/View/Proj. Everything that writes SetTransform behind that shadow puts it
+    back through the shadow: BeginUIDemote sets PROJECTION=identity for Hide draws and
+    EndUIDemote restores g_appliedProj (or clears g_haveAppliedProj); Hook_SetTransform clears
+    the shadow if the game ever calls it (it never does: "transform 0/frame").
+  - Vertex-shader binding: SyncBridgeVS is a strict shadow (g_bridgeVS); DrawHudFixedFunction
+    and DrawCompositeFixedFunction read the bridge's VS with GetVertexShader and restore through
+    SyncBridgeVS; both draw XYZRHW quads (no transforms touched), restore FVF and declaration.
+  - Streams/indices/declarations: the hooks forward EVERY game call (no redundancy dropping
+    there - the 13k "redundant state calls dropped" are render/sampler states). SkinAndBind
+    restores stream 0 to the game's buffer after the skinned draw (line ~14213); EndFFP
+    unbinds the uv stream, restores the declaration and the pixel shader; the cloth private IB
+    is swapped in and back around one draw.
+  - The uv ring's bind offset is computed and consumed in the same call; the skin ring refuses
+    what does not fit; DISCARD renames on the DXVK side; the game's dynamic-buffer locks are
+    ordered through the bridge queue.
+  - MeasureWorldExtent (samples converted draws' world positions) never reported an outlier
+    (threshold 20,000 u) all session.
+
+Conclusion: no shim-side mechanism found by reading. What the symptom implies is unchanged (a
+draw whose projected vertices land far apart for one frame), but which draw, and whose fault,
+needs a capture of the glitch frame - which the current F9 dump cannot give (it dumps the frame
+2 s after the key). A rolling last-N-frames record is the next instrument if the user can catch
+one; not built yet.
+
+## The pause-menu UI (symptom A): what the gates say
+
+For a draw to be CONVERT it passes, in order: usesProjTM (else "screen-space" -> PassThrough
+with screenSpaceMode=0); ComputeTransforms; IsPerspective(derived projection) (kPerspectiveOnly
+= true -> else Skip, counted as "ortho"); Same(view, g_mainView) (kMainCameraOnly = true -> else
+"auxiliary camera" -> Skip). The menu's map quad and dots ARE converted, so they used projTM,
+their derived projection was perspective, and their VIEW EQUALLED the frame's main camera. That
+is not what a screen-space UI draw looks like; it is what a 3D-placed UI element (Vint "LUA 3D")
+drawn with the map camera looks like. Why it sits above the city in Remix and not over it as in
+the game is what the dump has to show: the view/projection of the city draws versus the quad's.
+TEAM A's specs (D:\Project Crreish\TEAM A, read-only) cover file formats and the Lua/Vint hook
+surface (pause_map_interface_event etc.), not the UI renderer - nothing there decides this.
+
+## The menu dump (`sr3rtx.cpp.before-menudump`)
+
+  - Each frame-dump line now carries this draw's OWN camera and projection from its constants:
+    `cam(x y z)` (the eye from the inverted view), `proj(_11 _22 _34 _44 persp|ORTHO)`,
+    `OTHER-CAM` when the view differs from the frame's main camera, `NOVS` when no vertex shader
+    is bound; and for draws of <=8 vertices from a static buffer, the raw positions of the first
+    four vertices.
+  - An F9 capture dumps the frame whatever its draw count (the 1,500 floor only applies to the
+    automatic first capture). The F9 re-arm also resets the "HUD draw:" probe, so eight more of
+    those blocks (with proj rows) print after the key.
+
+Next run: open the pause menu, press F9, wait 3 s, then read `sr3-rtx-frame-1.log`.
+
+## Deployed
+
+    sr3-rtx.asi  1f92722a12e497c65ee4ef2615f352c2   UNRUN (menu dump)
+    sr3-rtx.ini  45d071ac17fce4c6ab4a7247d620aa33   unchanged
+
+## 2026-09-11 (2) - THE MENU FRAME READ: THE UI FLOATED BECAUSE EVERY HUD DRAW WENT OUT TWICE
+
+Two F9 captures with the pause menu open (frames 1641 and 1813; the game's camera fixed at
+(-224.1 15.6 153.6) with the pause menu's slow FOV sweep, 1,300 draws each, 612 draws/frame).
+Every draw carries its own camera now, and the frame says:
+
+    1,179 draws: cam(-224.1 15.6 153.6) persp - the world, one camera, no OTHER-CAM among the
+        converted draws; 22 sky draws at the origin; 22 paraboloid draws 3.8 u lower; 3 ORTHO
+        post-process quads. No draw of <=8 vertices is CONVERT except one world box.
+    58 HIDE "HUD (user-pointer, depth test off) - demoted to a UI overlay": the menu's UI. Their
+        vertex format (HUD FORMAT dump): float4 POSITION in PIXELS - (2560, 0, 0, 0),
+        (2560, 1440, 0, 0) - float2 TEXCOORD, d3dcolor. HudSrcVertex matches it exactly.
+    55 PASS "user-pointer draw, depth-tested - in-world": 39 with colour write OFF (depth/stencil
+        only) and 16 'Orbital_mapSampler' blended - VS-bound, dropped by Remix.
+
+So nothing in the menu frame was a 3D-placed UI element. The UI that floated is the HUD path
+itself, and the code had the fault in plain sight:
+
+    if (!(hud && g_settings.uiConvertUP &&
+          DrawHudFixedFunction(dev, type, count, vertices, stride)))
+        SyncBridgeVS(dev, g_lastVS);
+        hr = g_origDrawPrimitiveUP(dev, type, count, vertices, stride);   // <- NOT in the if
+
+A missing brace. After a HUD draw was rebuilt as an XYZRHW quad, the game's OWN draw was issued
+too, through whatever vertex processing the bridge had bound at that moment - fixed function
+after a converted world draw - so float4 PIXEL positions became world coordinates: a quad at
+(2560, 1440, 0), a thousand units above the player, viewed with the frame's camera. That is "the
+UI is way above the character", the map above the city, and the dots. Present since the HUD
+path was written on 2026-09-04 (absent from `sr3rtx.cpp.before-cloth`, present from
+`before-flicker-instrument` on) - it explains why the in-game HUD was "invisible" (drawn a
+thousand units up) while the menu video (a full-screen quad) "worked".
+
+Fixed: the raw draw goes out only when the rebuild did not happen (`uiRawAfterHud=0`; 1
+restores the double draw for an A/B). Counters in the USER-POINTER DRAWS report line:
+"HUD draws rebuilt as fixed function and NOT also sent raw" and "sent raw after a rebuild".
+Source backup `sr3rtx.cpp.before-hud-double-draw`.
+
+What the next run tells: the pause menu, the map and the HUD should sit flat on the screen if
+Remix rasterises the XYZRHW quads as UI; if they are now simply absent, the remaining question
+is Remix's UI classification of XYZRHW draws, not the shim's geometry.
+
+The one-frame stretched polygons: nothing new; the menu frame is the wrong frame for them.
+
+## Deployed
+
+    sr3-rtx.asi  d197c225750fe5bad9c6b7488c11064a   UNRUN (HUD single draw)
+    sr3-rtx.ini  a557dd688081dbfb8608d1f4db94b2ce   (uiRawAfterHud=0)
+
+## 2026-09-11 (3) - THE UI FIX CONFIRMED; THE ONE-FRAME POLYGONS: A MITIGATION AND A RECORD
+
+The user: "the ui seems to not be rendering in the 3d world anymore." The double draw was it.
+
+The stretched polygons, described again with a screenshot (camera far above the city, one frame):
+a whole streamed block - building facades with their window textures and a road - rendered as
+one mangled sheet across the screen, gone the next frame; "it looks like it is related to when
+meshes load", while rotating the camera. Nothing in the shim was found by reading (previous
+entry), and the index-window probe cleared the ring copy. What "when a mesh loads" means in
+D3D terms: the game writes a static vertex buffer range (Lock/Unlock, often from a loading
+thread) and draws from it in the same or the next frame. Whether the fault is then the bridge
+(the data arriving after the draw) or Remix (a geometry cache keyed by buffer/range serving the
+old contents for a frame), the FIRST draw after the write is the one that shows it.
+
+Built, both behind switches (`sr3rtx.cpp.before-fresh-defer`):
+  - `deferFreshStaticDraws=1` / `deferFreshFrames=1`: the drained lock queue now also feeds a
+    recent-write table (buffer -> ranges + frame). A converted, non-skinned draw whose STATIC
+    stream-0 range was written within the last N frames is SKIPPED (not hidden: a Hide draw
+    goes to the bridge under an identity projection, itself a way to make a stretched quad).
+    Dynamic buffers are exempt. Report line FRESH BUFFERS: draws/frame that read a fresh range,
+    draws/frame skipped for it. If the flashes stop, the class is settled.
+  - `ringFrames=60`: a rolling record of the last 60 frames' indexed draws (disposition, sizes,
+    VS flags, sampler, texture, objTM translation, FRESH=age, reason), written to
+    sr3-rtx-ring-N.log when F9 is pressed. Press F9 the moment a flash is seen: the frames
+    before the key are in it, and the FRESH draws in them are the suspects.
+
+## Deployed
+
+    sr3-rtx.asi  71b8ee76c78864c67b5878a1ab963b14   UNRUN (fresh-buffer deferral + rolling record)
+    sr3-rtx.ini  06eeb38b69f46e779f85d350702bed29
+
+## 2026-09-11 (4) - FRAME STEPPING
+
+The user asked for a way to step through frames. Built (`sr3rtx.cpp.before-framestep`):
+
+  - F7 (`frameStepPauseKey=118`) freezes the game: the render thread is held inside Present
+    AFTER the real Present, so the frame stays on screen; the game's main thread stalls on the
+    render thread within a frame, so everything waits.
+  - F8 (`frameStepKey=119`) releases exactly one frame - one game tick, one frame. Hold the
+    camera key while pressing F8 and the camera turns one tick per step.
+  - Every stepped frame gets its own full frame dump (sr3-rtx-frame-N.log, ~300 KB) when
+    `frameStepDumpEachStep=1`: RearmCaptures(false) targets the next frame while frozen. F9
+    while frozen writes the rolling record as well and arms a dump for the next step.
+  - Holds are excluded from the frame-time statistics (g_heldSinceLastPresent).
+  - Log lines: "FRAME STEP: FROZEN at frame N", "step K -> frame M (full dump armed for it)",
+    "resumed at frame N after K steps".
+
+The workflow for the one-frame polygons: fly above the city, press F7, hold the camera key and
+tap F8 until a flash shows; the frame on screen is sr3-rtx-frame-<latest>.log and the frame
+before it is the previous file. Also worth doing with deferFreshStaticDraws=0 (the mitigation
+off) so the faulty draw is in the dump rather than skipped.
+
+## Deployed
+
+    sr3-rtx.asi  2ed9562f390ae5d61ef6284e1075c4dc   UNRUN (frame stepping + fresh-buffer deferral + rolling record)
+    sr3-rtx.ini  34d8fe5e8325c3521bd8bc7ca1093fcc
+
+## 2026-09-11 (5) - POLYGONS NOT SEEN WITH THE DEFERRAL; THE BUILDING SHIMMER; THE DECAL OFFSET
+
+The user, after a run with the fresh-buffer deferral on: "i did not appear to see the random
+polygons. we might have fixed it". FRESH BUFFERS: 1.5 converted draws/frame were skipped for
+one frame. Tentative - they were rare - but consistent with the class (the first draw after a
+static buffer range is written). Frame stepping was not used this run.
+
+Reported instead, "the case for a while": flickering / z-fighting-like shimmer on buildings,
+e.g. outside Angel's Gym. In a path tracer that is two surfaces in one plane. Two mechanisms in
+this game produce that: (1) DECALS - posters, signs, dirt, road paint - drawn as separate
+meshes on the wall's plane without depth write (the rasteriser resolved them by draw order and
+depth bias; Remix has no rtx.decalTextures list here and the shim never handled depth bias);
+(2) LOD CROSS-FADES - SR3 fades LODs with a stipple prepass and ZFUNC=EQUAL colour passes, so
+both LODs are drawn for a few frames, fully, when converted. The dedup (29 draws/frame) hides
+only EXACT duplicates.
+
+Built (`sr3rtx.cpp.before-decal-offset`):
+  - `decalOffsetPermille=1`: a converted, non-skinned draw with depth test on and either no
+    depth write or ZFUNC=EQUAL has its world matrix post-multiplied by a scale about the eye
+    (p' = eye + k(p - eye), k = 0.999): every vertex moves toward the camera by 1/1000 of its
+    distance (1 mm per metre), lifting the layer off the wall. 0 disables.
+  - Counters in the DECAL OFFSET report line: draws offset/frame, colour draws sampling the
+    stipple pattern (an LOD fade in progress)/frame, draws with a depth bias set/frame.
+  - The frame dump line now carries zf= (ZFUNC) and bias= (DEPTHBIAS) per draw.
+
+Next: the user checks Angel's Gym. Shimmer gone -> decals. Still there -> read the stipple and
+depth-bias counters, and a frame dump (F7 + F8 or F9) at the spot for co-located draws.
+
+## Deployed
+
+    sr3-rtx.asi  66f6b2a089fcb416938be5ed649cfdcb   UNRUN (decal offset; dump carries zf/bias)
+    sr3-rtx.ini  0201c83e69314007625329aa5b52fc05
+
+## 2026-09-11 (6) - THE SHIMMER PERSISTED; LAYERS, AND A KEY THAT WAS ALMOST WRONG
+
+With the decal offset on: "the flicker still persisted". The run's numbers: 17 converted
+draws/frame pulled (no depth write or ZFUNC=EQUAL), 11 draws/frame carry a game-set depth bias
+(negative small floats such as 0xb58637bd, the game's own decal marking), stipple-sampling
+colour draws 0.1/frame - so LOD cross-fades are not it (though the fade's colour pass may not
+sample the stipple itself; the prepass does). The exact-duplicate filter hides 7-29 draws/frame,
+and its key includes the texture, so the same triangles drawn twice with DIFFERENT textures (a
+second material pass) are both converted - coplanar by construction. That is the remaining
+class the offset had not touched: depth-writing second passes.
+
+Built (`sr3rtx.cpp.before-layer-offset`): `layerOffset=1` - a per-frame table of converted
+draws keyed by the TRIANGLES (buffer, offset, stride, vertex window, start index, primitive
+count) and the placement (world translation to 1 cm, instance matrix included); a repeat is a
+layer and is pulled toward the eye by pass number x `layerOffsetPermille` (1). `biasOffset=1`
+pulls depth-biased draws too. The frame dump line carries `layer=N`. Report: LAYERS /frame.
+
+THE KEY WAS ALMOST WRONG. The first version keyed on the vertex window only. The shape probe
+(world bounds per draw) showed why that fails: a building is drawn as material groups - p=22,
+296, 2673, 216 triangles - all from ONE 2331-vertex window at one placement. Those are not
+layers; pulling them by 1, 2, 3/1000 would have opened 2 cm steps between adjacent wall panels
+at 20 m. The index range went into the key before the build. "Coincident bounds" from the
+shape probe (738 pairs) are mostly this window-sharing, not coplanar geometry.
+
+Not yet known: what the shimmer at Angel's Gym actually is. Candidates left if the layer
+offset does not remove it: something other than geometry (Remix's temporal accumulation on
+high-frequency window grids), or a coplanar pair whose triangles are not identical (a facade
+mesh and a separate detail mesh on the same plane). A frame dump at the spot (F9, or F7+F8)
+with layer= and bias= per draw, and the user's description of WHAT shimmers (window grids,
+posters, whole walls; does it follow the camera), are the next data.
+
+## Deployed
+
+    sr3-rtx.asi  e1267693ddcb8da00a6e2439575b0fef   UNRUN (layer offset + bias offset)
+    sr3-rtx.ini  bb130f123842220d9c94c550ee6fdc21
+
+## 2026-09-11 (7) - THE SHIMMERING THINGS NAMED THEMSELVES: Decal_MapSampler
+
+The user: "the textures that flicker are like the logo on the building and signs", with an F9
+capture at the spot (sr3-rtx-frame-1.log, frame 1731). The capture answers it outright.
+
+32 converted draws a frame have `ps='Decal_MapSampler'` - the pixel shader's FIRST (lowest
+register) sampler is a DECAL map. That is the game's own word for a sign, a logo, a poster.
+Their state, every one of them:
+
+    zw=1  zt=1  zf=4 (LESSEQUAL)  bias=0  blend=1  layer=0
+
+So they WRITE depth, carry NO depth bias, test LESSEQUAL, and are not repeats of other
+triangles - which means all three offset rules built so far could not fire on a single one of
+them. The decal rule wanted zw=0 or ZFUNC=EQUAL; the bias rule wanted a bias; the layer rule
+wanted the same triangles twice. The offsets were real and aimed at the wrong draws.
+
+Why LESSEQUAL is the whole story: a decal mesh laid on a wall passes the depth test at EQUAL
+depth and wins because it is drawn LATER. The rasteriser resolves the tie by draw order. A path
+tracer has no draw order - both surfaces are in the BVH at the same place, and which one a ray
+hits is decided by numerics, per pixel, per frame. That is the shimmer.
+
+Also measured and worth keeping: EVERY converted draw in the capture has blend=1. The flag is
+not the blend; the factors are (the fourth time this project has paid for that).
+
+Built (`sr3rtx.cpp.before-overlay-class`), one pull per draw whatever matches:
+  - `decalPrimaryOffset=1` - first sampler is a Decal map. NOTE: the test is the FIRST sampler,
+    not "any sampler named Decal" - a building's own material shader carries Decal_Map behind
+    Diffuse_Map, and pulling walls would open gaps between panels.
+  - `blendedOffset=1` - truly blended by the FACTORS (not ONE/ZERO).
+  - the earlier no-depth-write / ZFUNC=EQUAL, bias and layer rules, unchanged.
+  - Report renamed OVERLAY OFFSET, with a count per signature. The frame dump line now carries
+    the blend factors `blend=1(5/6)` and `pull=0x..` (1 layer, 2 decal-named, 4 no-write, 8
+    blended, 16 bias).
+
+If the signs stop shimmering, the class is settled. If they still shimmer with pull non-zero on
+those draws, the magnitude is next (decalOffsetPermille 1 -> 3; 1/1000 is 2 cm at 20 m), and
+after that the question is Remix's own decal handling (rtx.decalTextures, which this rtx.conf
+does not use) rather than our geometry.
+
+## Deployed
+
+    sr3-rtx.asi  feb2a66382a2912f1ccdff56f6610dd1   UNRUN (overlay classification)
+    sr3-rtx.ini  69779a23fdbf5cadce858b31463119ff
+
+## 2026-09-11 (8) - THE DECALS WERE PULLED AND STILL FLICKER; WHAT REMIX ITSELF OFFERS
+
+The overlay build DID run before the user's report. Its own numbers:
+
+    OVERLAY OFFSET: 26.6 converted draws/frame pulled by 1/1000 of their distance.
+        no depth write or ZFUNC=EQUAL 12.9 | first sampler is a DECAL map 16.9 |
+        truly blended (by the FACTORS) 11.8 | depth bias set 6.0 | LAYERS 5.9
+
+So the signs and logos WERE moved 1/1000 of their distance toward the camera - 2 cm at 20 m -
+and they still flicker. Note the blend-factor test is selective (11.8 of ~260 converted draws),
+so it is not pulling everything and cancelling itself out.
+
+## Nothing blinks: the rolling record clears our own rules
+
+The user's 60-frame rolling record (sr3-rtx-ring-1.log, frames 1610-1669, 523-672 draws each)
+was analysed by draw identity (texture + vertex count + primitive count + placement):
+
+    188 identities. 0 that alternate present/absent. 0 whose disposition changes across frames.
+
+Every identity is present in all 60 frames. Five identities showed two textures, and each was a
+COLLISION (two different signs sharing a 12-vertex mesh appear in the SAME frame with different
+textures), not a swap. So the occlusion culler, the dedup, the skip rules and texture streaming
+are all cleared as causes of this flicker: nothing our side blinks.
+
+## What Remix 1.5.2 actually offers (read out of .trex\d3d9.dll)
+
+    rtx.decalTextures            rtx.dynamicDecalTextures
+    rtx.singleOffsetDecalTextures  rtx.nonOffsetDecalTextures
+    rtx.decals.maxOffsetIndex    enableDecalMaterialBlending
+    rtx.geometryAssetHashRuleString      rtx.geometryGenerationHashRuleString
+    rtx.useObsoleteHashOnTextureUpload   rtx.hashCollisionDetection
+
+Remix HAS a decal system and this project uses none of it. It is driven by TEXTURE HASH LISTS.
+A texture in `rtx.decalTextures` is offset by Remix per draw (maxOffsetIndex) and, with
+`enableDecalMaterialBlending`, blended into the surface underneath instead of being a second
+surface - which removes the tie rather than moving it.
+
+Also read: `rtx.geometryGenerationHashRuleString` defaults to
+`positions,indices,texcoords,geometrydescriptor,vertexlayout,vertexshader` ("Defines which asset
+hashes we need to generate via the geometry processing engine"), while our rtx.conf sets
+`rtx.geometryAssetHashRuleString = indices,texcoords,geometrydescriptor` - positions REMOVED
+versus the default `positions,indices,geometrydescriptor`. The only embedded description that
+references the asset rule says it is what SKY DETECTION matches against
+(`rtx.skyBoxGeometries`), so it is unlikely to be the flicker; recorded because it is a
+deviation from default and because excluding positions is what keeps SKINNED meshes stable, so
+it should not be "fixed" without thought.
+
+Remix's texture hash is NOT a plain XXH64 of the image data: XXH64 (verified against the
+published test vectors) over the whole file, after the 128-byte DDS header, mip 0 alone, and the
+DX10 variants, seeds 0 and 1, matched none of 14 capture files. The capture folder
+(`rtx-remix\captures\textures`, 1,675 files) is ground truth - each file is NAMED by its hash -
+so the algorithm is crackable offline. Handed to a Fable agent.
+
+## The test deployed now (ini only, no rebuild) - MUST BE REVERTED
+
+    decalOffsetPermille=30  decalPrimaryOffset=1  blendedOffset=0  biasOffset=0  layerOffset=0
+
+Only the decal-named class is pulled, and by 3% of its distance instead of 0.1%: the signs must
+VISIBLY jump off the walls. This is a falsifier for the whole approach, not a fix:
+  - signs visibly move AND stop flickering -> it IS a coplanar tie; dial the offset back down to
+    the smallest value that holds.
+  - signs visibly move and STILL flicker -> not a tie; the cause is inside Remix (material or
+    instance identity), and the decal texture list is the path.
+  - signs do NOT move at all -> our world matrix is not what places these draws in Remix, and
+    every offset built on 2026-09-11 is inert. That would be the most important finding of all.
+
+Revert with decalOffsetPermille=1, blendedOffset=1, biasOffset=1, layerOffset=1.
+
+    sr3-rtx.ini  d4f609e6bb5a030a8e4bdccfd7ffcfcc   (TEST configuration, revert after the run)
+    sr3-rtx.asi  feb2a66382a2912f1ccdff56f6610dd1  unchanged
+
+# SESSION 2026-09-14 - THE COPLANAR EXPLANATION IS DEAD; THE TEXTURE ITSELF IS THE SUSPECT
+
+The exaggerated test ran and answered both of its questions at once. The user: "the texture was
+just slightly spaced from the wall. i dont think that is not the issue. it is probably uv
+related... it looks like a decal or a texture that is on top of the buildings already existing
+texture in the outside."
+
+    The decal VISIBLY SEPARATED from the wall  -> our world matrix DOES reach Remix's geometry.
+                                                  Every offset built on 2026-09-11 was live and
+                                                  doing exactly what it claimed.
+    It STILL FLICKERED while separated          -> it is NOT a coplanar tie. Z-fighting cannot
+                                                  survive a visible gap.
+
+Both halves matter. The second kills the whole line of work from 2026-09-11 (7) and (8) as a
+FIX, and the first is what makes that conclusion trustworthy rather than a null result from an
+inert switch - the instrument was proven on the same run that refuted the theory.
+
+Every pull is therefore OFF (`decalOffsetPermille=0`, `layerOffsetPermille=0`), with the class
+switches left on so the OVERLAY OFFSET counters keep reporting. That also removes the one thing
+the offsets introduced that could hurt on its own: a world matrix that changes with the camera
+every frame, which gives Remix a moving transform to match instances against.
+
+## Where that leaves the symptom
+
+The flickering thing is the DECAL LAYER ITSELF - a texture drawn over the building's own
+surface - and it flickers with camera angle while its geometry is stable (the 60-frame rolling
+record shows no draw blinking) and while it is physically separated from the wall. So the fault
+is in how that surface is SHADED, not where it sits. Two candidates, both under investigation:
+
+  1. **An undefined interpolator.** The shim keeps the game's decal PIXEL shader bound but
+     replaces its vertex shader with fixed-function processing. Fixed function writes position,
+     a diffuse and specular colour, fog, point size and whatever texture coordinate sets the
+     stage state produces - nothing else. If the decal pixel shader declares an input the
+     vertex shader used to compute (a tangent basis, a view vector, a projected coordinate),
+     that register is undefined under fixed function and holds whatever was left in it, which
+     varies with the camera. That is a textbook cause of a texture that flickers at certain
+     angles. A Fable agent is disassembling the decal families to settle it.
+  2. **The texcoords themselves** (the user's own suspicion). Which set the decal sampler reads
+     versus the single TEXCOORD0 set the shim converts from SHORT2 to float2; whether a
+     converted buffer's contents or BIND OFFSET can differ between frames for one draw; whether
+     a conversion failure has a fallback that can alternate.
+
+## Deployed
+
+    sr3-rtx.ini  68efd1ebdf8d785201594165c8c7d92f   (all pulls off, counters kept)
+    sr3-rtx.asi  feb2a66382a2912f1ccdff56f6610dd1  unchanged
+
+## 2026-09-14 (2) - THE DISASSEMBLY: TWO FACTS THAT REWRITE THE DECAL WORK
+
+A Fable agent disassembled the decal shader families (archived `re\shaders\DX9_disasm\*.asm`
+verified byte-identical to live `fxo_disasm.py` output on five blobs first, so the quotes are
+disassembly, not a cached guess). Two findings, both corrections of things this log asserted.
+
+### 1. `ps='Decal_MapSampler'` NEVER MEANT WHAT I SAID IT MEANT
+
+`ShaderInfo::firstSampler` is filled walking the CTAB in TABLE order (sr3rtx.cpp:1311), and
+**D3DX writes the CTAB ALPHABETICALLY**. "Decal_MapSampler" sorts before "Diffuse_MapSampler".
+So `firstSampler` is the alphabetically-first sampler, NOT the lowest register:
+
+    ir_bbstandard_bs PS[8]:  s1 Diffuse_Map | s2 Specular_Map | s3 Decal_Map | s4 Decal_Map_2
+                             -> firstSampler = "Decal_MapSampler"
+
+Across `re\shader_constants.csv`: **400** pixel shaders report Decal_Map first alphabetically;
+only **126** actually have a decal map at the lowest register. The other 274 are ordinary
+building/wall materials (`ir_bbstandard`, `ir_bbsimple2_decal`, `ir_sr3diffspec_decal`, the
+window walls, carpaint, pccloth).
+
+The 2026-09-11 entry (7) says, in as many words, "the test is the FIRST sampler, not any sampler
+named Decal - a building's material shader carries Decal_Map behind Diffuse_Map, and pulling
+walls would open gaps between panels". The intent was right and the implementation did exactly
+what it set out to avoid: **`decalPrimaryOffset` has been tagging WALLS**. That is also what the
+user saw in the 3% test - "the texture was just slightly spaced from the wall" was a wall
+material lifting off, not a decal leaving its surface. A Sonnet agent is adding
+`ShaderInfo::lowestSampler` (+ its register) and switching the classifier to it behind
+`decalByLowestSampler=1`, with both names printed per draw in the frame dump.
+
+In the frame dump the two populations are already visible and were read as one:
+  - **26 of 32** `ps='Decal_MapSampler'` draws are `rank=100`, `zw=1`, `vs[proj][   ]`,
+    v=347/2331/11972 - Diffuse+Decal WALL materials.
+  - **6 of 32** are `rank=90`, `zw=0`, `vs[proj][obj]`, v=28336 p=2/4, all at one position -
+    the true decal-only draws.
+
+### 2. THE WORLD PATH DOES NOT KEEP THE GAME'S PIXEL SHADER
+
+`BeginFFP` nulls it (sr3rtx.cpp:8931 `g_origSetPixelShader(dev, nullptr)`) and
+`SetupTextureStages` configures a fixed-function PIXEL pipeline: stage 0 SELECTARG1/TEXTURE,
+TEXCOORDINDEX 0, stages 1-7 DISABLED. The "fixed-function vertex + the game's own pixel shader"
+formula is true only of the HUD user-pointer path (`uiKeepPixelShader`) and the atlas composite.
+
+So the undefined-interpolator hypothesis from this morning is **moot for world draws** - those
+pixel shaders do not execute. It was worth asking: the bytecode says every resolve-pass decal
+shader reads a clip-space position copy, a per-vertex tint, a DSF id and a fog factor through
+TEXCOORDs, none of which fixed function can produce, and the forward variants `texkill` on a
+reflection-plane value. Had the hybrid applied to the world, it would have been a real cause.
+
+Two consequences that DO bite:
+  - **The decal layer of the 274 Diffuse+Decal materials is never rendered.** One texture is
+    bound (the diffuse, via EffectiveAlbedo) and stages 1-7 are off. Logos baked as a second
+    map on a wall material are simply absent from the path-traced image.
+  - **The decal UV set is often not the one the shim converts.** Per family, the decal sampler's
+    coordinates come from vertex TEXCOORD1 in `ir_at_sr3decalonly` (VS[0]-[4]),
+    `ir_sr3diffcol_normal_decal`, `ir_sr3decalcube`, `ir_bbstandard` and `ir_bbsimple2_decal`,
+    while the shim converts and binds vertex TEXCOORD0 only (`FloatUVDeclaration`, stage 0
+    TEXCOORDINDEX=0). Any decal the FF path does bind from those families is mapped with the
+    DIFFUSE map's coordinates. That is the user's "uv related" instinct, confirmed in the
+    bytecode - though it explains a decal in the WRONG PLACE, not by itself one that flickers.
+
+### What is deployed now
+
+`rtx.decalTextures` written into rtx.conf for the first time: 91 sign, poster, graffiti and
+wall-decal textures (98 name-matched candidates minus 7 flagged as sign OBJECTS - sign backs,
+banners, a bench ad - which must not be blended into what is behind them). Hashes from the
+recipe cracked on 2026-09-13: XXH3-64 over packed mip 0, seed 0, native byte order.
+Backup: `Saints Row 3\rtx.conf.before-decaltextures`.
+
+    rtx.conf     a71ed4d5f643b56ecb19c7e737fc966f   (+ rtx.decalTextures, 91 entries)
+    sr3-rtx.ini  68efd1ebdf8d785201594165c8c7d92f   (all geometry pulls OFF)
+    sr3-rtx.asi  feb2a66382a2912f1ccdff56f6610dd1   (unchanged; the lowest-sampler fix is being built)
+
+Remix's gate still applies: `isDecal` is only set when the draw genuinely blends, and ONE/ZERO
+counts as opaque. The 6 true decal draws have zw=0 and are the ones most likely to pass it.
+
+## 2026-09-14 (3) - THE LOWEST-REGISTER FIX, BUILT AND DEPLOYED
+
+`ShaderInfo` now carries `lowestSampler` + `lowestSamplerReg` alongside `firstSampler`, filled in
+the same CTAB walk from the register the loop already has. The decal classifier reads it behind
+`decalByLowestSampler=1` (0 restores the old, wrong test without a rebuild). BOTH tests are
+counted every converted draw, so one capture shows how often they disagree, and the per-draw
+frame-dump line now prints `low='<name>'@<reg>` next to `ps='<name>'`. The report's OVERLAY
+OFFSET line gained: "decal map at the LOWEST register N/frame vs merely alphabetically first
+(the old, wrong test) M/frame".
+
+Verified by reading the file rather than trusting the report: the struct field and its comment
+(1085-1093), the CTAB fill (1340-1342), the classification block (9026-9038), the ini key
+(configs/sr3-rtx.ini:1046), the dump format (12313) and the report line (17582).
+
+Pulls remain OFF, so this build changes no pixel: it only re-labels and counts. That keeps the
+next run a clean test of `rtx.decalTextures` alone.
+
+    sr3-rtx.asi  d39344f92ae8873a6e74234d7273bb97   (lowest-register decal classification; diagnostic only)
+    sr3-rtx.ini  9ba84b464e4a9c91714ddf66ad112cb9
+    rtx.conf     a71ed4d5f643b56ecb19c7e737fc966f   (+ rtx.decalTextures, 91 entries)
+    source backup: sr3rtx.cpp.before-lowest-sampler
+
+## 2026-09-14 (4) - THE DECAL LIST DID NOT FIX IT; THE ALBEDO STAGE WAS NEVER INSTRUMENTED
+
+The user ran with `rtx.decalTextures` (91 entries): "the texture still looked broken. i think
+this is a decal thing. it might also be related to the previous 'random polygon' thing. cuz one
+time i thought i saw a texture that was used as a decal in them."
+
+Note the WORD: **broken**, not flickering. And a link between the two symptoms: a random
+stretched polygon carrying a DECAL texture.
+
+## The three-lens workflow's results (15 agents, all returned)
+
+CLOSED - nothing blinks. The rolling record was re-analysed under three identity keys
+(tex0+geometry+placement; geometry+sampler+placement; sampler+tex0+geometry+placement) with the
+present/absent pattern printed per identity and classified:
+
+    KeyC: 648 identities = 412 present in all 60 frames + 174 one contiguous block + 62 scattered
+    Decal_MapSampler identities under KeyC: 24 = 20 ALWAYS + 4 SINGLE_BLOCK + 0 SCATTERED
+    the 59 "13-15 of 60 frames" identities the earlier pass flagged: ALL single-block view
+      transitions, 0 scattered, in every key
+    the only genuinely alternating identities in the whole record are PARTICLE BILLBOARDS
+    deferFreshStaticDraws fired ZERO times in the captured window, so it hits nothing here
+
+CLOSED - the uv conversion's plumbing is sound for these draws. For a STATIC source `UvKey` is
+built with first=0/count=0, so one cache entry covers the whole buffer and `g_uvBindOffset` is
+provably 0 on every call (the only non-zero write lives in the dynamic-ring branch, :9972). The
+1/1024 scale is confirmed live, tiling is applied, and the texture-matrix scale cache is
+consistent. Measured across four 600-frame intervals of a live session: invalidations track
+DYNAMIC re-conversions to within 0.1-1% every interval (deltas 7755/1772/9011/6472 against
+7762/1753/9020/6464), while the STATIC persistent-buffer count moved 1600->2670 in the same
+span. Static-buffer churn is a small residual, not the story. Conversion failures: 0 all session.
+
+MOOT - the lens's own headline, "decal pixel shaders read interpolators fixed function cannot
+supply", rests on the premise that the game's pixel shader stays bound on world draws. The Fable
+disassembly had already disproved that premise the same day (BeginFFP nulls the PS). A Sonnet
+lens took the project's stated premise at face value; the disassembly went and checked. That is
+the model split doing its job, and the reason disassembly is now a Fable-only rule.
+
+STILL OPEN and newly instrumented - THE ALBEDO STAGE. `EffectiveAlbedo()` returns
+`g_curTexture[albedoStage]`, where `albedoStage` was chosen by scoring sampler NAMES out of the
+CTAB. The live log says:
+
+    albedo: moved off stage 0 117/frame ... 148/frame, blanked 26-28/frame
+    ALBEDO WHITE: named-but-not-bound 0/frame
+
+So for 117-148 draws a frame the rendered texture is NOT stage 0's - and the frame dump, the
+rolling record and every identity key ever used in this project logged `g_curTexture[0]` only.
+For exactly that population no instrument has ever recorded what was actually rendered, which
+means "nothing blinks" was measured on the wrong field for those draws. The file's own comment
+(:5986) names the mechanism: binding the wrong thing as albedo is "what makes surfaces flicker
+through unrelated images as the frame's targets are rewritten". Submission order changes with
+camera angle, so a stage holding a leftover texture from an earlier draw fits "unstable at
+certain angles" exactly - and it fits the user's polygon note, since a surface showing a decal
+texture that does not belong to it is what this produces.
+
+Built and deployed (diagnostic only, no pixel changes, `albedoChurnProbe=1`):
+  - `g_lastEffectiveAlbedo` / `g_lastEffectiveAlbedoStage` published at every return of
+    `EffectiveAlbedo()`, including the blanked one.
+  - Per-draw churn detection keyed on the draw's IDENTITY WITHOUT THE TEXTURE (stream-0 buffer,
+    offset, stride, vertex window, index range, world translation to 1 cm), comparing against
+    the same identity's albedo in the previous frame; maps swapped once per frame at Present.
+  - `ALBEDO CHURN #N` lines for the first ten, naming both sampler names, the rank, the stage,
+    the previous and new texture pointers with an (RT) marker, sizes and placement.
+  - `alb=%p@%d` added to BOTH dumps, beside the existing `tex0=`.
+  - A new clause on the albedo report line: churned draws/frame and identities tracked.
+
+    sr3-rtx.asi  9691d53ba09c341f366c679ea2b41bdd
+    sr3-rtx.ini  2c0817e02a3f19b6f648d519430e6d67
+    source backup: sr3rtx.cpp.before-albedo-churn
+
+Added in the same build: the TEXCOORD SET the chosen albedo sampler actually reads, per draw, in
+both dumps as `uv=N` (with `*` when the answer was traced through temporaries rather than read
+from an input register), and three counters on the albedo report line - draws whose albedo
+sampler reads set 0, a NON-ZERO set, or a computed/unknown coordinate. The shim forces stage 0's
+D3DTSS_TEXCOORDINDEX to 0 and converts only vertex TEXCOORD0, while the game's meshes carry up to
+three SHORT2 sets (`usage=TEXCOORD index=0/1/2` in the live log), so a non-zero answer means that
+surface is being textured with the wrong coordinates - a BROKEN texture, which is the user's word.
+
+    sr3-rtx.asi  0dd9dcdac02e2b147a5e89fefd99221c   (albedo churn + texcoord-set fields; diagnostic only)
+    source backups: sr3rtx.cpp.before-albedo-churn, sr3rtx.cpp.before-uvset-field
+
+## 2026-09-14 (5) - THE PROBE RUN: CHURN IS ZERO, AND FOUR MORE CAUSES DIE
+
+The user ran the probe build. Frame 4317 capture plus the report line:
+
+    albedo: moved off stage 0 91-94/frame, blanked 18-20/frame
+    churned to a different texture than last frame 0/frame (230-245 identities tracked)
+    chosen albedo sampler read texcoord set 0 ~100/frame, a NON-ZERO set ~215/frame,
+        an unknown/computed set 2-3/frame
+
+**ALBEDO CHURN IS ZERO.** The same draw binds the same texture every frame, over 230-245 tracked
+identities. The ten `ALBEDO CHURN` lines that did fire are all at two world positions on large
+meshes (v=28708, v=7121) and are streaming/LOD swaps, not per-frame instability. That
+hypothesis is dead, and it was the strongest one standing.
+
+**The `uv=` field measures the wrong thing, and the data proves it.** It reports which PIXEL
+SHADER INPUT REGISTER feeds the sampler, not which VERTEX texcoord set feeds that register. In
+the capture only 36 of ~220 converted draws read interpolator 0, yet the city renders correctly -
+so a non-zero interpolator plainly does not imply wrong coordinates. The Fable disassembly had
+already given the true mapping for the decal families, and it agrees: `ir_sr3decalonly_*` reads
+its decal at PS TEXCOORD2 while its vertex shader builds that register from **vertex TEXCOORD0**,
+which is the set the shim converts. Measured in the capture, the true decal draws (rank=90,
+lowest sampler `Decal_MapSampler`@0) all read interpolator 2, exactly as disassembled.
+Resolving the VERTEX set properly needs a dataflow trace of the vertex shader's outputs; the
+interpolator index alone is not evidence of a bug and must not be read as one.
+
+**The shader cutout was never missing.** `SetupTextureStages` has handled it since 2026-08-19
+(the tree-leaves fix): a pixel shader that declares `Alpha_Threshold` and texkills is detected
+(`shaderCutout`, :6731) and converted into a real fixed-function alpha test at the shader's own
+threshold, restored in EndFFP. 403 shaders in the game do this, decals among them.
+
+### Eliminated so far for the sign/logo symptom
+
+    coplanar depth tie ............ separated visibly, still flickered (2026-09-14)
+    draws blinking on and off ..... 60 frames, 3 identity keys, 0 scattered decal identities
+    albedo texture churn .......... 0 draws/frame over 245 identities
+    uv bind offset / ring ......... provably 0 for static sources; conversion failures 0 all run
+    undefined interpolators ....... the world path does not keep the game's pixel shader
+    missing alpha cutout .......... already reproduced as a real alpha test since August
+    Remix decal texture list ...... 91 hashes applied, no change
+
+### The test now deployed (rtx.conf only, one line)
+
+    rtx.opacityMicromap.enable = True -> False        backup: rtx.conf.before-omm-off
+
+Opacity micromaps were ON. They exist precisely for ALPHA-CUTOUT geometry, which is what these
+decals are (the shim gives them a real alpha test, above), they are built per geometry and
+CACHED, and a cache keyed on geometry can churn as the camera moves - which is the user's own
+"the hashes are unstable at certain angles or positions" hypothesis with a concrete mechanism
+behind it. Remix's own words for the neighbouring option: "Enables Opacity Micromaps for
+geometries with textures that have alpha cutouts."
+
+If the flicker stops, the class is settled and the remaining work is tuning. If not, the next
+single-line test is `rtx.enableProbabilisticUnorderedResolveInIndirectRays = True -> False`,
+which is stochastic transparency resolution and would produce per-frame noise on exactly these
+surfaces.
+
+    rtx.conf     81249e23c4a929ea89d0b27f39b9d4e9   (opacity micromaps OFF for the test; decalTextures still in place)
+    sr3-rtx.asi  0dd9dcdac02e2b147a5e89fefd99221c   unchanged
+
+## 2026-09-14 (6) - THE USER IDENTIFIES THE POLYGONS: THEY ARE THE DECALS
+
+With a screenshot and recorded gameplay: "the random polygons are the decals. they are not
+rendering properly... everything the random polygons are happening, they are not random. they
+are the decals. they have unstable hashes also."
+
+The screenshot shows flat polygons over a building facade carrying a FINE REPEATING STRIPE
+pattern instead of their intended image, at a range of positions and orientations. That merges
+two symptoms this log has tracked separately for days - the intermittent "random stretched
+polygons" and the sign/logo flicker - into ONE: the decals are drawn, and they are drawn wrong.
+
+A stripe pattern is the signature of a texture sampled with coordinates scaled far too fast.
+That reframes the whole problem: not placement, not depth, not identity - COORDINATES.
+
+### What the shim actually renders for one of these draws
+
+Established today, and worth stating in one place because three earlier theories assumed
+otherwise: the world path drops the game's pixel shader entirely. A converted draw gets ONE
+texture, chosen by NAME rank, at stage 0, with stages 1-7 disabled, sampled from vertex
+TEXCOORD0, scaled by a texture matrix of 1/1024 times a per-map tiling constant, with an alpha
+test synthesised when the shader declared `Alpha_Threshold`.
+
+### The number that now matters
+
+    re/shader_constants.csv:  Decal_Map_TilingU   319 shaders
+                              Decal_Map_TilingV   313
+                              Normal_Map_TilingU  447
+                              Diffuse_Map_TilingU  22
+    the shim's live report:   uv tiling matched to the albedo map 9.5/frame,
+                              no pair for it 260.4/frame
+
+The DECAL map is the map this engine tiles - 319 shaders declare a tiling constant for it
+against 22 for the diffuse map - and `TilingForAlbedo` only ever looks up the tiling belonging
+to whichever map won the albedo NAME RANK. On a Diffuse+Decal wall material the diffuse wins
+(rank 100), so the decal's tiling is never consulted, and the decal layer is not bound at all.
+On a decal-only material the decal wins (rank 90) and its tiling should be found. Whether a
+mismatch here produces the stripes is exactly what is now being disassembled.
+
+Handed to a Fable agent (rule 5: disassembly is Fable's): the per-family table of which VERTEX
+texcoord set each decal image comes from and with what arithmetic; whether a wrong scale, a
+wrong set, or no scale predicts dense regular stripes specifically; whether `Decal_Map_Offset*`
+constants exist that the shim's scale-only texture matrix drops; what a `distfield` decal does
+to turn a sampled value into coverage, since signed-distance-field lettering is exactly what
+building signage is; and the smallest change per finding.
+
+### Asked of the user
+
+A capture (F9) AT THE SPOT IN THE SCREENSHOT. Both captures in hand are from other places: the
+16:43 one has 6 true decal draws, the 17:00 one has none at all, so neither contains the draws
+in the picture. Without that, the analysis cannot name the shader family responsible.
+
+## 2026-09-14 (7) - THE DISASSEMBLY ANSWERS IT: WRONG TEXCOORD SET, AND OPAQUE ALPHA
+
+A Fable agent disassembled all six decal-bearing families (archived `re/shaders/DX9_disasm/*.asm`
+verified instruction-for-instruction against live `fxo_disasm.py` output on all six containers,
+0 diff lines, before any of it was trusted). Three results, one of them the answer.
+
+### 1. TWO FAMILIES READ VERTEX TEXCOORD1 AND DECLARE NO TEXCOORD0 AT ALL
+
+    ir_at_sr3decalonly_{s,bs}        VS[0]-[4]   dcl_texcoord1, no dcl_texcoord
+    ir_sr3diffcol_normal_decal_{s,bs} VS[2]-[5]   dcl_texcoord1 only
+    ir_at_decalonly_cuberef_*        VS[5]
+    ir_sr3fauxinterior_{s,bs}        VS[0],[1]   <- the FAKE WINDOW INTERIORS on facades
+
+Library-wide, of 3,725 vertex shader blobs, 19 containers read texcoord1 with no texcoord0.
+
+The shim forces `D3DTSS_TEXCOORDINDEX = 0` (:6761) and `FloatUVDeclaration` retargets only
+usage-index 0 (:10247). So these draws are textured from whatever usage-index 0 holds - and if
+the mesh has no index-0 element, `InstallFloatUV` returns false at its FIRST condition, the draw
+reaches Remix with the game's original declaration, and Remix's own log says
+`[rtx-interleaver] Unsupported texcoord buffer format (80), skipping texcoord` - no texcoords at
+all. **That failure is UNCOUNTED**: the report's "failures: 0 convert" cannot see it, which is
+why this survived every probe built this week.
+
+Predicted appearance, from the agent's own reasoning: if index 0 is absent -> flat colour; if it
+holds another real UV set -> the decal image repeated or skewed, i.e. "a stretched polygon
+carrying a decal texture", which is the user's exact earlier description; if it holds something
+that is NOT a UV set, so values differ by thousands of shorts between neighbouring vertices ->
+DOZENS OF REPEATS BETWEEN VERTICES, that is DENSE REGULAR STRIPES. The screenshot shows dense
+regular stripes on quads sitting where a building's windows are, and `ir_sr3fauxinterior` draws
+exactly that geometry.
+
+### 2. THREE FAMILIES ARE RENDERED OPAQUE WHEN THE GAME BLENDS THEM
+
+`ir_sr3decalonly`, `ir_sr3diffcol_normal_decal` and `ir_sr3simple_distfield_decal` declare NO
+`Alpha_Threshold`, so `shaderCutout` (:6731) never fires for them, so `cutout` is false, so
+`ALPHAARG1 = TFACTOR` = alpha 1.0. Their pixel shaders instead compute
+`alpha = decal.a x Decal_Map_Opacity x Tint_color.a` and the game submits them with real
+SRCALPHA/INVSRCALPHA factors (`blend=1(5/6)` in the frame dump). So a decal that should fade onto
+the wall is drawn as a filled rectangle of its texture - "a texture that is on top of the
+building's already existing texture", verbatim what the user reported.
+
+### 3. NEGATIVE RESULTS THAT CLOSE THREE OPEN QUESTIONS
+
+  - **No scale error anywhere.** Every one of the six families computes the same thing:
+    `uv = vertexTexcoord x Decal_Map_TilingU/V x 1/1024`, no offset, no matrix. `TilingForAlbedo`
+    resolves it CORRECTLY for all six. The "no pair for it 260/frame" figure is mostly correct
+    behaviour: those materials genuinely have no tiling constant for their albedo. One real but
+    narrow bug: `Decal_Map_TilingU_2` shares the base name `Decal_Map` and overwrites the primary
+    pair's register - cars only (`ir_sr2carpaint1_*`).
+  - **`Decal_Map_Offset*` is not a translation.** It exists only in `ir_sr3megatv_*`,
+    `ir_sr3television_*` and `ir_sr3vr_pixel_*`, where it is a `Time`-driven flipbook CELL INDEX.
+    Omitting it freezes a TV on one frame; it has nothing to do with the six building families,
+    whose UV maths has no translation term at all. The shim's scale-only texture matrix is
+    complete for them.
+  - **What a distfield decal is.** `ir_sr3simple_distfield_decal_s [2]`: `texld r0, v1, s0` then
+    `smoothstep(0.45, 0.55, alpha)` for coverage, and the RGB comes ENTIRELY from the constant
+    `Decal_Map_Color` - the texture's own RGB is never read. Converted with no alpha test at all,
+    building signage renders as an opaque rectangle of an RGB channel the game never displays.
+
+### Commissioned (Sonnet, two fixes, separate switches, a build after each)
+
+  A. `decalUvFromDeclaredSet=1` - record which texcoord usage indices the VERTEX shader declares,
+     pick set 1 when it declares 1 and not 0, convert THAT element, and emit it as usage-index 0
+     in the cloned declaration so the stage's TEXCOORDINDEX 0 picks it up. Plus counters, and a
+     counter for the silent `InstallFloatUV` refusal so it can never be invisible again.
+  B. `decalAlphaFromTexture=1` - when the albedo sampler is Decal-named and the draw is blended
+     BY ITS FACTORS, take alpha from the texture instead of TFACTOR.
+
+Deferred, recorded so they are not lost: distfield colour from `Decal_Map_Color` with a 0.5 alpha
+test; the second decal layer on Diffuse+Decal wall materials (`ir_bbstandard`, `ir_bbsimple2_decal`),
+which needs a second texture stage on texcoord set 1; the dropped `Decal_Color x
+Object_instance_params` and `Diffuse_Color` multipliers; the `_TilingU_2` base-name overwrite.
+
+## 2026-09-14 (8) - BOTH DECAL FIXES BUILT; THE CLONE COLLISION CLOSED
+
+FIX A and FIX B are implemented and each built clean (Sonnet, per the model rule), then a third
+patch closed a gap I found reading FIX A back.
+
+**The gap.** `FloatUVDeclaration` relabels the set-1 element AS usage-index 0 so the
+fixed-function stage picks it up. Which draws take that path is decided by the VERTEX SHADER,
+independent of what the bound DECLARATION carries - so a declaration holding BOTH a real
+TEXCOORD0 element and the TEXCOORD1 one would end up with two elements claiming usage-index 0.
+That is not a valid D3D9 declaration; `CreateVertexDeclaration` refuses it, the clone comes back
+null, and the draw falls back to the game's own broken declaration. It fails SAFE but SILENTLY,
+and the fix would simply never apply to those meshes. Now the colliding TEXCOORD0 element is
+displaced to the lowest free TEXCOORD index 1-7 (safe: nothing in the fixed-function path reads
+any set but 0, since TEXCOORDINDEX is 0 for stage 0 and stages 1-7 are disabled) and the case is
+counted. If no index is free the clone is abandoned, as before.
+
+Verified by reading the file rather than trusting the reports: the struct fields (1112-1113), the
+`isVertexShader = (tokens[0]>>16)==0xFFFE` guard and the TEXCOORD input recording (1173, 1215-1225),
+`DecalUvSourceSet` (~8849), the displacement pre-pass and the unchanged set-0 loop
+(10346-10405), FIX B's `decalAlphaBlend` and the `ALPHAARG1` decision (6786-6816), and both ini
+keys (1671, 1704).
+
+    build/sr3-rtx.asi    f987aed43976d8373935448b1eb99d04   572,416 bytes  NOT DEPLOYED
+    configs/sr3-rtx.ini  00eaa6fa6c028cf6c36be1782bd07132                  NOT DEPLOYED
+
+Not deployed because the game was running (pid 24564) and the ASI is file-locked while it is.
+The deploy command and what to read afterwards are at the top of docs/HANDOFF-PROMPT.md, which
+was rewritten in full at this point for the context handover.
+
+Deployed once the game closed, hash-verified: `sr3-rtx.asi f987aed43976d8373935448b1eb99d04`,
+`sr3-rtx.ini 00eaa6fa6c028cf6c36be1782bd07132`, `rtx.conf 81249e23c4a929ea89d0b27f39b9d4e9`.
+UNRUN. Both fixes are ini-switchable for an A/B without a rebuild.
+
+## 2026-09-14 (9) - FIX A CRASHED ON WORLD LOAD; THE MISSING GUARD
+
+The user ran the deployed build and the game crashed loading the world. The shim's own crash
+reporter caught it, which is the whole reason that reporter exists:
+
+    *** CRASH: code 0xC0000005 at 6D73BA6E (sr3-rtx.asi +0x4BA6E)
+        access violation READING address 59ADF000
+        shim state: frame 3405 draw 0 | last albedo 4CDC36D8 | 55 RT textures
+        minidump: Saints Row 3\sr3-rtx-crash.dmp
+
+**Recovered immediately with an ini change, no rebuild**: `decalUvFromDeclaredSet=0` and
+`decalAlphaFromTexture=0` in both `configs/sr3-rtx.ini` and the deployed copy (now
+`797b44054fc0237c44a9fbc371cede9e`). With the switch off `DecalUvSourceSet()` returns 0 on its
+first line, so every path behaves exactly as the previous build did; the only ungated part of
+FIX A is the ReflectShader recording, which reads dcl tokens at shader-creation time and cannot
+be the draw-time read that faulted.
+
+**The cause, from reading the code.** FIX A validates only the TYPE of the set-1 element before
+reading it out of STREAM 0's vertex data at `texcoord1Offset` with stream 0's stride. It never
+checks two things this file already knew to check:
+
+  - **the element's STREAM.** `ParseDeclaration` records `texcoord1Stream` (~1524) and the cloth
+    path already requires it to be 0 before trusting the offset (~2990). These decal draws are
+    INSTANCED, so their declarations legitimately place elements in stream 1. Reading a stream-1
+    offset out of stream 0's bytes walks off the end.
+  - **the offset against the stride.** Nothing checks `texcoord1Offset + 4 <= stride`. The loop
+    reads `base + vertexIndex * stride + offset` for every vertex, so an offset at or past the
+    stride runs the last vertex off the mapping.
+
+Both match the symptom exactly: a read fault during world streaming, when new declarations first
+appear. A Sonnet agent is adding both guards with their own counter, so a wrong-stream refusal is
+distinguishable in the report from a wrong-type one.
+
+**The lesson, and it is the same one this project keeps paying for**: the knowledge was already
+in the file. Another function guarded the identical field for the identical reason, 7,000 lines
+away, and the new code did not inherit it. When adding a second consumer of a parsed field, read
+every existing consumer first - they encode the conditions the field is only valid under.
+
+## 2026-09-14 (10) - THE MINIDUMP RESOLVED: THE DECAL FIXES ARE INNOCENT
+
+The crash was resolved properly rather than argued about, and the answer clears both decal fixes.
+
+**The map was made EXACT first.** `sr3rtx.cpp.before-uvset-guard` (the source that crashed) was
+rebuilt. Its whole-file MD5 did NOT match the deployed `f987aed4` - and instead of shrugging at
+that, the two binaries were byte-diffed: **4 differing bytes in two clusters, both the PE header
+timestamp and its mirror in the Load Config Directory.** The `.text` sections hash IDENTICALLY
+(`28997671e8f65e132d77e403a8a80388`). So the map is exact for code addresses, and every
+resolution below is measured, not approximate. The source and the whole build directory were
+restored and re-verified by hash afterwards.
+
+**The registers, from the exception record's CONTEXT:**
+
+    Eax 59adf020   Ecx 00000020   Edx 00002000   Esi 59adf000   Edi 5b718020
+    Ebp 001afcc0   Esp 001afa08   Eip 6d73ba6e -> CopyUpLargeMov+0xa (libvcruntime:memmove.obj)
+
+`Esi`, the copy SOURCE, is EXACTLY the faulting address. `Edx = 0x2000 = 2048 x 4` - one full row
+of the 2048-wide CHARACTER ATLAS.
+
+**The caller, from a stack walk of the recovered stack memory:** exactly one genuine call-chain
+link survives, `Hook_SurfUnlockRect`, corroborated by its own compiler-generated EH registration
+record sitting on the same stack. The other in-module hits are addresses of globals passed as
+arguments, the tail of the already-returned `Hook_SurfLockRect`, and the shim's own `CrashFilter`
+running BELOW the fault on the same stack while it wrote the log line.
+
+**So: the ATLAS SNOOP killed the game, not FIX A or FIX B.** `Hook_SurfUnlockRect` copies pixel
+rows out of `p.bits`, a raw surface pointer captured during the matching `Hook_SurfLockRect` and
+held in a pending slot until the unlock. By unlock time it can be unmapped - a DISCARD rename, a
+lost device, another thread, the surface freed between the two calls - and the row loop then walks
+into unmapped memory. Nothing in that path touches a UV set, a vertex declaration or a vertex
+buffer. **Both decal fixes are cleared and go back on in the next build.**
+
+**A defect in our own crash reporter, found by the same work.** In the dump the shim wrote,
+`MINIDUMP_THREAD.Stack.Memory.Rva` is **0 for every one of the 35 threads**, so no debugger and no
+parser can walk a stack from it; the bytes had to be recovered indirectly through the memory list
+by finding the range containing Esp. Being fixed in the same build (flags plus a proper
+`MINIDUMP_EXCEPTION_INFORMATION`), because the next crash should not cost a forensic detour.
+
+### Commissioned (Sonnet)
+
+  - `snoopValidateSource=1`: VirtualQuery the ENTIRE source range (`src` to
+    `src + (h-1)*pitch + w*4`) for MEM_COMMIT and a readable protection before the copy, skip and
+    count if any page fails, AND wrap the copy loop itself in `__try/__except` in its own helper
+    (a function with `__try` cannot also hold C++ objects needing unwinding) so a range that is
+    unmapped a microsecond after validation still cannot take the process down.
+  - The minidump flags.
+
+**The methodology point worth keeping:** the whole-file hash mismatch would have been a perfectly
+reasonable place to stop and declare the map "approximate". Diffing the four bytes turned a hedge
+into a certainty, and the certainty is what let the decal fixes be cleared rather than left under
+suspicion.
+
+## 2026-09-14 (11) - THE CAPTURE AT THE SPOT, AT LAST: FIX B IS THE ONE THAT MATTERS HERE
+
+The user loaded the game, pressed F9 while looking at the broken decals and quit safely.
+`sr3-rtx-frame-2.log`, frame 4635, camera (-187.6 6.2 142.0) - the screenshot's building. The
+switches were OFF for this run, so it captures the BROKEN state, which is what was wanted.
+
+**The six draws, all at ONE position (-220.2 14.2 143.7), all identical in state:**
+
+    775-780 CONVERT v=28336 p=2|4 zw=0 zt=1 zf=4 bias=0 blend=1(5/6) cw=0xf pull=0
+            vs[proj][obj] ps='Decal_MapSampler' rank=90 low='Decal_MapSampler'@0
+            tex0=alb@0  uv=2  inst=0
+
+Read out of that, each measured:
+
+  - `low='Decal_MapSampler'@0` - a decal map at the LOWEST register, so these are TRUE decals,
+    not the alphabetical false positives that wasted a day.
+  - `blend=1(5/6)` - SRCALPHA/INVSRCALPHA. **Genuinely blended by the factors.**
+  - `zw=0` - no depth write, the classic decal signature.
+  - `rank=90` and `alb == tex0 @0` - the decal map IS what we render, correctly chosen.
+  - `inst=0` with `vs[proj][obj]` - placed by objTM, NOT from the instance stream.
+  - `uv=2` - the decal is sampled at PS interpolator 2, exactly as `ir_sr3decalonly_*` was
+    disassembled ("`texld r1, v2, s0`"), and that family builds interpolator 2 from **vertex
+    TEXCOORD0** - the set the shim already converts.
+
+**Therefore, and this is worth being blunt about: FIX A does not apply to these draws.** They are
+`ir_sr3decalonly`, whose coordinates come from set 0. FIX A remains a real fix for
+`ir_at_sr3decalonly`, `ir_sr3diffcol_normal_decal` and `ir_sr3fauxinterior`, none of which appear
+in this frame. Chasing the coordinate set was right in general and wrong for this spot.
+
+**FIX B applies to exactly these six.** Counted in the same frame:
+
+    converted draws genuinely blended (5/6):            20
+    of those, with a Decal-named albedo:                 6   <- FIX B changes precisely these
+
+With the switches off, `cutout` is false for them (no `Alpha_Threshold`, so `shaderCutout` never
+fires) and `ALPHAARG1 = TFACTOR` = alpha 1.0. Under SRCALPHA/INVSRCALPHA that is
+`1*src + 0*dst` - **fully opaque**. A decal that should fade onto the wall covers it completely.
+And the 3% pull test moved exactly this population (`zw=0` satisfied the old `noWrite` rule),
+which is why the user saw "the texture was just slightly spaced from the wall".
+
+So the prediction for the next run is specific: with `decalAlphaFromTexture=1` these six draws
+stop being opaque rectangles and blend onto the facade. If the quads still look wrong after that,
+the remaining candidate on the same draws is the decal's own UV scale within its texture, and the
+next instrument is dumping the decal texture plus the min/max of the converted coordinates for
+one of those six draws.
+
+## 2026-09-14 (12) - THE SNOOP GUARD, AND EVERYTHING BACK ON
+
+Built and deployed. `sr3-rtx.asi 7ee78ec2edf533ee43a60e5c4f7685b4` (573,440 bytes),
+`sr3-rtx.ini 448a7ae2b3acd0ced40a7573e6a1d984`, `rtx.conf 81249e23c4a929ea89d0b27f39b9d4e9`.
+Source backup `sr3rtx.cpp.before-snoop-guard`. UNRUN.
+
+**`snoopValidateSource=1`** - `AtlasSourceRangeReadable()` (:5338) walks `VirtualQuery` over the
+WHOLE source range `[src, src + (h-1)*pitch + w*4)` and requires `MEM_COMMIT` plus one of the six
+readable protections, rejecting `PAGE_GUARD`; `CopyAtlasRowsGuarded()` (:5371) holds the copy loop
+inside `__try/__except(EXCEPTION_EXECUTE_HANDLER)` in its own function, which is REQUIRED because
+MSVC refuses `__try` in a scope holding unwindable C++ objects (C2712) and `Hook_SurfUnlockRect`
+has them. Skips and exceptions are counted separately (`g_atlasSrcUnmapped`,
+`g_atlasSrcException`) and reported on the ATLAS SNOOP line with the switch state. The follow-on
+mean/dump block is now gated on whether the copy actually happened.
+
+**The minidump writer** now passes `MiniDumpWithIndirectlyReferencedMemory |
+MiniDumpWithThreadInfo`; `MiniDumpWithFullMemory` was deliberately left out to keep dumps small.
+The next crash should be walkable without recovering stacks by hand.
+
+**Both decal fixes are ON again** (`decalUvFromDeclaredSet=1`, `decalAlphaFromTexture=1`), since
+the forensics cleared them. So the next run tests, in one go: FIX B on the six blended decal draws
+at the user's spot, FIX A on the families that need it, and the crash guard.
+
+**What to read from that run**
+
+    ATLAS SNOOP ... source validation ON, N skipped unmapped, N caught by the handler
+    SHORT2 ... FIX A decal texcoord1 set: N served, N wanted but unavailable, N displaced
+    albedo: ... FIX B decal alpha from texture N/frame      <- expect ~6 at that building
+
+A non-zero "skipped unmapped" would prove the stale-pointer theory outright and mean the guard
+just prevented a crash.
+
+## 2026-09-14 (13) - FIX B FIRES AND THE DECALS STILL LOOK WRONG
+
+The run with everything on. No crash (the snoop guard's first outing was clean). Counters:
+
+    FIX B decal alpha from texture 4/frame        <- firing, on the right draws
+    FIX A decal texcoord1 set: 0.0 served, 0.0 wanted but unavailable, 0.0 refused,
+                               0 declarations displaced
+    *** CRASH lines: 0
+
+FIX A reading zero is the PREDICTED result, not a failure: the capture already showed this
+building's decals are `ir_sr3decalonly`, which reads vertex set 0. FIX A serves other families.
+
+FIX B is firing on 4 draws a frame - the blended, decal-albedo draws - and the user reports the
+decals look exactly as wrong as before. **So correcting the alpha did not change the appearance.
+The fault is in WHAT IMAGE is on the quad, or WHERE ON THE IMAGE we sample.**
+
+### Everything now eliminated, each by a measurement
+
+    depth tie ............ visibly separated at 3%, still wrong
+    blinking ............. 60 frames, 3 keys, 0 scattered decal identities
+    albedo churn ......... 0 draws/frame over 245 identities
+    uv bind offset ....... provably 0 for static sources; 0 conversion failures
+    undefined interps .... the world path drops the game's pixel shader
+    missing cutout ....... reproduced as a real alpha test since August
+    the texcoord SET ..... this family reads set 0, which is what we convert (capture-confirmed)
+    the tiling lookup .... resolves correctly for all six decal families (disassembly)
+    a UV offset term ..... none exists in these vertex shaders (disassembly)
+    the ALPHA ............ fixed, firing 4/frame, appearance unchanged
+    Remix decal list ..... 91 hashes, no change
+    opacity micromaps .... off, no change
+
+### The two things never measured, now being probed
+
+`decalProbe=1`: for the first 8 decal draws, one log block giving the bound texture's
+dimensions/format/pool, the `su`/`sv` the texture matrix actually applied, the RAW SHORT2
+coordinates **over the vertices the draw actually INDEXES** (not the 28,336-vertex window - the
+distinction is the point), and the resulting UV span stated as "N.NN x M.MM texture repeats".
+Plus `decalProbeDumpTexture=1` dumping that texture's top mip to
+`sr3-remix-decalprobe-<n>-<w>x<h>.dds`, with the alpha channel written as the texture's own
+(the DDS writer fabricated alpha 255 once before and hid a finding for a day).
+
+That answers it outright: a span near 1x1 with a sensible image means the mapping is right and
+the image is wrong; a span of tens means we are tiling a decal across itself, which IS a fine
+repeating stripe pattern; a texture that is not a logo at all means the wrong thing is bound.
+
+## 2026-09-14 (14) - THE DECAL PROBE, DEPLOYED
+
+`ProbeDecalDraw` (sr3rtx.cpp:16188, called at :9328 right after `EffectiveAlbedo` publishes the
+bound texture) fires for the first 8 converted draws whose albedo sampler names a Decal map, and
+is re-armed by F9. Each block reports:
+
+  identity  albedoSampler, lowest sampler + register, stage, verts, prims, world position,
+            and the texture pointer actually bound
+  texture   WxH, format, mips, pool, usage from GetLevelDesc
+  scale     the su/sv the texture matrix REALLY applied this draw (published from inside
+            SetupTextureStages where they are computed) and COUNT2 vs DISABLE
+  raw       the SHORT2 lanes over the vertices the draw ACTUALLY INDEXES - the index buffer is
+            locked and each index mapped through the same baseVertex arithmetic OcclMeshFor uses,
+            so a 2-triangle draw out of a 28,336-vertex window reports 6 vertices, not 28,336
+  uv        raw x scale: min, max, first four, and "spans N.NN x M.MM texture repeats"
+
+`decalProbeDumpTexture=1` writes the bound texture's top mip to
+`sr3-remix-decalprobe-<n>-<w>x<h>.dds` through the existing `TextureToBgra` + `WriteBgraDds`,
+which decodes REAL per-format alpha (DXT3/DXT5 included); on failure it re-locks to report the
+true HRESULT rather than failing silently - the fabricated-alpha trap of 2026-09-09 written into
+the code as a guard.
+
+    sr3-rtx.asi  db3059897dbab468df65f9fcb04df84e   579,072 bytes  DEPLOYED, UNRUN
+    sr3-rtx.ini  22f3fe8b37264c8094956961c9899bc7
+    source backup: sr3rtx.cpp.before-decalprobe
+
+# SESSION 2026-09-17 - THE AUDIT SESSION: A SILENT CONFIG, THE REAL CRASH, AND A DECAL
+# DIAGNOSIS THAT EXPLAINS BOTH SYMPTOMS AT ONCE
+
+The user asked for the whole project to be inspected for errors and conflicts, with Fable
+planning and the fixes written by Sonnet. Five lenses were launched. Fable hit its session limit
+and four of the five died mid-read, so they were re-run in staggered pairs after the reset.
+Everything below is from a lens that completed and was then verified independently here.
+
+## 1. THE CONFIGURATION SURFACE WAS LYING, AND NOT IN THE WAY ANYONE EXPECTED
+
+A scripted cross-reference of 122 settings fields against 119 parse statements against 115 ini
+keys found NO dead switches and NO phantom switches. Every field is parsed and every field is
+read. The defect is subtler and worse: the built-in defaults were the INVERSE of the deployed
+configuration for 30 keys, and LoadSettings used only GetPrivateProfileIntA, which cannot tell a
+missing key from a present one.
+
+    forceOcclusionVisible   code false, ini 1   the value the docs say must NEVER be used with
+                                                capture off
+    convertSkinned          code false, ini 1   0 means no characters at all
+    hiddenPassMode          code 3,     ini 2   mode 3 needs an rtx.ignoreTextures list that was
+                                                removed on 2026-08-31, so it paints the prepass
+                                                as a magenta checkerboard
+    skinRigidSingleBone     code false, ini 1   0 means cars do not render
+    bakeShaderAlbedo        struct false,       the two contradicted each other, and the parse
+                            parse TRUE          default reopens the route YOUR-INSTRUCTIONS calls
+                                                "CLOSED. Do not reopen" after it exhausted memory
+
+So one typo in an ini key name, or one trimmed ini, produced a black character or a checkerboard
+world with a log that looked completely normal. That is the same shape as the InstallFloatUV bug
+that made the report read "failures: 0" for weeks: A GUARD THAT REFUSES SILENTLY HIDES A CLASS OF
+BUG, and a default that silently substitutes is the same thing wearing a different hat.
+
+Fixed: all 30 defaults synced to the deployed ini (behaviour-neutral, since the ini has every key
+and the ini wins), and LoadSettings now probes each key with a sentinel and logs
+"ini: key 'X' ABSENT - using built-in default N", with a summary line. The sync found two keys the
+audit had missed, markAuxCamera and skinThreads, which is the argument for doing it by script
+rather than from a list.
+
+Two disagreements were surfaced rather than adjudicated. The struct comment above
+dedupSkinned/dedupAll says "OFF. Three attempts, three regressions ... it simply has never paid
+for itself" while the deployed ini has both ON. Reading the key itself settles it: the key now
+folds in the buffer, the vertex and index range, the primitive count, objTM, eight bone matrices,
+the bound albedo pointer and, for instanced draws, the instance world matrix, and it REFUSES TO
+JUDGE when it cannot read an instance placement. The comment predates the albedo being added and
+is stale; the ini is current. The struct comment should be corrected.
+
+## 2. THE CRASH: THE MITIGATION GUARDED THE WRONG LAYER
+
+"bool g_internal = false;" is a plain global, and there is no thread_local anywhere in the file.
+The render thread holds it true across the whole of BeginFFP (cloth generation, uv buffer locks,
+atlas re-upload, and now the decal probe's DDS writes) while the game performs its atlas and
+vertex buffer lock/unlock pairs on its MAIN thread. Hook_SurfLockRect records a pending entry only
+when the flag is clear and Hook_SurfUnlockRect consumes one only when the flag is clear, so an
+unlock that lands during our own work is skipped and the entry is left holding a bits pointer that
+dies when the real Unlock returns. The lock side never de-duplicated by surface, so the next lock
+appended a SECOND entry and the next unlock found the OLD one first.
+
+That is the 2026-09-14 crash without needing the surface to have been unmapped at all: memcpy
+source Esi = 0x59ADF000, Edx = 0x2000 (2048x4, one atlas row), in CopyUpLargeMov inside the CRT
+memmove, on the game's main thread.
+
+Two consequences worth keeping:
+
+  - The same defect was still COMPLETELY UNGUARDED in Hook_VBUnlock, the path that crashed on
+    2026-08-28. That fix removed only the NULL re-read; the stale non-null case was never
+    addressed and the copy had neither VirtualQuery nor __try.
+  - The mitigation would have produced a MISLEADING MEASUREMENT. The handoff instructed the next
+    reader to treat a non-zero "skipped unmapped" count as proof of the stale-pointer theory. It
+    would also have counted these orphans, confirming the theory for the wrong reason, and an
+    orphan pointer the bridge has since REUSED is perfectly mapped, passes the guard, and gets
+    copied and bound as the character's skin.
+
+Fixed: g_internal now records the thread that owns it and every guard read goes through
+InternalHere(), gated by snoopThreadScopedInternal=1 (an ownership test rather than
+__declspec(thread), because a thread-local cannot be switched off from the ini). 42 assignment
+sites publish the owner, 20 guard reads were converted. The atlas lock side now de-duplicates by
+surface and counts orphans; the unlock side always consumes; Hook_TexUnlockRect consumes the
+surface-level entry that a texture-level unlock used to orphan. Hook_VBUnlock always consumes and
+its copy now shares one validated, SEH-guarded helper with the atlas copy instead of one being
+protected and the other bare.
+
+Also corrected: AtlasSourceRangeReadable masked only PAGE_GUARD, so a readable page carrying
+PAGE_NOCACHE or PAGE_WRITECOMBINE was refused and the refusal was indistinguishable from a genuine
+unmapped range. Both are masked now and the skip log prints state, protection and allocation base.
+
+A CORRECTION TO THE RECORD. The claim that MiniDumpWithThreadInfo fixed
+MINIDUMP_THREAD.Stack.Memory.Rva = 0 is doubtful. That flag adds thread times and start addresses;
+thread stacks come from the ThreadListStream, which every dump type writes, including
+MiniDumpNormal. So the original cause may still be present. The dump now also carries
+MiniDumpWithFullMemoryInfo (the VirtualQuery map at crash time, which directly answers "was this
+address mapped?") and MiniDumpWithDataSegs (the shim's own globals), opens the file
+GENERIC_READ | GENERIC_WRITE, and crashTestDumpAtStart=1 writes a dump on demand so the writer can
+be verified without waiting for a crash. The crash filter also gained a re-entrancy interlock,
+first-install-only capture of the previous filter, dbghelp preloaded outside the filter, and the
+dump written BEFORE any logging.
+
+The decal probe was reviewed line by line and is SAFE TO RUN as it stands. Every array bounded,
+the index-buffer lock bounds-checked in 64-bit against the buffer size, both index formats
+handled, every walked index rebased through baseVertex and rejected outside the window, every
+failure degrading to a log line.
+
+## 3. THE DECALS: ONE MECHANISM FOR BOTH SYMPTOMS
+
+The game submits each building decal as a 2 to 4 triangle draw that declares the WHOLE MESH as its
+vertex window (v=28336, p=2|4), and the shim forwards that window to the device unchanged.
+
+Remix's geometry generation hash rule, READ FROM REMIX'S OWN STARTUP LOG rather than inferred:
+
+    Geometry generation hash rule:        Geometry asset hash rule:
+        positions                             indices
+        indices                               texcoords
+        texcoords                             geometrydescriptor
+        geometrydescriptor
+        vertexlayout
+        vertexshader
+
+The rule this project carefully stripped positions out of is the ASSET rule.
+rtx.geometryGenerationHashRuleString is not set in rtx.conf at all, so the rule that decides when
+Remix rebuilds geometry runs its default, and that default includes POSITIONS and TEXCOORDS. A
+decal's identity to Remix is therefore computed over a 28,336-vertex slice of a buffer the
+streamer writes into every frame, while the decal's own six vertices never move. The shim's own
+counters show the game invalidating converted buffers 18,180 times in a session and writing
+sub-ranges of these buffers about 8 times a frame, and the occlusion pool line shows the shim
+SPARING its own entries whose specific range was not hit. The shim is range-aware. What it
+forwards to Remix is not.
+
+That is the user's "unstable hashes", and it explains why nothing in the shim's own 60-frame record
+blinks: the draw is CONVERT in all 60 frames, 6 per frame, 0 skipped. What churns is Remix's
+geometry identity, not the shim's disposition.
+
+TEAM A corroborates the fix from the engine side. spec-geometry-format.md 8.1-8.2: each draw range
+carries tight per-range vertex bounds at +0x0C (lowest vertex index) and +0x10 (highest),
+validated on 8,899 of 8,899 ranges, and FUN_00e72d00 returns those two fields as the range's
+minimum and maximum vertex index. The tight window is authoritative engine data that the D3D9 call
+throws away by passing a lazy whole-mesh window. spec-vertex-format.md 6.5 also confirms texcoords
+are signed int16 with 1024 = 1.0, which agrees with the shim's 1/1024 and independently supports
+the earlier ruling that this is NOT a UV scale error.
+
+THE HONEST WEAK LINK, recorded so nobody mistakes it for proven: whether Remix hashes the whole
+DECLARED window or only the referenced vertices is not provable from these repositories. And
+characters change their positions every frame, so their generation hash churns too, and characters
+are stable. The chain relies on a dynamic object being expected to churn while a static one that
+churns loses the identity Remix matches it by. Plausible, consistent with every measurement, not
+proven.
+
+Which is why the next step is justified either way. Tightening the forwarded window is what the
+engine's own data says the range is, it is ordinary valid D3D9 (MinVertexIndex is the minimum
+index VALUE, not including BaseVertexIndex, so the tightened call keeps the same BaseVertexIndex
+and StartIndex), and it stops Remix processing 28,336 vertices for a two-triangle draw, which is a
+real performance win even if it fixes nothing visually.
+
+## 4. RULED OUT THIS SESSION, each by reading the code rather than by a run
+
+    dedup dropping decals ...... the key folds in the bound albedo, objTM, the index range and the
+                                 instance world matrix, and refuses to judge when it cannot read a
+                                 placement. The "three regressions" comment is stale.
+    a stretched quad from a .... Disp::Hide sets D3DTS_PROJECTION, and a Hide draw reaching the
+    rewritten projection        bridge under an identity projection is a documented way to make a
+                                stretched quad. But both non-policy Hide sites live in
+                                screenSpaceMode branches 1 and 2, and the live value is 0, which
+                                returns PassThrough at case 0. Unreachable today.
+
+## 5. ALSO FIXED OR CORRECTED
+
+  - The deployed sr3-rtx.map was from 2026-09-04 while the deployed .asi was from 2026-09-14. The
+    crash forensics had to rebuild the source and byte-diff two binaries because of exactly this.
+    The current map is now deployed beside the asi; the stale one is kept as
+    sr3-rtx.map.stale-2026-09-04.
+  - Six keys were parsed but absent from the ini, so their defaults ruled silently while three
+    documents told the reader to set them. All six are now written into the ini at their current
+    values: cameraOnly=0, cameraOnlyFloatUV=0, cameraMainViewOnly=1, convertDynamicUV=1,
+    remixApiClothAlbedo=0, remixApiCharacterOffset=3.
+  - Five switches are ON but inert under the live configuration and the ini now says so:
+    decalPrimaryOffset, biasOffset, blendedOffset and decalByLowestSampler are consumed only
+    inside "if (decalOffsetPermille > 0)", and markAuxCamera only selects markSafe, which mode 2
+    ignores. The OVERLAY OFFSET report line now prints "(pull DISABLED: decalOffsetPermille=0)" so
+    nobody reads those counters as a live test again.
+  - The DEDUP report line said duplicates were "hidden". Under the live hiddenPassMode=2,
+    HiddenDisp(true) returns Disp::Skip, so they are SKIPPED. The line now prints the real
+    disposition, computed by mirroring the policy rather than calling it, because the default
+    branch of HiddenDisp increments g_markRefused as a side effect and calling it from the report
+    path would have contaminated that counter once per report window.
+  - NotePassedThrough compared g_passCensus[i].sampler == name where name was always the address
+    of the same global array, so every row matched by pointer and the census printed whatever
+    shader was current at report time. The row now stores char sampler[28] and compares with
+    strcmp. A diagnostic that lies is worse than no diagnostic.
+  - RemixApiCameraTick ran a 4x4 inverse and a multiply for every one of about 3,000 draws a frame
+    BEFORE testing its switch. It now returns early when none of remixApiCamera, remixApiTestCube
+    or remixApiCharacter is on. The naive fix would have starved the test cube and the API
+    character, which read g_remixLastView unconditionally.
+  - CreateMarkerTexture ran at every device creation for a subsystem the docs called deleted and
+    mode 2 never reaches. It is gated on hiddenPassMode == 3 now. All 12 uses of g_marker were
+    checked null-safe first.
+  - ProbeDecalDraw read-locked stream 0 without the dynamic-buffer check every other probe applies
+    and without checking texcoordOffset + 4 <= stride. Both added, and the refusal now names its
+    reason in the probe's own output.
+  - Documentation drift corrected in README, CHANGELOG and YOUR-INSTRUCTIONS: the occlusion hook
+    no longer answers "visible" to everything, the per-draw uv ring exists, the marker subsystem
+    survives rather than having been deleted, clothAlbedoPercent is read unconditionally in three
+    places and gated in only one, and build/ is committed but NOT byte-reproducible.
+
+## 6. rtx.conf, DELIBERATELY NOT TOUCHED YET
+
+Three texture hashes sit in more than one Remix category list, verified here independently:
+
+    -0x645CF1DD53FF6357  worldSpaceUiBackgroundTextures, worldSpaceUiTextures, skyBoxTextures,
+                         ignoreLights        <- four lists, and ignoreLights takes LIGHT hashes
+    -0x196FBE2CAB23CB16  worldSpaceUiBackgroundTextures, worldSpaceUiTextures, particleTextures
+    -0x6AC1CFA187D094AA  worldSpaceUiBackgroundTextures, worldSpaceUiTextures
+
+None of the three is a decal, and the next run exists to measure the decals. Changing Remix's
+configuration in the same run would put two variables into a measurement this project has spent a
+dozen runs narrowing. It goes in immediately after.
+
+# SESSION 2026-09-18 - THE TWO REMAINING LENSES, AND TWO REGRESSIONS THEY CAUGHT
+
+Fable hit its session limit twice, so the fixed-function and performance lenses were run on Opus
+instead. Both were worth the wait, and both caught defects in code deployed hours earlier.
+
+## 1. THE FFP LENS: TWO REGRESSIONS FROM THE SAME NIGHT'S FIXES
+
+**`TightenConvertedWindow`'s cache was keyed on a raw index-buffer pointer, with no reference and
+no invalidation.** SR3 streams geometry, so a released buffer's address is handed straight back to
+the next one and the cache answers with a different mesh's range. This shim has found and fixed
+that exact defect with a held reference in THREE other pointer-keyed caches (`g_shaders`,
+`g_layouts`, `g_uvBuffers`) and each of those comments says so. The subset safety net could not
+catch it: for this population the declared window is the whole mesh, so almost any stale range is
+a subset and passes. Fixed by pinning each distinct index buffer at first sight and folding its
+size and format into the key, behind `tightenWindowPinIndexBuffers=1`.
+
+**`Hook_VBUnlock` was consuming its pending entry unconditionally.** Removing the internal-flag
+guard is what makes a main-thread unlock work while the render thread is busy, but the stated
+invariant ("our own internal locks are never on a buffer a real game lock has pending") is not
+enforced anywhere: `UvBufferFor` calls `RegisterSnoop(g_stream0)` for every dynamic stream-0
+buffer, and the shim read-locks stream 0 from about seventeen sites of which only two check for a
+dynamic buffer first. Our own unlock could therefore consume the game's entry, copy a HALF-WRITTEN
+buffer into the snoop cache, flag every byte fresh, and leave the game's real unlock with nothing.
+Fixed by recording the owning thread in `PendingLock` and consuming only on that thread, behind
+`vbUnlockOwnerThread=1`.
+
+**A CRITICAL finding that is real but was NOT live at the building under investigation.** When
+`DecalUvSourceSet()` returns 1, `UvBufferFor` writes RAW short values on purpose, because the uv
+texture matrix is supposed to carry the 1/1024. But `SetupTextureStages` derived that scale from
+`g_curLayout.texcoordType`, which is always set 0, and `ParseDeclaration` skips any element not in
+stream 0, so for exactly the families FIX A exists for the type reads -1, the scale stays 1.0 and
+the texture transform is DISABLED. Raw shorts then reach the sampler: 1024 raw units is 1.0 UV, so
+the quad samples about a thousand repeats, which is a fine striped band instead of an image, and
+that is what the user's screenshot shows.
+
+**It is still not the explanation for that screenshot, and the counters say so.** All three FIX A
+counters read `0.0/frame` in the last run, which means `DecalUvSourceSet()` returned 1 for ZERO
+draws there. The path never executed at that spot. Fixed on its own merits, with a new counter
+that fires whenever the corrected branch disagrees with the old one, so the next run measures
+whether the population exists at all rather than leaving it to argument. The probe's own gate was
+also widened, since it required `texcoordType == SHORT2` and so refused to measure the very
+population it was written for, and a read site inside it was still using the set-0 offset.
+
+Also fixed from that lens: `skipOcclusionProxies` dropped the proxy draw on one switch while the
+query hooks pair it with `forceOcclusionVisible`, so the documented A/B at
+`forceOcclusionVisible=0` would have fabricated a zero pixel count and culled about 73% of the
+world; `cameraOnly + cameraOnlyFloatUV` installed a declaration and a stream on a scope that is
+never activated, so `EndFFP` restored nothing (and the naive fix would have cleared the pixel
+shader out from under a pass-through draw, which the implementer caught and handled);
+`g_uvSet1WrongStream` could never be incremented because `texcoord1Stream` is assigned after the
+`if (e.Stream != 0) continue;`, so a real class of refusal was being folded into another counter;
+`Hook_DrawPrimitive` left five indexed-draw fields stale, poisoning the layer key and the
+albedo-churn identity; `g_appliedU/V` were never invalidated; and `g_paletteSetupId` was assigned
+inside a per-bone loop instead of after it.
+
+## 2. THE PERFORMANCE LENS: THE PROJECT'S STANDING ASSUMPTION IS WRONG
+
+The handoff has said for weeks that about 12,000 state calls a frame crossing the bridge is a
+major lever. **It is not.** The shim's own PROFILE line measures a forwarded draw at 0.14
+microseconds across the bridge, so all 3,969 filterable game state calls cost about 0.40 ms even
+if every one were redundant, and a heavy city frame about 0.99 ms. Meanwhile:
+
+    entry 0.15 | BeginFFP: classify 0.17 transforms 0.06 uv 0.11 apply 0.31 stages 0.09
+                 albedo 0.08 bind 0.21 | dedup 0.09 | skin 10.46 | probes 0.12 | draw(bridge) 0.04
+
+**Skinning is 10.46 of the 11.89 ms the shim spends in the indexed draw path: 88 per cent.**
+Everything else together is 1.43 ms. And the instrumentation, which was the obvious suspect, is
+about 0.25 ms in total: eleven per-draw probes at 106 ns per draw. It is not where the frames go.
+
+**The biggest single win, not yet implemented:** the bone blend is scalar on a 32-bit target where
+`float m[12]` cannot stay in registers, so roughly 276 of about 400 micro-ops per vertex are a
+load-modify-store chain. Rewritten with SSE against a column-major palette scratch that is about
+72, which is 34.4 ns/vertex down to something near 14, or **about 3.5 ms a frame**. The claim is
+bit-for-bit identical output: same operands in the same order, no FMA contraction, no
+reassociation, with the normal's length kept scalar. Gate it `skinSimd`, default 0, and A/B it.
+
+**Second, and it must be measured before it is built:** nothing caches a skinned result. Skinning
+costs 0.223 ms per skinned draw, so every 10 per cent of draws that could be served from a cached
+range is 1.05 ms a frame. But the dedup key deliberately separates the same mesh in the same pose
+drawn with a different bound texture, and nothing counts that population. Build the probe first.
+This key has been wrong four times in this file already.
+
+Implemented from that lens now, all of it provably pixel-neutral:
+
+  - `PH_TIGHTEN`, a profile bracket around the window-tightening cache MISS path. It shipped hours
+    earlier with no timer at all, and the two defensible estimates for its 96 bridge calls a frame
+    differ by 125 times depending on whether a read lock is queued or a synchronous round trip.
+    Age-based eviction replaced `erase(begin())`, mirroring the occluder cache, behind
+    `tightWinEvictByAge=1`, with a soft cap that sweeps and a hard cap ten times higher.
+  - `SnoopCopy` scanned 1.25 MB of freshness one byte at a time, inside the critical section the
+    game's streaming thread also takes: about 0.42 ms a frame, now a single `memchr`.
+  - `dev->GetIndices()` in the tiled-cloth path, a synchronous round trip for a value `g_curIB`
+    already holds. Three per-draw `StrStrIA(..., "Decal")` searches and `TilingForAlbedo`'s
+    `_stricmp` chain, all recomputing fixed properties of a cached `ShaderInfo`, now memoised.
+  - The SHADOW vs DEVICE read-back capped on MISMATCHES rather than runs, so if the shadow had
+    ever AGREED it would have issued two `GetVertexShaderConstantF` round trips per single-bone
+    skinned draw forever. Inert today at 12 of 12 mismatched, but it was a trap set for the first
+    run where it agreed. Now counts runs, and is off by default: it has produced its answer.
+  - `ProbeHudDraw` had no switch and does two uncached `GetDesc` calls per draw while armed, for
+    every draw in the frame, and EVERY F9 re-arms it. Off by default now, which matters because
+    the next run is a diagnostic capture.
+  - A free measurement: `ProbeIndexWindow` already computes the tight referenced range for SKINNED
+    draws and threw the size away. It now reports declared against referenced, so the next run
+    says whether skinning is blending vertices no index ever touches. Every 10 per cent there is
+    about 0.96 ms a frame.
+
+## 3. DEPLOYED
+
+    Saints Row 3/sr3-rtx.asi  f70a3778a801e445c256986ebb145c64   601,088 bytes  UNRUN
+    Saints Row 3/sr3-rtx.ini  f42ff7da83bc58fd45db4d56b4d82619   130 keys
+    Saints Row 3/sr3-rtx.map  da5556110a776b04e1b1ddd5047824aa   matches this binary
+    Saints Row 3/rtx.conf     81249e23c4a929ea89d0b27f39b9d4e9   deliberately unchanged
+
+New switches this session: `snoopThreadScopedInternal=1`, `crashTestDumpAtStart=0`,
+`tightenConvertedWindow=1`, `tightenWindowPinIndexBuffers=1`, `tightWinEvictByAge=1`,
+`vbUnlockOwnerThread=1`, `decalUvScaleFromSet=1`, `shadowCheckProbe=0`, `hudProbe=0`.
+
+# SESSION 2026-09-18 (2) - TWO FAULTS, NOT ONE: THE STRETCHED POLYGON IS A SEARCHLIGHT BEAM
+
+A five-lens investigation with three adversarial reviewers overturned the premise that has framed
+this problem for a dozen sessions. The user's own report was that the stretched polygons and the
+broken decals are the same fault, confirmed by recording: "almost every time the polygons come on
+screen, some on screen decal is being distorted". The correlation is REAL. The causation is not.
+
+## CHAIN A - the stretched polygon is ir_vfxmask, and it is not a decal at all
+
+Verified here by direct reading of the frame dump, not taken on report:
+
+    6230 CONVERT v=4 p=2 zw=0 zt=1 zf=4 bias=0 blend=1(5/2) cw=0xf | vs[proj][obj]
+         ps='Alpha_MaskSampler' rank=100 low='Diffuse_MapSampler'@0 | tex0=16813AF0
+         alb=16813AF0@0 albfmt=827611204(4ch) uv=5* inst=0 at(470.8 107.3 1128.3)
+         cam(33.5 29.3 169.6) proj(2.614 4.647 1.000 0.000 persp)
+         raw (-19.05 -0.03 0.00) (-23.12 785.19 0.00) (19.05 -0.03 -0.00) (23.12 785.19 0.00)
+
+A four-vertex quad 46 units wide and 785 units TALL, additively blended (5/2 is SRCALPHA/ONE): a
+searchlight beam or light shaft. The material is ir_vfxmask / ir_vfxmasktod, whose entire shape
+lives in Alpha_MapSampler at sampler register 3 (re/shader_constants.csv,
+`ir_vfxmask_bs.fxo_pc,5,ps_3_0,Alpha_MaskSampler,sampler,3,1`, beside Alpha_Falloff_Amount/Power
+and Soft_Fade_Alpha).
+
+The failure chain, every link verified in code:
+
+  1. AlbedoRank scores Diffuse* 100 and Alpha_Mask 0, so stage 0 gets the DIFFUSE.
+  2. SetupTextureStages disables stages 1 to 7, so the mask is never bound.
+  3. These shaders declare no Alpha_Threshold, so shaderCutout is false, and the chosen albedo is
+     not Decal-named, so decalAlphaBlend is false. ALPHAARG1 therefore becomes TFACTOR, and
+     TFACTOR is forced to 0xFFFFFFFF.
+  4. Alpha pinned at 1.0 under ADDITIVE blending contributes the FULL diffuse texture.
+
+Arithmetic on the numbers in that one line: 785.2 units at 1,056.6 units of range with the frame's
+own proj _22 = 4.647 (vertical field of view 24.3 degrees) subtends 40.8 degrees, which is about
+168 per cent of screen height. That is, literally, a polygon stretched across the scene, and
+nothing else in either frame dump comes close to it.
+
+**Why it looked like the decals caused it.** The beams are submitted INTERLEAVED with the decals,
+in the same late alpha-blended pass, because they are the same kind of city-facade furniture:
+draws 6223 to 6238 run decal, decal, beam, beam, decal. Any camera angle that puts city decals on
+screen puts the beams there too. The user observed the co-occurrence accurately and attributed it
+reasonably; it is co-location in one render pass. Credit the observation, correct the inference.
+
+Fixed behind `skipMaskOnlyVfx=1`: a draw that is truly blended by its factors and whose shader
+names an Alpha_Mask sampler anywhere other than the chosen albedo's stage goes through the
+hidden-pass policy, which under hiddenPassMode=2 means SKIP. Only FOUR shader files in the whole
+corpus name an Alpha_Mask sampler (ir_vfxmask_s/_bs, ir_vfxmasktod_s/_bs), so the rule cannot
+over-match. NOTE this is a REMOVAL, not a repair: the beams vanish instead of rendering as slabs.
+Binding the mask on a second texture stage is the real fix and is not built.
+
+## CHAIN B - the decals: the decal layer is never drawn at all
+
+Counted here directly over the decal-building capture (sr3-rtx-frame-1.log):
+
+    175 rank=100 low='Diffuse_MapSampler'@0
+     36 rank=100 low='Diffuse_MapSampler'@1
+     19 rank=90  low='Decal_MapSampler'@0
+
+So in 211 of 230 converted decal-material draws the DIFFUSE wins the albedo name rank (100
+against 90), exactly one texture is bound and stages 1 to 7 are disabled. The sign, poster, logo
+or window frame is therefore ABSENT and the wall renders its base texture alone. The decals are
+not distorted. They were never drawn.
+
+## THE METHODOLOGICAL FINDING, which is the most important thing here
+
+**No building decal has ever been measured by the decal probe.** `ProbeDecalDraw` armed on the
+CHOSEN albedo sampler containing "Decal", which is false for 211 of those 230 draws. Every probe
+report ever produced came from the other 19, and in practice from ONE CAR probed twice: all 16
+blocks report verts=2892 and lowest='Damage_Normal_MapSampler'@0.
+
+That is the third time in this project a capped probe armed on "the first N draws that match" and
+filled every slot with whatever arrives first, which is never the rare thing being hunted. The
+lesson is now explicit: **a capped probe needs a targeting test derived from what makes the TARGET
+distinctive, not from what is convenient to test.** The arming test now scans the shader's whole
+reflected sampler list and reports whether the decal map won the albedo or not.
+
+## CORRECTIONS TO THIS LOG'S OWN EARLIER CLAIMS
+
+  - "A whole-frame tally of 3,847 draws found ZERO D3DFMT_A8 albedos" was read from
+    sr3-rtx-frame.log, which is a DIFFERENT DISTRICT (frame 1904, camera 96.1 147.7 35.2). The
+    decal-building capture is sr3-rtx-frame-1.log (frame 5013, camera 33.5 29.3 169.6) and it
+    contains 26 A8 draws, 19 of them decal-named. The vehicle-damage half of that finding stands.
+  - "The probe measured the applied scale as exactly 1/1024" was measured on a vehicle, twice, and
+    says nothing about building decals.
+  - "Decal draws present in ALL 60 frames" came from a near-stationary camera. With a moving
+    camera nothing is stable, but the conclusion survives INVERTED: decals are the most persistent
+    population (66.7 per cent of decal identities in all 60 frames against 51.1 per cent of walls).
+    Churn is a property of a moving camera, not of decals.
+
+## KILLED THIS PASS - do not re-test
+
+    the ~1000-repeat stripe route ...... DecalUvSourceSet() has returned 1 on ZERO draws in 2,957
+                                         frames, and ir_sr3fauxinterior declares dcl_texcoord v1,
+                                         so it can never qualify.
+    a declaration-side missing TEXCOORD0  real gap, but when it fires the SHORT2 element survives
+                                         to Remix, which DISCARDS it (remix-dxvk.log:411). The
+                                         result is UNTEXTURED, not striped.
+    a wrong per-material tiling ........ at most one non-unity scale per frame, and it is 1/1024.
+    Remix DrawCallCache aliasing ....... the two conditions are mutually exclusive in the source.
+    A8 albedos reaching COLORARG1 ...... the guard forces TFACTOR when channels < 3; those quads
+                                         render WHITE, not black, and they are sub-pixel anyway.
+    the sampler address mode .......... decals already inherit WRAP from the game.
+
+## STILL OPEN
+
+  1. WHICH on-screen quad is the striped one in the user's screenshot. ir_sr3fauxinterior, the
+     only family whose geometry sits at a building's windows by construction, appears in ZERO of
+     the three frame dumps and has never been probed.
+  2. The intermittent disappearances while flying. Real, reproduced twice, unattributed. The
+     occlusion culler is the standing suspect and the control is free: occlusionDryRun=1.
+  3. 77 converted draws a frame with no float2 texcoord stream and no counted failure.
+  4. Whether g_stream0Offset is ever non-zero on a converted draw. UvBufferFor is the only
+     stream-0 reader in the file that omits it; nine other sites add it. Latent, unmeasured.
+  5. Every Remix claim was read against main, not the running remix-1.5.2+68edea01.
+
+# SESSION 2026-09-19 - A REGRESSION I CAUSED, AND HOW IT HID
+
+User: "the npc heads are zfighting again which we had fixed. and my bra and underwear is white in
+most areas and angles." Two symptoms, ONE cause, and the cause was a deletion in the 2026-09-18
+VFX mask patch.
+
+The instruction for that patch said to insert the new rule "immediately before its final return"
+and quoted, as the location, an anchor spanning the existing skipDeferredGBuffer block PLUS that
+return. The agent matched the anchor and replaced it with text containing only the new rule and
+the return. **The skipDeferredGBuffer block was deleted.**
+
+Every safeguard passed. The anchor matched exactly once, so abort-on-mismatch was satisfied. The
+build compiled clean, because the deleted code was a self-contained if that nothing referenced.
+The setting kept its struct field, its ini key, its parse line and its report line, so grepping
+the name still found it three times. Only the USE SITE was gone.
+
+What that rule prevents, from the 2026-08-28 entry: "heads wrongly textured, z-fighting, swapping
+| the character G-buffer pass was converted with Blend_Map - a specular mask - as its albedo, on
+top of the correct material copy". A specular mask read as colour is mostly WHITE. So the
+z-fighting heads and the white underwear are the same duplicate surface.
+
+**The fault announced itself in the log and read as good news:**
+
+    ...of which 0.0 SKINNED draws/frame passed through instead of converted by
+    skipDeferredGBuffer (gate ON)
+    DEFERRED G-BUFFER PASS: 166.5 draws/frame, of which 4.6/frame are CONVERTED |
+    their albedo samplers: Diffuse_mapSampler, Diffuse_MapSampler, Blend_MapSampler
+
+0.0 per frame was the counter saying its own increment no longer exists, and Blend_MapSampler in
+the converted list was the specular mask going to the screen. A counter reading zero deserves as
+much suspicion as one that spikes.
+
+Restored from sr3rtx.cpp.before-vfxmask, all 36 lines including the comment that explains why the
+rule is SKINNED-ONLY (terrain shares the same G-buffer shape, and terrain's only converted copy
+IS that pass, which is why the unconditional version turned the world black twice).
+
+**The check that would have caught this in one command**, now standard after any patch session:
+diff the use-count of every g_settings flag between the backup and the result and flag anything
+whose count DROPPED. It found this instantly and reported no other casualties.
+
+    Saints Row 3/sr3-rtx.asi  00890b07170907468cc72fed21c54c1b   617,984 bytes
+
+
+## SESSION 2026-09-21/22 - the overlay, the GPU-skin corrections, TWO REMIX RUNTIME BUGS, the shape bake
+
+Everything below was confirmed by the user in-game unless marked otherwise. Hashes are md5.
+
+### 1. THE OVERLAY (raster frame replacing the world, path tracing stopping) - FIXED, CONFIRMED
+The shim latched the frame's main camera from the FIRST convertible draw. At some angles every early
+scene draw was multi-instance or a prepass, so the first one that qualified came from the 512x288
+WATER REFLECTION pass: 16:9 like the screen, but with the camera mirrored below the water line. It was
+adopted as "main"; its own draws then died on handedness and all ~165 real-camera draws/frame died as
+"auxiliary camera". Result: 0 CONVERT on all 60 ring frames, Remix's Main camera never updated,
+RtCamera::isValid() false, injectRTX path-traced nothing, and the game's raster frame was what remained.
+FIX `mainCameraScreenSizedOnly=1`: a draw may only become the main camera if it draws into a
+screen-sized render target AND its view is not mirrored (the same two discriminators IsMainSceneCamera
+already used). User: "the render issue is fixed for now based on my observation."
+
+### 2. GPU SKINNING CORRECTIONS (all four confirmed)
+- `skinFFRestageBone0=1`. WORLDMATRIX(0) IS D3DTS_WORLD. Staging bone 0 overwrites it, UnbindSkinFF
+  restores plain objTM after the draw, and the next draw of the same mesh key (another material of the
+  same item - 8.9 draws/frame) took the "palette unchanged" shortcut and restaged nothing, so bone 0 was
+  the plain object transform. FIXED the stretched bracelet and glasses lens. 5.0 draws/frame restage.
+- `skinFFFollowShaderInfluences=1` (FIX 5). The GPU path skinned from the VERTEX DATA; the CPU path
+  follows the SHADER: `reads = usesBlendIndices || !skinRequireBoneDecl` (else bind pose by objTM alone)
+  and `influences = usesBlendWeights ? 4 : 1` (single bone = idx[0] at weight 1). The GPU path now
+  refuses a no-BLENDINDICES shader, uses a single-bone mask built from idx[0] when the shader reads no
+  weights, and refuses any draw containing a vertex the CPU path would leave in bind pose. FIXED car
+  windows and parts floating with player/NPC animation. Proof it was the cause: the CPU stats for
+  "SINGLE unweighted bone" and "NO BONE DECL" had gone from 1.6-1.7/frame to 0.0 when FIX 4 moved that
+  whole population onto the GPU path.
+- `skinFFRigidDecl=1`. Rigid single-bone declarations (BLENDINDICES, no BLENDWEIGHT) failed the clone -
+  "declarations: 3 made, 7 failed", ~10-11 draws/frame on the CPU. The clone now appends the missing
+  BLENDWEIGHT element: 8 made / 0 failed.
+- `skinFFHonourStreamOffset=1`, `uvHonourStreamOffset=1`. The weight/index side stream and the UV
+  conversion both decoded from byte 0 and bound at offset 0, ignoring a non-zero stream-0 byte offset.
+  MEASURED: 0.0/frame on skinned draws, 1.5/frame on UV (dynamic sources only), 0.1/frame on decals - so
+  this was NOT the bracelet cause and is NOT the decal cause. Kept because it is correct.
+
+### 3. THE ORPHAN SWEEP - the shim was keeping the whole city alive
+14 pointer-keyed caches AddRef game resources (the reference is what stops a recycled address being
+handed an old buffer's data). For STATIC resources the only release paths were "the game writes it
+again" (never for static geometry), a size cap, or nothing at all - `g_tightIbShapes` and `g_instCache`
+never released. At game exit the bridge still held 11,960 resources / 148 declarations / 1,902 VS /
+886 PS. `SweepOrphans` (Hook_Present, every `orphanSweepFrames`=120) tallies every reference the shim
+holds, probes `pub = p->AddRef()-1; p->Release()` - local atomics on the bridge client, and device
+bindings do NOT count towards the public refcount - and releases whatever only the shim holds, erasing
+cache entries BEFORE the last Release. Safety valve: if the tally ever exceeds the public count it stops
+releasing for the process. MEASURED: 8,412 objects / 662 MB released in one run; live caches then flat
+(uv buffers 68 instead of 2,204 accumulated). Shaders and declarations stay pinned
+(`orphanSweepShadersDecls=0`): unaudited address-keyed memos, and they are bounded by the game's own set.
+
+### 4. REMIX BUG #1 - THE STAGING LEAK (found, fixed in our fork, confirmed)
+Symptom: NvRemixBridge.exe grew ~50-90 MB/s and died after ~8 minutes with
+`DxvkMemoryAllocator: Memory allocation failed, Size 33554432, Heap 1: 25472 MB allocated / 25071 used`.
+The Remix memory profiler (enable with `rtx.profiler.memory.enable = True`, then Alt+X -> Development ->
+Memory Profiler -> Sample Memory -> "Write to Log", parsed by scratchpad/memparse2.py) showed
+428 x 32 MB `RtxStagingDataAlloc: D3D9` blocks = 13.7 GB of 15.6 GB.
+CAUSE: `rtx_staging.cpp` recycles a block only `if (!m_buffer->isInUse())`, but `d3d9_rtx.cpp:322`
+(processVertices, per draw) and `:126` (index memoization) call `acquire(DxvkAccess::Read)` with NO
+matching release anywhere in the tree, so isInUse() is permanently true and every filled 32 MB block is
+abandoned. Present in origin/main (HEAD 471db69f) too - a genuine upstream bug.
+FIX (`C:\remix-fork\staging-release.diff`), after two failed attempts that both crashed on a save load:
+  - Build 1 released synchronously in EndFrame -> access violation: Flush()/EmitCs only QUEUE work; the
+    endFrame command (and the commitGeometryToRT copies that READ the staging data) run later on the CS
+    thread.
+  - Build 2 deferred the release to a second EmitCs (correct ordering: every draw enqueues its own
+    EmitCs(commitGeometryToRT) first, and the CS thread is a single FIFO consumer) but still tracked the
+    MEMOIZED index slices, which processIndexBuffer caches ON THE INDEX BUFFER and hands to LATER frames
+    -> another access violation.
+  - Build 3 tracks only the per-draw vertex copies and the non-memoized index path; the memoized acquire
+    stays permanently held, as upstream has it.
+Even then the blocks did not recycle, because ONE memoized index copy strands its whole 32 MB block.
+`rtx.enableIndexBufferMemoization = False` fixed it: 428 blocks / 13.7 GB -> 5 blocks / 160 MB, host RAM
+13.82 GB -> 0.60 GB. User: "the memory issue is fixed for now."
+STILL TO DO: give each memoized index copy its own dedicated host-visible TRANSFER_SRC buffer (like
+allocVertexCaptureBuffer) instead of carving it from the staging ring, then re-enable memoization.
+
+### 5. useBuffersDirectly - why it is False
+Remix's default is True and ours had been False since an old experiment. True removes the copies (and
+the leak) but Remix then points at the game's own vertex memory, and SR3 recycles those buffers as
+districts stream, so buildings drew other buildings' geometry ("pop in at random places"). Reverted to
+False. `canUseBuffer = vbo->DoesStagingBufferUploads() == false` (d3d9_rtx.cpp:1172); direct use at
+:307-312; orphan clone at :313-317.
+
+### 6. REMIX BUG #2 - SKINNING CANNOT READ THIS GAME'S NORMALS (found, fixed in our fork, confirmed)
+Symptom: every GPU-skinned character had hard/faceted shading (hair worst), no warning in any log.
+SR3 declares NORMAL as UBYTE4N = VK_FORMAT_R8G8B8A8_UNORM (37).
+`RtxGeometryUtils::dispatchSkinning` ASSERTS the normal format is float3/float4/octahedral and passes
+only `useOctahedralNormals = (fmt == R32_UINT)`; the shared kernel `skinning()` then reads THREE
+CONSECUTIVE FLOATS from what is actually packed bytes. Release builds compile the assert out, so the
+skinned normals are garbage. Remix's interleaver handles the same format correctly
+(`float3(r,g,b)*2-1`), which is why only lighting was wrong.
+PROVEN BY A/B: `skinViaFixedFunction=0` (CPU skinning hands over FLOAT3 normals) -> "the hair is smooth
+shaded now"; `skinFFRigidDecl=0` (only rigid parts back on the CPU) -> still hard, so it is the shared
+path; `morphBake=0` -> still hard, so the bake was innocent.
+FIX (`C:\remix-fork\skinning-normal-format.diff`): `SkinningArgs` gains `normalFormat` (the INPUT
+format); the kernel switches on it and decodes R8G8B8A8_UNORM exactly as the interleaver does;
+`useOctahedralNormals` now derives from the OUTPUT format `geo.normalBuffer.vertexFormat()` (always
+R32G32B32_SFLOAT here, because areFormatsGpuFriendly() rejects UBYTE4N and forces the interleave path,
+which hardcodes float3) - the old input-derived flag was right only by coincidence. Assert relaxed,
+ONCE() warning added. `unorm8ToF32` was added to cpu_gpu_compat.h rather than including
+packing_helpers.h, which collides with its own f32ToUnorm16.
+SAME LATENT BUG, REPORTED NOT FIXED: `GameCapturer::captureMeshNormals` (rtx_game_capturer.cpp:674)
+asserts float3 and reads floats from the RAW skinned normal buffer - USD captures of skinned meshes
+export garbage normals.
+
+### 7. THE SHAPE BAKE (morphBake) - built, measured, fixed, confirmed
+Characters with body/face shape sliders were refused by the GPU path ("morph delta active", 28.7
+draws/frame) and cost ~9-15 ms/frame of CPU skinning plus ~6.8 MB/frame of posed vertices across the
+bridge. The bake applies the delta ONCE into a whole-source-VB copy, bound at g_stream0Offset, and
+GPU-skins that. Math mirrors SkinAndBind's fast path exactly (pos += short.xyz * 1/8192; n =
+normalize(n_base + 2*(ubyte/255*2-1)), re-encoded to the layout's own UBYTE4N).
+THE MORPH PROBE first settled whether the delta is static: the morph VB is written ~190 times/frame,
+0.94 DISCARD/frame, and every content change (2,275 of 2,275, later 8,735 of 8,735) landed AFTER a
+DISCARD, never in place - the game REPACKING its pool, not per-frame facial animation. The player's own
+block was byte-identical from frame 12,434 to 22,199.
+FIRST RUN: worked but thrashed - 12 built, 7,699 REBUILT, because the cache keyed on (morph VB, byte
+offset) and a repack moves a character's block. FIX: key on the delta's CONTENT HASH
+(`MorphBakeKey(src, stride, phase, firstVertex, numVertices, deltaHash)`), with the hash memoised once
+per block per frame; `g_morphBakeRebuilt` now means a genuine 64-bit key collision. Also cached FIX 5's
+two per-vertex scans on the BaseMesh (singleBoneMask, singleBoneMaxIdx0, singleBoneIdx0Overflow,
+noUsableInfluence) so they are computed once per decode instead of per draw.
+MEASURED AFTER (user: "fps is better by about two times"):
+    frame 28.7 ms / 35 fps (was 43.5 ms / 23 fps) | WORST FRAME 44 ms (was 1201 ms)
+    skin 8.22 ms (was 15) | MORPH BAKE 0 REBUILT (was 7,699) | morph refusals 0.1/frame (was 28.7)
+    62.7 FF-skinned draws/frame, 279,782 vertices/frame skinned on the GPU
+Remaining churn: 3,451 built / 3,364 evicted / 87 live at the 24 MB cap -> raised `morphBakeMaxMB` to 64
+and switched off the two probes that had answered their questions (`morphProbe=0`, `assetHashProbe=0`,
+~2.3 ms/frame together). UNRUN at the time of writing.
+
+### 8. THE ASSET HASH PROBE - what Remix's "Geometry Hash" view actually shows
+`surface.associatedGeometryHash` = the ASSET hash = indices + texcoords + geometrydescriptor (per
+rtx.conf). Remix derives the vertex range FROM THE INDICES (`vertexCount = maxIndex - minIndex + 1`)
+and REBASES indices before hashing, and hashes texcoords only at the unique referenced vertices - so the
+shim's declared window (tightening) does NOT affect the hash. Descriptor = indexCount, vertexCount,
+topology, index type.
+RESULT over three F9 bursts: decal-named identities 31-51 per burst, 0 flips in bursts 2-3, and no
+same-frame duplicate carrying a different hash; the only 3 flips were dynamic decals whose texcoord
+SOURCE changed (the game rewrites them). skinned-FF 171-412 and skinned-CPU 39-40 identities: 0 flips.
+So the building-decal flicker the user sees in that view is NOT a hash change - most likely the decal and
+its wall are coplanar and fight for the same pixels. Probe cost ~7.2 ms/frame during a burst only.
+Caveat: a draw that moves to a new buffer location counts as a NEW identity and is not compared.
+
+### 9. Operational lessons
+- The game and NvRemixBridge.exe MUST be closed before copying files into the game folder; three test
+  runs were wasted on copies that silently failed because the file was locked, and the crashes they
+  produced were all the OLD build. ALWAYS verify md5 after copying.
+- PowerShell's Set-Content -Encoding utf8 writes a BOM. Write the ini and the source with Python only.
+- Remix's memory profiler has a "Write to Log" button - far better than screenshots for large tables.
