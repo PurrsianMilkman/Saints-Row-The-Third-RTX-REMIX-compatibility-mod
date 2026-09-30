@@ -1,102 +1,123 @@
 <!-- CONTEXT-GUARD:RESUME-BEGIN -->
-# RESUME NOTE (context guard, rewritten 2026-09-22 19:30) - read this first
-Full detail for this session is in docs/worklog.md under "SESSION 2026-09-21/22". Do not re-derive it.
+# RESUME NOTE (context guard, rewritten 2026-09-28 at 75%) - read this first
+Full detail: docs/worklog.md, newest entries at the END. Do not re-derive anything below.
+
+## (b) IN FLIGHT RIGHT NOW - the world-surface TINT bug
+SYMPTOM (user, refined over many answers): some world surfaces shift tint. NOT every surface.
+Latest description: "it looks to be a DARK tint". Earlier: "dark to bright tinted, not black or
+white". Per-surface; instant snap; texture detail stays visible; Remix OBJECT PICKER reports the
+SAME texture in both states; Remix "Diffuse Albedo" debug view SHOWS the change; depends on
+movement AND camera angle, and a single fixed feature changes tint under PURE ROTATION.
+User says this bug is LONG-STANDING - it predates this session's work.
+
+STATUS 2026-09-30 - THE SHIM IS EXONERATED; THE CAUSE IS INSIDE REMIX.
+User confirmed the tint shift DOES NOT HAPPEN in the unmodded game - a mod-introduced defect.
+Five full frame dumps (sr3-rtx-frame-25..29) at ONE position and FIVE view angles: of 574 draws
+present in >=3 dumps, only three fields changed (a skinned bake counter, a skinned palette offset,
+a SKIPPED depth draw's stream offset) - NONE on a world surface. The shim hands Remix
+BYTE-IDENTICAL state across view angles, so Remix creates the view-dependence from constant
+inputs. DO NOT reinvestigate shim-side material/stage/UV state for this bug.
+Sample hashes the user tagged (world-space-UI tags were SAMPLES ONLY, changed nothing visually,
+and have been REMOVED - rtx.conf restored to ea92d93b; the UI save had also dropped
+rtx.profiler.memory.enable and reordered decalTextures, both undone):
+    0x30E812E37ED7FF71     0x9BDD710C6151F1EE     -0xE2B21CEFD47CE275
+
+>>> THE EXACT NEXT STEP <<<
+1. ASK: do the affected surfaces involve a cutout or translucent layer (window, sign, fence,
+   foliage, anything with holes, or anything sitting in front of a wall)? A ray passing a cutout
+   at one angle and not another lands on a different surface - changing the pixel's albedo with
+   NO input changing. That is the leading Remix-side candidate and fits "only some surfaces".
+2. BUILD a Remix-image-hash -> D3D9-texture-pointer map in the shim, so the three sample hashes
+   above can be matched to specific draws in a frame dump (the dump records pointers, not hashes).
+3. The frame dump does NOT record vertex data - if needed, that is the other unexamined input.
+
+TINT - RULED OUT (13 + 1), each with evidence - DO NOT RETRY:
+ 1 auto-exposure/ACES: user said per-surface + instant (post-process would be whole-screen+gradual)
+ 2 low-mip streaming: TEAM A spec-low-mips.md - type 17 is registered but UNUSED, nothing ships
+ 3 albedo texture swap: counter "churned to a different texture than last frame 0/frame", 1,550 ids
+ 4 albedo blanking: only 3 shaders, all legitimately non-colour (IR_GBuffer_DSF_DataSampler,
+   Damage_Normal_MapSampler, Dual_Paraboloid_Map_BackSam)
+ 5 constant-colour path: user says texture detail stays visible
+ 6 vertex-colour baked lighting: TESTED rtx.ignoreAllVertexColorBakedLighting=True - no change
+ 7 shim tintFallbackAlbedo: =0, counter "tinted fallback 0/frame"
+ 8 stale TEXTUREFACTOR: REAL GAP, FIXED (resetTFactorOnTexturedDraws=1, in the deployed shim),
+   TESTED - no change to the tint. Kept: it closes a real "one register, one owner" violation.
+ 9 mip/aniso sampling: TESTED rtx.nativeMipBias=-16 + upscalingMipBias=-16 - no change. Reverted.
+10 leaked texture stages: code - SetupTextureStages disables stages 1-7 on every converted draw
+11 thin film: rtx.legacyMaterial.enableThinFilm/alphaIsThinFilmThickness default false, not set
+12 coplanar decal z-fight: DISPROVEN 2026-09-14 (30-permille offset visibly separated the decal
+   and the fault persisted) - recorded in the ini beside decalOffsetPermille
+13 texgen: shim forces D3DTSS_TEXCOORDINDEX=0 on stage 0
+14 decal material blending: TESTED rtx.enableDecalMaterialBlending=False - STILL HAPPENED.
+   (This was the one genuinely view-dependent term found in Remix's albedo path: the primary
+   ray blends decal materials into the G-buffer albedo - geometry_resolver.slangh:1348. Innocent.)
+ALSO CHECKED: "ALBEDO stage 0 taken raw (no shader reflection) 0/frame" - the albedo-stage fix
+never falls through. Historical note: the ORIGINAL green/yellow tint (worklog line ~243) was Remix
+reading a NORMAL MAP as albedo because SR3 binds normal maps at stage 0 in ~900 shaders; the shim
+fixes that (fixAlbedoStage, "moved off stage 0" ~83-199/frame). Same symptom class - keep in mind.
 
 ## Deployed right now - all hash-verified
-    Saints Row 3/sr3-rtx.asi      18d0e9da21b5d3efac8a87276f443f3b   680,960 bytes
-    Saints Row 3/sr3-rtx.ini      8b6f1963a12b645bd588ab3e835f95a3   154 keys   (UNRUN tuning, see (b)1)
-    Saints Row 3/sr3-rtx.map      795ff6ce8791fa9334ea592df9f26d95
-    Saints Row 3/.trex/d3d9.dll   fc092dea17cee5759fe7c376354679a2   190,476,288 = OUR FORK BUILD 4
-      shipped backup beside it:   d3d9.dll.shipped-2026-06-04  f4a02738e096c57e897e5ba0af854628
-    Saints Row 3/rtx.conf         961908874723560340690287f471e2a1
-      = original 81249e23 + `rtx.profiler.memory.enable = True` + `rtx.useBuffersDirectly = False`
-        + `rtx.enableIndexBufferMemoization = False`. Backups: rtx.conf.before-memory-profiler (81249e23),
-        rtx.conf.before-usebuffersdirectly (9e476baa). The REPO configs/rtx.conf (88a5ecf4) is NOT live.
-    Fork patches, each its own diff in C:\remix-fork\: staging-release.diff (memory leak),
-      skinning-normal-format.diff (normals), identity-pinning.diff (dormant),
-      build-environment-workarounds.diff. Build: `. .\build_common.ps1` then
-      `meson compile -C _Comp64Release` in C:\remix-fork\dxvk-remix, then COPY
-      _Comp64Release\src\d3d9\{d3d9.dll,.exp,.lib,.pdb} to _output\ (meson install is blocked).
-    newest source backup: src/sr3-rtx/sr3rtx.cpp.before-bake-keys
-    Shim build: powershell -NoProfile -ExecutionPolicy Bypass -File src/sr3-rtx/build.ps1
-    Deploy: copy build/sr3-rtx.asi + .map + configs/sr3-rtx.ini into "Saints Row 3/", then md5-verify.
-    THE GAME AND NvRemixBridge.exe MUST BE CLOSED FIRST - locked-file copies fail silently and cost three
-    wasted test runs. Write the ini/source with PYTHON only: PowerShell Set-Content adds a BOM.
+    Saints Row 3/sr3-rtx.asi      e8f234b4a2d704ac88c1106867188e72  (adds resetTFactorOnTexturedDraws)
+    Saints Row 3/sr3-rtx.ini      8d1ae4932d1e15935d9743ec38bc8ca4
+    Saints Row 3/rtx.conf         ea92d93bf88f9ebd0d6abd3fa75c385e  (clean baseline, samples removed)
+    Saints Row 3/.trex/d3d9.dll   573bb6fda301abe22b37119a923465f7  = OUR FORK BUILD 7
+      shipped backup: d3d9.dll.shipped-2026-06-04  f4a02738e096c57e897e5ba0af854628
+    rtx.conf key settings: useBuffersDirectly=False, enableIndexBufferMemoization=False,
+      antiCulling.object.enable=False, drawCallCacheRequireShapeMatch=True,
+      geometryAssetHashRuleString=indices,geometrydescriptor, profiler.memory.enable=True
+    Fork diffs C:\remix-fork\ (rtx_options.h hunks OVERLAP - apply one, take .cpp hunks of others):
+      staging-release (PROVEN), skinning-normal-format (PROVEN), drawcallcache-shape-match,
+      instance-history-requires-prior-frame, bvh-count-rebuild (real bug, did not fix artifact)
+    Build shim: powershell -File src/sr3-rtx/build.ps1 (~1 min).
+    Build fork: $env:PATH="C:\Users\Purrsian\AppData\Roaming\Python\Python312\Scripts;$env:PATH";
+      . .\build_common.ps1 ; meson compile -C _Comp64Release ; COPY _Comp64Release\src\d3d9\
+      d3d9.{dll,exp,lib,pdb} to _output\ (meson install blocked). ~10 min.
+    GAME + NvRemixBridge.exe MUST BE CLOSED before copying - locked copies fail SILENTLY.
+    Write ini/source with PYTHON only. Convert raw-string newlines to CRLF (a raw block once
+    introduced 18 lone LFs - caught by the lone-LF check, restored from backup).
 
-## (a) FIXED AND CONFIRMED BY THE USER THIS SESSION
-- The overlay (raster frame replacing the world, path tracing stopping): `mainCameraScreenSizedOnly=1`.
-- Stretched bracelet/glasses lens: `skinFFRestageBone0=1`.
-- Car windows/parts floating with player and NPC animation: `skinFFFollowShaderInfluences=1`.
-- Rigid attachments on the GPU: `skinFFRigidDecl=1` (declarations 8 made / 0 failed, was 3/7).
-- The 25 GB leak and its ~8 minute crash: our fork's staging-release fix + `enableIndexBufferMemoization
-  = False`. 428 x 32 MB blocks / 13.7 GB -> 5 blocks / 160 MB; host RAM 13.82 -> 0.60 GB.
-- Hard/faceted shading on every GPU-skinned character: our fork's skinning normal-format fix.
-- Performance: frame 28.7 ms / 35 fps (was 43.5 / 23), WORST FRAME 44 ms (was 1201), skin 8.22 ms (was
-  15), morph refusals 0.1/frame (was 28.7), 0 bake rebuilds (was 7,699). User: "about two times".
+## (a) DONE AND CONFIRMED (do not re-open)
+Earlier sessions: overlay/lost camera; bracelet+lens; floating car parts; 25 GB leak + crash;
+hard shading on GPU-skinned characters; ~2x performance.
+This session: MISPLACED BUILDINGS - caused by rtx.antiCulling.object.enable=True in the ORIGINAL
+SR3 rtx.conf (Remix default False); an anti-culled instance pins its BlasEntry and DrawCallCache
+buckets on indices+geometrydescriptor only, so another decal is accepted on a material match
+alone and overwrites the pinned vertices. Set False. User confirmed.
 
-## (b) IN FLIGHT / NEXT, in order
-1. **UNRUN tuning already deployed:** `morphBakeMaxMB` 24 -> 64 (the bake was at its cap: 3,451 built vs
-   87 live, 3,364 evicted) and `morphProbe=0`, `assetHashProbe=0` (both had answered; ~2.3 ms/frame).
-   Next run should show far fewer evictions and a lower skin/probes time. No user check needed beyond fps.
-2. **MISPLACED BUILDINGS - unattributed, the top open correctness bug.** Rare, sticks a few seconds,
-   "slightly angle and location dependent", seen while flying. Shim-side captures CANNOT see it (the
-   shim's own data is correct; frame-4 analysis found only legitimate at-origin draws - 1,065 instanced
-   plus 64 world-space-shader draws - and no object moving in the 60-frame ring record).
-   THE CONTROL RUN that settles it: restore the SHIPPED runtime (copy .trex\d3d9.dll.shipped-2026-06-04
-   over .trex\d3d9.dll) AND remove the `rtx.enableIndexBufferMemoization = False` line from rtx.conf,
-   then fly the same route ~5 min, accepting that the leak and its crash come back for that run.
-   Still misplaced there -> our changes are not the cause. Gone -> the staging release is the suspect.
-3. **Character colours: body skin and head do not match.** Parked by the user earlier, explicitly to come
-   back to. Probably the most visible remaining fault now that shading is fixed.
-4. **Decal flicker in Remix's Geometry Hash view.** PROVEN not to be a hash change (see worklog 8). Ask
-   whether the whole decal changes colour at once or speckles between two colours, which separates a
-   coplanar decal/wall fight from anything else. 91 hashes are already in rtx.decalTextures.
-5. **Restore Remix's index memoization properly:** give each memoized index copy its own dedicated
-   host-visible TRANSFER_SRC buffer (like allocVertexCaptureBuffer) instead of carving it from
-   RtxStagingDataAlloc, then set `rtx.enableIndexBufferMemoization` back to True.
-6. **Report both Remix bugs upstream** (both are in NVIDIA's shipped build AND in origin/main
-   HEAD 471db69f): the unreleased staging acquire, and the skinning kernel's float-only normal read.
-7. **Stutter work, not started:** first-time per-buffer conversions (uv decode, bind-pose decode, skin
-   side buffers, index scans) run on the game's render thread when content streams in. Worst shim spike
-   was 219 ms. Move them to a worker thread. (The 1201 ms frame was the F9 ring write, not this.)
-8. **Known latent bug, reported not fixed:** GameCapturer::captureMeshNormals (rtx_game_capturer.cpp:674)
-   reads raw skinned normals as floats - USD captures of skinned meshes export garbage normals.
+## PARKED - the stretched-decal ARTIFACT (six fixes, none worked)
+One-frame flat pale polygon at decal churn; REAL geometry (visible in Geometry Hash view).
+Failed: shape gate, instance history, index-window clamp, strip/fan clamp (82,254 corrections),
+stale-vertexCount rebuild, hiding Diffuse_Map_1Sampler/Diffuse_mapSampler/Diffuse_MapSampler.
+LEADING UNTESTED THEORY: TEAM A spec-render-pipeline.md section 6 - SR3 RECORDS D3D9 calls and
+REPLAYS them on "rl_command_thread" (DrawIndexedPrimitive = opcode 42). Remix memcpys the buffer's
+CURRENT mapped slice at replay time, so a discard-and-refill in between copies the WRONG
+GENERATION. Our log has always said "the game locks vertex buffers from more than one thread".
+NEXT IF RESUMED: a cheap counter for record-vs-replay slice skew FIRST; only then a snapshot fix.
 
-## (c) KEY FACTS worth keeping (numbers; the rest is in the worklog)
-- Remix's "Geometry Hash" debug view = the ASSET hash = indices + texcoords + geometrydescriptor. Remix
-  derives the vertex range from the INDICES and rebases them, and hashes texcoords only at referenced
-  vertices, so the shim's window/tightening does NOT affect it.
-- The morph delta is repacked, never edited in place (8,735 of 8,735 changes followed a DISCARD); a
-  character's block can stay byte-identical for ~10,000 frames. That is why the content-hash key works.
-- Bridge client AddRef/Release are LOCAL atomics; the returned count is the public count; device bindings
-  do NOT count. GetDesc/GetLevelDesc are answered locally (sendReadOnlyCalls=false), so old "GetDesc is a
-  round trip" comments in the shim are stale.
-- Remix clears its scene at the menu, but DXVK keeps empty chunks (high-water) and only frees them when
-  the Remix menu (Alt+X) is opened/closed - Task Manager lags any memory fix until then.
-- Memory profiler: `rtx.profiler.memory.enable = True`, then Alt+X -> Development -> Memory Profiler ->
-  Sample Memory -> "Write to Log"; parse with scratchpad/memparse2.py.
-- Useful current counters: `MORPH BAKE`, `MORPH PROBE`, `GPU SKIN`, `GPU SKIN refused`, `ORPHAN SWEEP`,
-  `LIVE:`, `STREAM-0 OFFSET`, `PROFILE ms/frame`, `TIMING: frame`, and ` bake=`/` ffskin ` in the F9 dump.
+## DECAL HASH INSTABILITY - as good as config gets
+Removing texcoords from the asset hash rule made it much more stable; full stability needs the
+shim to split batches into one draw per decal.
 
-## (d) RULED OUT - do not re-test
-coplanar z-fight as the decal-DISTORTION cause; draws blinking; albedo churn; UV scale error;
-Decal_Map_Offset; rtx.decalTextures as a fix; opacity micromaps; sampler address mode; the FIX A stripe
-route; dedup dropping decals; Disp::Hide via screenSpaceMode; the out-of-window theory for decals; the
-early-injection theory for the overlay (0 of 2,999 frames); identity pinning as a fix for
-skinning/overlay/decals; the shim's tightening affecting Remix's hash; the stream-0 offset as the
-bracelet cause (0.0/frame) or the decal cause (0.1/frame); the Remix API as the memory leak
-(remixApiCharacter=0, CreateLight never called); shim Get* calls leaking references (all Release);
-the morph bake as the hard-shading cause (it persisted with morphBake=0); rigid draws as the
-hard-shading cause (persisted with skinFFRigidDecl=0).
+## OTHER OPEN ITEMS
+- Character body/head colour mismatch: probe DUP EXAMPLES show the same mesh at the same position
+  binding a DIFFERENT albedo within ONE frame (3,400 and 291 prims) - concrete lead, unexplored.
+- Report the five Remix bugs upstream (staging leak, skinning normals, anti-culling/pinned entry,
+  ignored declared vertex window, stale vertexCount on kUpdateBVH).
+- onSceneObjectUpdated asserts result != KBuildBVH; bvh-count-rebuild can return it (release OK).
+- MeasureWorldExtent read-locks stream 0 unconditionally incl. dynamic buffers - clean it up.
 
-## (e) PENDING FROM THE USER / RULES
-- Nothing is waiting on the user right now except choosing the next item from (b): the lead recommended
-  the character colours (b3), with the misplaced buildings (b2) as the alternative.
-- RULES: Fable 5.1 plans, Sonnet 5 codes, Opus 5 takes over a task Sonnet fails, ask before Fable on the
-  biggest coding jobs, disassembly is Fable's. `D:\Project Crreish\TEAM A` is READ ONLY. Every
-  behavioural change gets an ini switch. Patch scripts must be exact-match and ABORT unless the anchor
-  matches once; an anchor spanning kept code must repeat it verbatim; after patching diff g_settings
-  use-counts against the backup. Never commit game assets. Fork work only under C:\remix-fork.
+## HARD-WON PROCESS RULES
+- CONSULT D:\Project Crreish\TEAM A FIRST (read-only). It reframed the artifact hunt in one read.
+- READ THE CODE FOR WHERE A THING CAN LEGITIMATELY HAPPEN before testing guesses: the rotation
+  test proved albedo was view-dependent, which ruled out most candidates at once.
+- sr3-rtx.log is opened "w" every launch: its TIMESTAMP proves a run happened, the relevant
+  counter line proves which config. VERIFY BOTH before reasoning from a result.
+- Anything shipped must PRINT what it did - a counter with no report line is not a measurement.
+- A 0.00/frame counter is a BROKEN TEST, not a clean exclusion.
+- Remix's Logger output goes NOWHERE (DXVK file logging off).
+- The Remix UI rewrites rtx.conf when the user tags textures - check before restoring a hash.
+- Model policy: Fable plans, Sonnet codes, Opus takes over what Sonnet fails. Every behavioural
+  change gets a switch. Patch scripts exact-match and ABORT unless the anchor matches once.
 <!-- CONTEXT-GUARD:RESUME-END -->
 
 # RESUME PROMPT - Saints Row 3 RTX Remix

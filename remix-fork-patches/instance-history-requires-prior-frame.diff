@@ -1,0 +1,62 @@
+﻿diff --git a/src/dxvk/rtx_render/rtx_instance_manager.cpp b/src/dxvk/rtx_render/rtx_instance_manager.cpp
+index 92e11909..0aac4214 100644
+--- a/src/dxvk/rtx_render/rtx_instance_manager.cpp
++++ b/src/dxvk/rtx_render/rtx_instance_manager.cpp
+@@ -1133,9 +1133,30 @@ namespace dxvk {
+                                    || currentInstance.testCategoryFlags(InstanceCategories::Particle)
+                                    || currentInstance.testCategoryFlags(InstanceCategories::WorldUI);
+ 
+-        hasPreviousPositions = blas.modifiedGeometryData.previousPositionBuffer.defined() && !isMotionUnstable;
+         const bool isFirstUpdateAfterCreation = currentInstance.isCreatedThisFrame(m_device->getCurrentFrameId()) && isFirstUpdateThisFrame;
+ 
++        // An instance that was CREATED THIS FRAME has no previous frame, so it has no valid
++        // previous VERTEX POSITIONS either - and previousPositionBuffer is owned by the BLAS,
++        // not by this instance. A BlasEntry routinely outlives and is shared between instances
++        // (SceneManager::garbageCollection only erases entries with no linked instances, and
++        // DrawCallCache hands an existing entry to whatever draw matches it), so a brand-new
++        // instance attaching to an existing entry would otherwise inherit previous-frame
++        // positions belonging to a DIFFERENT object, or to itself from before it was unloaded.
++        // The surface is then marked non-static below and the motion vector is computed from
++        // those foreign positions, smearing the geometry across the screen for exactly one frame.
++        //
++        // Measured in SR3: the user sees decals "stretch for a frame" precisely when they "load,
++        // unload or reload" - i.e. on instance creation - and it survived a DrawCallCache-side
++        // fix, because the entry being reused can be perfectly legitimate; it is the INSTANCE
++        // that is new.
++        //
++        // Remix already does exactly this for the TRANSFORM half of the motion vector: the
++        // isFirstUpdateAfterCreation branch below calls teleport(), which sets prevObjectToWorld
++        // = objectToWorld so a new instance reports zero transform motion. This applies the same
++        // rule to the vertex half, which was simply missed.
++        hasPreviousPositions = blas.modifiedGeometryData.previousPositionBuffer.defined() && !isMotionUnstable
++                            && !(RtxOptions::instanceHistoryRequiresPriorFrame() && isFirstUpdateAfterCreation);
++
+         // Note: objectToView is aliased on updates, since findSimilarInstance() doesn't discern it
+         Matrix4 objectToWorld = drawCall.getTransformData().objectToWorld;
+ 
+diff --git a/src/dxvk/rtx_render/rtx_options.h b/src/dxvk/rtx_render/rtx_options.h
+index 749551c3..d0358292 100644
+--- a/src/dxvk/rtx_render/rtx_options.h
++++ b/src/dxvk/rtx_render/rtx_options.h
+@@ -520,7 +520,21 @@ namespace dxvk {
+     RTX_OPTION_ARGS("rtx", float, uniqueObjectDistance, 300.f, "The distance (in game units) that an object can move in a single frame before it is no longer considered the same object.\n"
+                     "If this is too low, fast moving objects may flicker and have bad lighting.  If it's too high, repeated objects may flicker.\n"
+                     "This does not account for sceneScale.", args.minValue = 0.f);
++
++    RTX_OPTION("rtx", bool, drawCallCacheRequireShapeMatch, true,
++      "When true, a cached BlasEntry may only be reused on a material-hash match if the incoming draw has the same vertex and index counts and a world centroid within "
++      "uniqueObjectDistance. Prevents a game that rebuilds batched geometry into a recycled dynamic buffer from inheriting another batch's previous-frame positions, which "
++      "produces stretched geometry via bogus motion vectors (measured on Saints Row: The Third's world decal batching - see the shapeMatches() comment in "
++      "rtx_draw_call_cache.cpp). Set false to restore the original upstream behaviour, where a material-hash match alone was sufficient to reuse a BlasEntry.");
+     
++    RTX_OPTION("rtx", bool, instanceHistoryRequiresPriorFrame, true,
++      "When true, an instance created this frame does not use the previous-frame vertex positions held by its BlasEntry. "
++      "A BlasEntry is shared between instances and outlives them, so a newly created instance would otherwise compute its "
++      "motion vectors against another object's previous positions (or its own from before it was unloaded), smearing the "
++      "geometry across the screen for one frame - visible in games that stream geometry in and out. Remix already applies "
++      "the equivalent rule to the transform via RtInstance::teleport(); this extends it to vertex positions. "
++      "Set false to restore the original upstream behaviour.");
++
+     RTX_OPTION("rtx", bool, useNewGuiInputMethod, true, "Disables the previous method for getting mouse/keyboard input and enables a new method which should be more reliable.  If successful the old method will be deprecated.  This setting can't be changed at runtime, so it must be set in a .conf file.");
+ 
+     RTX_OPTION_ARGS("rtx", UIType, showUI, UIType::None, "0 = Don't Show, 1 = Show Simple, 2 = Show Advanced.",

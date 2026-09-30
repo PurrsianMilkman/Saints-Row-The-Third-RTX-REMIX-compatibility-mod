@@ -8,14 +8,38 @@ not SR3-specific — any game that skins on the GPU through Remix will hit both.
 
 ## The patches
 
+Current local build: **build 7**, five switchable fixes of which two are proven.
+
+### Proven
+
 | file | what it fixes |
 |---|---|
 | `staging-release.diff` | **A staging-buffer memory leak.** Remix acquires a slice of `RtxStagingDataAlloc` and never releases it on one path, so the allocator grows without bound. On SR3 that reached **13.7 GB across 428 × 32 MB blocks** and crashed the game after roughly eight minutes. With the fix plus `rtx.enableIndexBufferMemoization = False`: **5 blocks, 160 MB**, and host RAM 13.82 GB → 0.60 GB. |
 | `skinning-normal-format.diff` | **The skinning kernel reads normals as floats only.** Anything supplying normals in a packed format gets garbage, which renders as hard, faceted shading on every GPU-skinned character. |
-| `build-environment-workarounds.diff` | Local build-environment fixes. Not a bug fix — needed to get the tree building here. |
-| `identity-pinning.diff` | Dormant. Kept because it was measured and ruled out, so nobody re-derives it. |
 
-Both real bugs should be reported upstream; they have not been at the time of writing.
+### Real bugs, but they did not fix the artifact they were written for
+
+Each is a genuine defect found while chasing the stretched-decal artifact. They are kept because
+they are correct and because a fix that *didn't* work is worth as much as one that did — nobody
+should re-derive them.
+
+| file | what it addresses |
+|---|---|
+| `drawcallcache-shape-match.diff` | The DrawCallCache accepts a bucket on a material match without requiring the shape to agree. Paired with `rtx.drawCallCacheRequireShapeMatch = True`. |
+| `instance-history-requires-prior-frame.diff` | Instance history is consulted without requiring the instance to have existed in the previous frame. |
+| `bvh-count-rebuild.diff` | A stale vertex count survives into BVH rebuild. |
+
+### Not fixes
+
+| file | what it is |
+|---|---|
+| `build-environment-workarounds.diff` | Local build-environment fixes — needed to get the tree building here. |
+| `identity-pinning.diff` | Dormant. Kept because it was measured and ruled out. |
+
+Both proven bugs should be reported upstream; they have not been at the time of writing.
+
+> **Applying more than one:** the `rtx_options.h` hunks **overlap**. Apply one patch's `rtx_options.h`
+> hunk and take only the `.cpp`/`.slangh` hunks from the others, or they will conflict.
 
 ## Do I need this?
 

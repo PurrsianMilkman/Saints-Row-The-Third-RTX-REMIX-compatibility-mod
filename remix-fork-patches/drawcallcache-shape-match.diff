@@ -1,0 +1,135 @@
+﻿diff --git a/src/dxvk/rtx_render/rtx_draw_call_cache.cpp b/src/dxvk/rtx_render/rtx_draw_call_cache.cpp
+index e4de1f25..3f82bc95 100644
+--- a/src/dxvk/rtx_render/rtx_draw_call_cache.cpp
++++ b/src/dxvk/rtx_render/rtx_draw_call_cache.cpp
+@@ -21,6 +21,7 @@
+ */
+ #include "rtx_draw_call_cache.h"
+ #include "../d3d9/d3d9_state.h"
++#include "rtx_options.h"
+ 
+ namespace dxvk 
+ {
+@@ -39,6 +40,74 @@ namespace {
+         && drawCall.getGeometryData().getHashForRule<rules::FullGeometryHash>() == blas.input.getGeometryData().getHashForRule<rules::FullGeometryHash>()
+         && drawCall.getSkinningState().boneHash == blas.input.getSkinningState().boneHash;
+   }
++
++  // Cheap "is this plausibly the same object?" gate for a BlasEntry reuse that would
++  // otherwise be justified by a material-hash match alone. Required because SR3 (Saints
++  // Row: The Third) batches world decals into a dynamic vertex-buffer ring and rebuilds an
++  // entirely unrelated batch of geometry into it every frame. Measured over two 60-frame
++  // bursts in-game: index-hash flips = 0 and geometry-descriptor flips = 0 (so
++  // rules::TopologicalHash - which buckets solely on those, not positions/texcoords - stays
++  // stable, so these unrelated batches collide in ONE DrawCallCache bucket), texcoord
++  // flips = 2,416 over 2,165 tracked draws (so rules::VertexDataHash never matches), and
++  // material/albedo flips = 20 (the material hash IS stable, because many unrelated decal
++  // batches share one atlas material). With vertexDataMatches permanently false and
++  // materialHashesMatch permanently true for these draws, the bare materialHashesMatch term
++  // in DrawCallCache::get() was enough to rebind this frame's draw to a completely
++  // unrelated BlasEntry, which drags that BlasEntry's stale previous-frame positions along
++  // via SceneManager::onSceneObjectUpdated's historyBuffer[0]/[1] swap - producing bogus
++  // motion vectors and visibly stretched decals for one frame.
++  //
++  // A material-hash-only match must therefore also pass this gate: same vertex/index
++  // counts, and a world centroid within RtxOptions::uniqueObjectDistance() of the cached
++  // entry's last known position. A genuinely animated/skinned mesh keeps its vertex/index
++  // counts and moves only a little frame to frame, so it still passes; a recycled batch
++  // slot generally has an unrelated triangle count and/or an unrelated centroid, so it is
++  // correctly rejected and gets a fresh BlasEntry instead. Do NOT fold this back into a
++  // bare materialHashesMatch/getHash()== check - that regresses to the bug above.
++  bool shapeMatches(const DrawCallState& drawCall, const DrawCallState& cachedInput) {
++    if (drawCall.getGeometryData().vertexCount != cachedInput.getGeometryData().vertexCount ||
++        drawCall.getGeometryData().indexCount != cachedInput.getGeometryData().indexCount) {
++      return false;
++    }
++
++    // THE SHARPEST OF THE THREE TESTS, and the reason the other two are not sufficient on
++    // their own: require the TEXCOORD component hash to match.
++    //
++    // The counts test above does NOT catch SR3's worst offenders. The same dynamic-ring slot
++    // is refilled with a different batch that happens to carry the SAME triangle count
++    // (measured: repeated flips at prims=184 / vertexCount=368 with an identical index hash
++    // and changed texcoords), so counts match and only the 300-unit centroid test stands -
++    // and two decal batches within one city district can easily sit closer than that.
++    //
++    // Texcoords separate the two populations cleanly, which is exactly what was measured
++    // over two 60-frame bursts:
++    //     class decal/world : texcoord flips = 2,416   (recycled batch slots)
++    //     class skinned-FF  : texcoord flips = 0       (animated meshes)
++    //     class skinned-CPU : texcoord flips = 0       (animated meshes)
++    // A skinned or animated mesh deforms its POSITIONS every frame but its UVs are static,
++    // so it still passes. A recycled batch slot holds different decals with different UVs,
++    // so it is rejected.
++    //
++    // Deliberately strict: a mesh that genuinely rewrites its texcoords per frame (UV
++    // scrolling written into the vertex buffer rather than via a texture transform) is
++    // rejected too and gets a fresh BlasEntry. That costs it a BLAS build and its motion
++    // vectors for that frame, which is the safe direction to fail - the alternative is
++    // inheriting an unrelated batch's previous-frame positions and smearing it across the
++    // screen. Spritesheet animation is unaffected; Remix drives that from the surface, not
++    // by rewriting vertex texcoords.
++    if (drawCall.getGeometryData().hashes[HashComponents::VertexTexcoord] !=
++        cachedInput.getGeometryData().hashes[HashComponents::VertexTexcoord]) {
++      return false;
++    }
++
++    // Same world-centroid-distance test the multi-entry bucket loop in DrawCallCache::get()
++    // below already computes for its own scoring - reuse it rather than inventing new maths.
++    Matrix4 newTransform = drawCall.getTransformData().objectToWorld;
++    Matrix4 oldTransform = cachedInput.getTransformData().objectToWorld;
++    const Vector3 newPos = drawCall.getGeometryData().boundingBox.getTransformedCentroid(newTransform);
++    const Vector3 oldPos = cachedInput.getGeometryData().boundingBox.getTransformedCentroid(oldTransform);
++    return lengthSqr(newPos - oldPos) <= RtxOptions::getUniqueObjectDistanceSqr();
++  }
+ }
+ 
+ DrawCallCache::DrawCallCache(DxvkDevice* device) : CommonDeviceObject(device) {
+@@ -66,8 +135,13 @@ DrawCallCache::CacheState DrawCallCache::get(const DrawCallState& drawCall, Blas
+     const bool vertexDataMatches = entry.input.getGeometryData().getHashForRule<rules::VertexDataHash>() == drawCall.getGeometryData().getHashForRule<rules::VertexDataHash>();
+     const bool boneHashesMatch = entry.input.getSkinningState().boneHash == drawCall.getSkinningState().boneHash;
+     const bool materialHashesMatch = entry.input.getMaterialData().getHash() == drawCall.getMaterialData().getHash();
++    // Gate the material-hash-only fallback on shapeMatches() (see its comment above for the
++    // measured SR3 bug this fixes) when rtx.drawCallCacheRequireShapeMatch is enabled - the
++    // default. When the option is disabled this collapses to plain `true`, i.e. the
++    // condition below is byte-for-byte the original upstream `materialHashesMatch` behaviour.
++    const bool materialOnlyMatchIsPlausible = !RtxOptions::drawCallCacheRequireShapeMatch() || shapeMatches(drawCall, entry.input);
+ 
+-    if (exactMatch(drawCall, entry) || !updatedThisFrame && (vertexDataMatches && boneHashesMatch || materialHashesMatch)) {
++    if (exactMatch(drawCall, entry) || !updatedThisFrame && (vertexDataMatches && boneHashesMatch || materialHashesMatch && materialOnlyMatchIsPlausible)) {
+       // Exact vertex match that is reusable for the current draw call,
+       // or something that hasn't been updated this frame and is similar enough.
+       // Matching the logic in the multi-element loop below.
+@@ -105,7 +179,14 @@ DrawCallCache::CacheState DrawCallCache::get(const DrawCallState& drawCall, Blas
+     if (blas.modifiedGeometryData.hashes[HashComponents::VertexTexcoord] == drawCall.getGeometryData().hashes[HashComponents::VertexTexcoord]) {
+       score += 1000.f;
+     }
+-    if (blas.input.getMaterialData().getHash() == drawCall.getMaterialData().getHash()) {
++    // Same shapeMatches() gate as the single-entry path above, applied to this candidate's
++    // material-hash bonus: a material-hash match alone must not earn score when the
++    // candidate's vertex/index counts or world centroid don't plausibly correspond to the
++    // same object (the measured SR3 world-decal-batching bug documented on shapeMatches()
++    // above). Disabled via rtx.drawCallCacheRequireShapeMatch for byte-for-byte upstream
++    // behaviour.
++    if (blas.input.getMaterialData().getHash() == drawCall.getMaterialData().getHash() &&
++        (!RtxOptions::drawCallCacheRequireShapeMatch() || shapeMatches(drawCall, blas.input))) {
+       score += 1000.f;
+     }
+     // TODO this is only checking the distance to the first instance that created the BlasEntry, not to
+diff --git a/src/dxvk/rtx_render/rtx_options.h b/src/dxvk/rtx_render/rtx_options.h
+index 749551c3..1a973867 100644
+--- a/src/dxvk/rtx_render/rtx_options.h
++++ b/src/dxvk/rtx_render/rtx_options.h
+@@ -520,6 +520,12 @@ namespace dxvk {
+     RTX_OPTION_ARGS("rtx", float, uniqueObjectDistance, 300.f, "The distance (in game units) that an object can move in a single frame before it is no longer considered the same object.\n"
+                     "If this is too low, fast moving objects may flicker and have bad lighting.  If it's too high, repeated objects may flicker.\n"
+                     "This does not account for sceneScale.", args.minValue = 0.f);
++
++    RTX_OPTION("rtx", bool, drawCallCacheRequireShapeMatch, true,
++      "When true, a cached BlasEntry may only be reused on a material-hash match if the incoming draw has the same vertex and index counts and a world centroid within "
++      "uniqueObjectDistance. Prevents a game that rebuilds batched geometry into a recycled dynamic buffer from inheriting another batch's previous-frame positions, which "
++      "produces stretched geometry via bogus motion vectors (measured on Saints Row: The Third's world decal batching - see the shapeMatches() comment in "
++      "rtx_draw_call_cache.cpp). Set false to restore the original upstream behaviour, where a material-hash match alone was sufficient to reuse a BlasEntry.");
+     
+     RTX_OPTION("rtx", bool, useNewGuiInputMethod, true, "Disables the previous method for getting mouse/keyboard input and enables a new method which should be more reliable.  If successful the old method will be deprecated.  This setting can't be changed at runtime, so it must be set in a .conf file.");
+ 

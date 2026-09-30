@@ -1,0 +1,125 @@
+diff --git a/src/dxvk/rtx_render/rtx_options.h b/src/dxvk/rtx_render/rtx_options.h
+index 749551c3..dc18e337 100644
+--- a/src/dxvk/rtx_render/rtx_options.h
++++ b/src/dxvk/rtx_render/rtx_options.h
+@@ -520,7 +520,31 @@ namespace dxvk {
+     RTX_OPTION_ARGS("rtx", float, uniqueObjectDistance, 300.f, "The distance (in game units) that an object can move in a single frame before it is no longer considered the same object.\n"
+                     "If this is too low, fast moving objects may flicker and have bad lighting.  If it's too high, repeated objects may flicker.\n"
+                     "This does not account for sceneScale.", args.minValue = 0.f);
++
++    RTX_OPTION("rtx", bool, drawCallCacheRequireShapeMatch, true,
++      "When true, a cached BlasEntry may only be reused on a material-hash match if the incoming draw has the same vertex and index counts and a world centroid within "
++      "uniqueObjectDistance. Prevents a game that rebuilds batched geometry into a recycled dynamic buffer from inheriting another batch's previous-frame positions, which "
++      "produces stretched geometry via bogus motion vectors (measured on Saints Row: The Third's world decal batching - see the shapeMatches() comment in "
++      "rtx_draw_call_cache.cpp). Set false to restore the original upstream behaviour, where a material-hash match alone was sufficient to reuse a BlasEntry.");
+     
++    RTX_OPTION("rtx", bool, instanceHistoryRequiresPriorFrame, true,
++      "When true, an instance created this frame does not use the previous-frame vertex positions held by its BlasEntry. "
++      "A BlasEntry is shared between instances and outlives them, so a newly created instance would otherwise compute its "
++      "motion vectors against another object's previous positions (or its own from before it was unloaded), smearing the "
++      "geometry across the screen for one frame - visible in games that stream geometry in and out. Remix already applies "
++      "the equivalent rule to the transform via RtInstance::teleport(); this extends it to vertex positions. "
++      "Set false to restore the original upstream behaviour.");
++
++    RTX_OPTION("rtx", bool, rebuildBvhOnGeometryCountChange, true,
++      "When true, a cached BlasEntry whose vertex or index count no longer matches the incoming draw is fully "
++      "rebuilt (KBuildBVH) instead of taking the incremental kUpdateBVH update path. processGeometryInfo assigns "
++      "output.vertexCount/indexCount only inside the KBuildBVH case, so the incremental path would leave the "
++      "acceleration structure built with a stale maxVertex over freshly uploaded vertex/index data of a "
++      "different size - reading vertices that are not there and producing stretched triangles (measured on "
++      "Saints Row: The Third's batched world decals, whose vertex/index counts change every frame in a "
++      "recycled dynamic buffer - see the promotion check in processGeometryInfo in rtx_scene_manager.cpp). "
++      "Set false to restore the original upstream behaviour.");
++
+     RTX_OPTION("rtx", bool, useNewGuiInputMethod, true, "Disables the previous method for getting mouse/keyboard input and enables a new method which should be more reliable.  If successful the old method will be deprecated.  This setting can't be changed at runtime, so it must be set in a .conf file.");
+ 
+     RTX_OPTION_ARGS("rtx", UIType, showUI, UIType::None, "0 = Don't Show, 1 = Show Simple, 2 = Show Advanced.",
+diff --git a/src/dxvk/rtx_render/rtx_scene_manager.cpp b/src/dxvk/rtx_render/rtx_scene_manager.cpp
+index 2d2d2a01..f1bb45e0 100644
+--- a/src/dxvk/rtx_render/rtx_scene_manager.cpp
++++ b/src/dxvk/rtx_render/rtx_scene_manager.cpp
+@@ -314,6 +314,15 @@ namespace dxvk {
+     }
+   }
+ 
++  // BUGFIX (measured on Saints Row: The Third, 2026-09-25): counts how many times
++  // processGeometryInfo (below) has promoted a cached BlasEntry from the kUpdateBVH
++  // incremental-update path to a full KBuildBVH rebuild because the incoming draw's
++  // vertex/index count no longer matched what the entry was built with. See the promotion
++  // check near the top of processGeometryInfo, and rtx.rebuildBvhOnGeometryCountChange in
++  // rtx_options.h. Declared at namespace scope (not as a function-local static) so both
++  // template instantiations of processGeometryInfo<isNew> share one running total.
++  static uint32_t s_bvhCountMismatchRebuilds = 0;
++
+   template<bool isNew>
+   SceneManager::ObjectCacheState SceneManager::processGeometryInfo(Rc<DxvkContext> ctx, const DrawCallState& drawCallState, RaytraceGeometry& inOutGeometry) {
+     ScopedCpuProfileZone();
+@@ -385,6 +394,68 @@ namespace dxvk {
+       ? input.positionBuffer.stride()
+       : RtxGeometryUtils::computeOptimalVertexStride(input, forceNormals);
+ 
++    // BUGFIX (measured on Saints Row: The Third, 2026-09-25): output.vertexCount and
++    // output.indexCount are assigned ONLY inside the KBuildBVH case a few lines below (the
++    // "output.vertexCount = input.vertexCount;" and "output.indexCount = input.isTopologyRaytraceReady()
++    // ? ..." lines). The kUpdateBVH case never touches either field, and never re-uploads the
++    // index buffer at all - it only resizes/swaps historyBuffer[0]/[1] for vertex data and
++    // re-runs cacheVertexDataOnGPU. rtx_accel_manager.cpp (buildBlas, ~line 233 and ~271) then
++    // builds the BLAS using blasEntry.modifiedGeometryData.vertexCount - 1 as
++    // triangleData.maxVertex - the STALE count from whenever this cache entry last took the
++    // KBuildBVH path.
++    //
++    // A cached BlasEntry can legitimately match (the index-hash check above passed) and still
++    // take kUpdateBVH for a draw whose actual vertex/index count differs from what the entry was
++    // built with. Measured on SR3's batched world decals, which are re-emitted into a recycled
++    // dynamic buffer every frame (3,890 identity churns across 2,165 tracked draws, 2,416
++    // texcoord flips in one capture): when that happens the BLAS is built with a maxVertex/index
++    // range that doesn't match the freshly uploaded data - either reading vertices that were
++    // never written (stale or uninitialized memory), or leaving stale indices describing a mesh
++    // that no longer exists - producing the single-frame stretched-triangle artifact seen exactly
++    // when the decal batch churns. Five previous fixes aimed at instance/entry IDENTITY missed
++    // this because the entry match itself is legitimate; only the stale COUNT is wrong.
++    //
++    // Fix: if the incoming vertex/index count doesn't match what this entry was built with, force
++    // a full rebuild instead of the incremental update, so vertexCount/indexCount and the index
++    // buffer all get refreshed. See rtx.rebuildBvhOnGeometryCountChange in rtx_options.h.
++    if (RtxOptions::rebuildBvhOnGeometryCountChange() && result == ObjectCacheState::kUpdateBVH) {
++      // Mirror KBuildBVH's own index count computation exactly (see the KBuildBVH case below) -
++      // a different expression here would mis-trigger this guard on topologies Remix converts to
++      // a triangle list (getOptimalTriangleListSize gives a different count than input.indexCount
++      // for those).
++      const uint32_t incomingIndexCount = input.isTopologyRaytraceReady()
++        ? input.indexCount
++        : RtxGeometryUtils::getOptimalTriangleListSize(input);
++
++      if (input.vertexCount != output.vertexCount || incomingIndexCount != output.indexCount) {
++        result = ObjectCacheState::KBuildBVH;
++
++        // KBuildBVH asserts indexCacheBuffer/historyBuffer[0] are null ("Make sure we're not
++        // stomping something else..." a few lines down). Release them here since we just
++        // diverted this entry away from the kUpdateBVH shortcut it was about to take - both
++        // still hold buffers sized for the entry's OLD, no-longer-matching count.
++        output.indexCacheBuffer = nullptr;
++        output.historyBuffer[0] = nullptr;
++
++        // historyBuffer[1] isn't asserted by KBuildBVH (which never reads or writes it - it's
++        // purely kUpdateBVH's previous-frame swap storage), but leaving a stale-sized buffer in
++        // it here is a landmine for the NEXT frame: if that next frame takes the normal
++        // kUpdateBVH path, it swaps historyBuffer[0]/[1] and only recreates historyBuffer[0] if
++        // it comes back null after the swap. A non-null historyBuffer[1] left here would be
++        // handed back as historyBuffer[0] next frame, skip recreation, and receive a
++        // cacheVertexDataOnGPU write sized for the (correct) current count into a buffer sized
++        // for whatever count this entry had two rebuilds ago.
++        output.historyBuffer[1] = nullptr;
++
++        ++s_bvhCountMismatchRebuilds;
++        if ((s_bvhCountMismatchRebuilds % 100) == 1) {
++          Logger::info(str::format("[RTX-Geometry-Count-Rebuild] Promoted kUpdateBVH -> KBuildBVH ",
++            s_bvhCountMismatchRebuilds, " time(s) so far this run: a cached BlasEntry's vertex/index "
++            "count no longer matched the incoming draw (see rtx.rebuildBvhOnGeometryCountChange)."));
++        }
++      }
++    }
++
+     switch (result) {
+       case ObjectCacheState::KBuildBVH: {
+         // Set up the ideal vertex params, if input vertices are interleaved, it's safe to assume the positionBuffer stride is the vertex stride
