@@ -13740,3 +13740,1149 @@ Caveat: a draw that moves to a new buffer location counts as a NEW identity and 
   produced were all the OLD build. ALWAYS verify md5 after copying.
 - PowerShell's Set-Content -Encoding utf8 writes a BOM. Write the ini and the source with Python only.
 - Remix's memory profiler has a "Write to Log" button - far better than screenshots for large tables.
+
+================================================================================
+SESSION 2026-09-22 (cont.) - MISPLACED BUILDINGS: ROOT CAUSE FOUND AND FIXED
+================================================================================
+
+USER OBSERVATION THAT CRACKED IT
+--------------------------------
+"as i look at the building windows and decals, their hash constantly change, but the
+missplaced building decals/geometry are not unstable in the hash. it is probably a
+mistake that happens for one frame."
+
+That inverts the naive reading. An UNSTABLE hash is the healthy state: it forces Remix
+to allocate a fresh BlasEntry and re-upload every frame, so a bad frame cannot persist.
+A STABLE hash is the precondition for a one-frame error to be cached and kept. So the
+question was never "why is the geometry wrong" but "what keeps a wrong frame alive".
+
+ROOT CAUSE (confirmed by the user: "random building geometry problem is solved")
+--------------------------------------------------------------------------------
+rtx.conf carried `rtx.antiCulling.object.enable = True`. Remix's own default is FALSE
+(rtx_options.h:641). The True came from the ORIGINAL SR3 rtx.conf - not from any of our
+changes - which is why it correlated with, but was not caused by, the staging fix.
+
+The chain, all verified in the fork source:
+
+1. DrawCallTracker::garbageCollectReplacementInstances (rtx_draw_call_tracker.cpp:398+)
+   keeps an instance alive when anti-culling is on and its AABB does NOT intersect the
+   camera frustum - i.e. precisely the objects the game has stopped drawing.
+
+2. A kept instance PINS its BlasEntry: SceneManager::garbageCollection
+   (rtx_scene_manager.cpp:283-295) only erases entries whose getLinkedInstances() is
+   empty. So numFramesToKeepBLAS = 1 does not save us; the entry lives as long as the
+   anti-culled instance does.
+
+3. That entry sits in a DrawCallCache bucket keyed on
+       rules::TopologicalHash = Indices | GeometryDescriptor          (rtx_hashing.h:50)
+   POSITIONS AND TEXCOORDS ARE NOT IN THE BUCKET KEY. Every building decal sharing a
+   quad topology therefore lands in ONE bucket.
+
+4. DrawCallCache::get, single-entry path (rtx_draw_call_cache.cpp:70):
+       if (exactMatch(drawCall, entry) ||
+           !updatedThisFrame && (vertexDataMatches && boneHashesMatch || materialHashesMatch))
+   Operator precedence: !updatedThisFrame && ((vertexDataMatches && boneHashesMatch) ||
+   materialHashesMatch). An entry not touched this frame is accepted on materialHashesMatch
+   ALONE - no vertex-data match required. All building decals share a material.
+
+5. onSceneObjectUpdated then runs processGeometryInfo<false> -> kUpdateBVH ->
+   cacheVertexDataOnGPU, which re-uploads the NEW decal's vertices INTO THE KEPT ENTRY'S
+   BUFFERS (rtx_scene_manager.cpp:425-460).
+
+6. Every stale instance still linked to that entry now renders a DIFFERENT decal's
+   geometry at its own transform. It pops into view when the camera turns and the kept
+   instance re-enters the frustum.
+
+That accounts for all four reported symptoms at once: rare (needs the collision), sticks
+for a few seconds (as long as the instance is kept), "slightly angle and location
+dependent" (whether the kept AABB re-enters the frustum), and a STABLE hash on the
+offender (it is the shared, pinned entry - the one thing in the scene that cannot churn).
+
+THE FIX
+-------
+rtx.antiCulling.object.enable = False
+  rtx.conf 961908874723560340690287f471e2a1 -> f979d8fa2120b9fba742d50cfb8ee824
+  backup: rtx.conf.before-anticulling-test
+Single key changed, line-count delta 0, verified by re-reading the file after the write.
+rtx.antiCulling.light.enable was deliberately LEFT True - lights are a separate path and
+were not implicated.
+
+COST: off-screen objects no longer contribute shadows or reflections. That is what the
+feature is for. If it is ever wanted back, the narrower knob is
+`rtx.antiCulling.object.hashInstanceWithBoundingBoxHash = False`, whose own documentation
+says to disable it "when the game using primitive culling which may cause flickering".
+The real upstream fix is to require a vertex-data match before reusing a PINNED entry -
+a third genuine Remix bug, distinct from the two we already patched.
+
+WHAT THIS RETIRES
+-----------------
+The (b2) control run (restore the shipped runtime + re-enable index memoization, fly the
+route) is NO LONGER NEEDED for this bug. Our staging-release fix was never implicated;
+the correlation was timing only. Do not spend a run on it.
+
+--------------------------------------------------------------------------------
+HASH STABILITY: WHAT THE DEBUG VIEW ACTUALLY SHOWS  (groundwork, not yet resolved)
+--------------------------------------------------------------------------------
+Chased for the next item ("make the decal/building window hashes stable"). Established:
+
+- The "Geometry Hash" debug view stores r5g6b5ToColor(surface.hashPacked)
+  (geometry_resolver.slangh:615). hashPacked is a 16-bit XOR fold (rtx_materials.h:126-129)
+  of surface.associatedGeometryHash, assigned per instance at rtx_instance_manager.cpp:1056
+  from drawCall.getHash(RtxOptions::geometryAssetHashRule()).
+
+- DrawCallState::getHash (rtx_types.h:635) is:
+      geometryData.getHashForRule(rule) ^ materialData.getHash()
+  THE VIEW IS NOT A PURE GEOMETRY HASH. It XORs in the material hash.
+
+- LegacyMaterialData::updateCachedHash (rtx_materials.h:1797) is simply
+      m_cachedHash = colorTextures[0].getImageHash();
+  i.e. the ALBEDO TEXTURE'S IMAGE HASH, nothing else (the RS150/RS220 identity-pinning
+  branches are dormant - identity-pinning.diff is not applied).
+
+- TextureRef::getImageHash (rtx_texture.h:130) returns 0 when the image view does not
+  resolve.
+
+CONSEQUENCE: the shim's assetHashProbe "0 flips" result measured only the GEOMETRY half
+and is not evidence about what the user is watching. The material half has NEVER been
+measured.
+
+FALSE TRAIL, RECORDED SO IT IS NOT RE-RUN: "material textures are evicted after
+numFramesToKeepMaterialTextures (= numFramesToKeepBLAS = 1) so the albedo hash collapses
+to 0 every frame". WRONG. That retention path (rtx_texture_manager.cpp:1243-1277) only
+covers ManagedTextures with m_canDemote - replacement assets streamed from disk. SR3's
+game textures do not go through it. Checked before asking the user to test it; discarded.
+
+PROBE AIM WAS WRONG. ProbeAssetHash (sr3rtx.cpp:~21258) filters to:
+      decalNamed = pixel shader's albedoSampler contains "Decal"
+      isSkinned
+      if (!decalNamed && !isSkinned) return;
+Building WINDOWS run through ir_sr3fauxinterior_* / ir_at_decalonly_cuberef_* shaders and
+are not necessarily decal-named, so the probe very likely never sampled the draws the user
+is watching. Same failure mode as the earlier "no building decal had EVER been measured"
+finding - see memory aim-the-probe-at-the-target.
+
+NEXT: probe extended (a) to widen the filter to world draws behind a new switch, and
+(b) to track the albedo texture identity as a fifth component, so one armed run says
+WHICH half churns for the draws in question.
+
+ONE-FRAME POLYGONS - WORKING HYPOTHESIS (not yet tested)
+--------------------------------------------------------
+In the multi-entry bucket path (rtx_draw_call_cache.cpp:85-120) Remix scores candidates as
+(+1000 position-hash match) (+1000 texcoord match) (+1000 material match) - lengthSqr(world
+distance). Adjacent windows on one building share material and texcoords and sit well within
+~45 units, so the score stays positive and one decal's entry can be matched to a different
+decal's draw. That triggers kUpdateBVH, which does std::swap(historyBuffer[0], historyBuffer[1])
+and sets previousPositionBuffer from the swapped buffer - so the PREVIOUS-position data
+belongs to a different decal for one frame. Wrong motion vectors -> one-frame smear. This
+predicts the artifact is visible in the Screen-Space Motion Vector debug view.
+
+Also noted, a latent wart in the same loop: bestScore is initialised to
+std::numeric_limits<float>::min(), which is the smallest POSITIVE float (~1.18e-38), not the
+most negative. Only positive-scoring candidates can ever win. The nullptr case is handled
+immediately below, so it is conservative rather than wrong, but it is not what the author
+meant and it makes the heuristic much stricter than it reads.
+
+================================================================================
+SESSION 2026-09-22 (cont.) - DECAL HASH CHURN: MEASURED, AND IT IS THE GAME'S
+DYNAMIC BATCHING (not the albedo, not the shim's conversion)
+================================================================================
+
+THE PREDICTION WAS WRONG - RECORD IT
+------------------------------------
+Lead predicted the ALBEDO/material half of Remix's hash would be the churning one, on the
+reasoning that drawCall.getHash() = geometryHash ^ materialHash and only the geometry half
+had ever been measured. The measurement says otherwise: albedo flips were 5 (moving) and
+20 (stationary) against 2,416 texcoord flips. The material half is effectively stable.
+The probe was still worth building - it is what produced the real answer - but the
+hypothesis it was built to confirm was false. Do not resurrect it.
+
+THE MEASUREMENT (shim build dd24a3fa, ini c305c5ac, two F9 bursts in one run)
+-----------------------------------------------------------------------------
+                                moving camera      stationary camera
+  identities tracked            4096 (2739 ovf)    2331 (0 overflow)
+  index-hash flips                     0                  0
+  geometry-descriptor flips            0                  0
+  texcoord-source flips              255              2,416
+  texcoord-conversion flips          255              2,416
+  albedo flips                         5                 20
+  identity churn                 3,841              3,890
+  probe cost                  19.99 ms/frame     18.10 ms/frame (burst only)
+
+Three facts follow directly:
+1. texcoord-source == texcoord-conversion in BOTH runs (255/255, 2416/2416). The shim's UV
+   conversion is faithful; the GAME'S OWN source texcoords differ frame to frame.
+2. It churns MORE with the camera stationary than moving, so nothing camera-driven explains it.
+3. index and descriptor flips are ZERO, so rules::TopologicalHash is perfectly STABLE.
+
+WHAT THE DRAWS ACTUALLY ARE
+---------------------------
+Representative flip record:
+  ib=14D8A498 start=0 prims=184 vb=03802170 off=121584 baseVtx=0 | at(0.00 0.00 0.00)
+  index same(cf57b5d17cabea63->cf57b5d17cabea63) desc same(661a6ec8297d01a6->661a6ec8297d01a6)
+  texConv CHANGED(3bbe1425...->50440f48...) albedo same(454fd678->454fd678) | path 'uvDynamic'
+
+Every such draw: startIndex 0 on ONE shared index buffer (14D8A498), one shared dynamic vertex
+buffer (03802170) at a varying offset, world-space at the origin, 12-234 triangles. These are
+NOT individual decals - they are BATCHES, rebuilt into a dynamic ring buffer every frame.
+identity churn = 3,890 of 2,165 tracked: the same decal (same albedo, same rounded world
+position, same primitive count) appears under a DIFFERENT (ib/vb/start/baseVertex) identity on
+a later frame. There is no stable per-object identity in these draws at all.
+
+WHY THAT PRODUCES "DECALS STRETCHING ACROSS THE SCREEN"
+-------------------------------------------------------
+Chain, every link confirmed in the fork source:
+  - TopologicalHash = Indices | GeometryDescriptor (rtx_hashing.h:50) - no positions, no
+    texcoords - and both are stable, so every batch with the same triangle count lands in ONE
+    DrawCallCache bucket.
+  - VertexDataHash changes every frame, so vertexDataMatches is ALWAYS false.
+  - The material hash is stable, so materialHashesMatch is ALWAYS true.
+  - DrawCallCache::get single-entry path (rtx_draw_call_cache.cpp:70):
+        if (exactMatch(...) || !updatedThisFrame && (vertexDataMatches && boneHashesMatch
+                                                     || materialHashesMatch))
+    fires on the materialHashesMatch term alone.
+  - SceneManager::onSceneObjectUpdated -> processGeometryInfo<false> -> kUpdateBVH, which does
+    std::swap(output.historyBuffer[0], output.historyBuffer[1]) and sets previousPositionBuffer
+    from the swapped buffer (rtx_scene_manager.cpp:~443-458).
+  - previousPositionBuffer now holds a COMPLETELY DIFFERENT batch of decals. Motion vectors
+    point from one decal to another across the screen -> one-frame stretch.
+User's words: "decals stretching across the screen on some random frames as i rotate and move
+the camera". That is the signature.
+
+CONSEQUENCE FOR THE STATED GOAL "MAKE THE HASHES STABLE"
+--------------------------------------------------------
+NOT ACHIEVABLE FROM THE SHIM. The game supplies no stable identity for these draws: it
+re-batches world decals into a recycled dynamic buffer every frame, so there is nothing
+persistent to hand Remix. Tightening the shim's window cannot help either - Remix derives its
+vertex range from the indices and rebases them, so the shim's window never reached that hash
+(already in the ruled-out list). The fix has to be in the CACHE, not in the identity.
+
+THE FIX BEING IMPLEMENTED (fork, drawcallcache-shape-match.diff)
+-----------------------------------------------------------------
+Gate the MATERIAL-ONLY match behind a cheap "plausibly the same object" test: equal vertexCount,
+equal indexCount, EQUAL TEXCOORD COMPONENT HASH, and a world centroid within
+RtxOptions::uniqueObjectDistance(), computed the way the existing multi-entry path already does.
+
+THE TEXCOORD TEST IS THE ONE THAT CARRIES THE WEIGHT, and it was added only after reviewing the
+first cut of the fix against the capture: the counts test does NOT catch the worst offenders,
+because the same ring slot is refilled with a batch of the SAME triangle count (repeated flips at
+prims=184 / vertexCount=368, identical index hash, changed texcoords), leaving only a 300-unit
+centroid test that two decal batches in one district can easily satisfy. The measured split is
+decisive - decal/world texcoord flips = 2,416, skinned-FF = 0, skinned-CPU = 0 - because an
+animated mesh deforms POSITIONS while its UVs stay static, and a recycled batch slot changes UVs.
+Deliberately strict: a mesh that rewrites its own texcoords per frame (UV scrolling written into
+the vertex buffer instead of via a texture transform) is rejected too and loses its motion vectors
+for that frame. That is the safe direction to fail. Applied to the material-only term in the
+single-entry path AND to the +1000 material bonus in the multi-entry loop. exactMatch and the
+vertexDataMatches && boneHashesMatch term are untouched.
+
+CRITICAL - DO NOT "SIMPLIFY" THIS LATER: the materialHashesMatch fallback is NOT simply a bug.
+It is what keeps genuinely ANIMATED and SKINNED meshes bound to their BlasEntry, because their
+vertex data legitimately changes every frame. Removing it outright would give every animated
+mesh a fresh BLAS per frame and destroy its motion vectors. The gate is deliberately shaped to
+keep animation working (same counts, small movement) while rejecting recycled batch slots
+(unrelated triangle counts and/or unrelated centroids).
+
+New option: rtx.drawCallCacheRequireShapeMatch, default TRUE; set False in rtx.conf to restore
+upstream behaviour for an A/B without a rebuild.
+
+This is a FOURTH genuine upstream Remix issue, after the staging leak, the skinning normal
+format, and the anti-culling/pinned-entry interaction.
+
+STILL OPEN AFTER THIS
+---------------------
+- Whether the stretch fully disappears, or only the worst cases (needs the user's run).
+- Performance: these batches currently take kUpdateBVH every frame; after the gate they will
+  take KBuildBVH instead when the shape differs. Same order of cost, but measure it.
+- The skinned-FF class showed albedo flips 48 (moving) / 14 (stationary) and "albedo changed
+  within the same frame" DUP examples on characters at a fixed position - a SEPARATE issue,
+  possibly related to the parked body-vs-head colour mismatch. Not investigated yet.
+
+================================================================================
+SESSION 2026-09-22 (cont.) - STRETCHED DECALS: THE REAL CAUSE IS INSTANCE
+CREATION, NOT THE DRAW CALL CACHE
+================================================================================
+
+THE SHAPE-MATCH FIX DID NOT WORK - RECORD IT
+--------------------------------------------
+Build 5 (drawcallcache-shape-match, three-test gate incl. the texcoord hash) was deployed
+and tested. User: "the hashes are still unstable and by moving around in the game and
+rotating the camera, you can see the decals stretch for a frame. this seams to be happening
+when they load, unload or reload."
+
+So the DrawCallCache reasoning, though correct about the cache's weak bucketing, was not the
+mechanism driving the artifact. The gate is now PARKED OFF via
+rtx.drawCallCacheRequireShapeMatch = False in rtx.conf: it fixed nothing observable and costs
+extra BLAS builds. It remains in the binary and can be re-enabled without a rebuild if a
+reason appears. Do not re-argue it from theory - it was tested.
+
+THE CLUE THAT MATTERED
+----------------------
+"when they load, unload or reload" = OBJECT LIFETIME, not per-frame batching. That points at
+instance CREATION, which the cache-side fix could never have addressed.
+
+THE REAL CAUSE (rtx_instance_manager.cpp ~1136)
+------------------------------------------------
+    hasPreviousPositions = blas.modifiedGeometryData.previousPositionBuffer.defined() && !isMotionUnstable;
+    const bool isFirstUpdateAfterCreation = currentInstance.isCreatedThisFrame(...) && isFirstUpdateThisFrame;
+
+A motion vector has two halves. Remix handles the TRANSFORM half correctly for a brand-new
+instance: isFirstUpdateAfterCreation -> RtInstance::teleport(), which sets
+prevObjectToWorld = objectToWorld, so a new instance reports zero transform motion.
+
+The VERTEX half has no such check. hasPreviousPositions is read straight off the BLAS. But a
+BlasEntry is SHARED between instances and OUTLIVES them - SceneManager::garbageCollection only
+erases entries with no linked instances, and DrawCallCache hands an existing entry to whatever
+draw matches it. So an instance created this frame, attaching to an existing entry, inherits
+previous-frame vertex positions belonging to a DIFFERENT object, or to itself from before it
+was unloaded. hasPreviousPositions then feeds:
+    surface.isStatic = !(hasTransformChanged || hasPreviousPositions) || ...    (line ~1166)
+marking the surface non-static, so the shader computes a motion vector against foreign
+positions and the geometry smears across the screen for exactly one frame.
+
+That is why it fires on load/unload/reload: those are precisely the frames on which instances
+are created.
+
+THE FIX (instance-history-requires-prior-frame.diff, build 6)
+--------------------------------------------------------------
+    const bool isFirstUpdateAfterCreation = ...;      // moved ABOVE the assignment
+    hasPreviousPositions = blas.modifiedGeometryData.previousPositionBuffer.defined() && !isMotionUnstable
+                        && !(RtxOptions::instanceHistoryRequiresPriorFrame() && isFirstUpdateAfterCreation);
+
+An instance created this frame has no previous frame, therefore no valid previous vertex
+positions. This is the same rule Remix already applies to the transform via teleport(),
+extended to the half that was missed. Option rtx.instanceHistoryRequiresPriorFrame, default
+true; false restores upstream behaviour.
+
+DIFF OVERLAP WARNING
+--------------------
+instance-history-requires-prior-frame.diff and drawcallcache-shape-match.diff BOTH carry the
+rtx_options.h hunk for BOTH options, because both edits are uncommitted in the same tree.
+Applying both diffs conflicts. Apply one, then take only the .cpp hunk of the other.
+
+ON "MAKE THE HASHES STABLE" - THE GOAL IS WRONG
+------------------------------------------------
+The hashes cannot be stabilised. SR3 rebuilds these decals into a recycled dynamic vertex
+buffer every frame and gives Remix no persistent identity (measured: identity churn 3,890 of
+2,165 tracked draws; texcoord flips 2,416). The shim cannot invent one. What unstable hashes
+actually cost is that they let Remix mistake one object for another - so the achievable goal
+is to stop the confusion, not to stop the churn. If the stretching stops, the instability
+stops mattering.
+
+DEPLOYED FOR THIS TEST (single variable)
+-----------------------------------------
+  .trex/d3d9.dll  49f1370639c8a345c3f3fa9296d7ec9b  190,479,872  = fork build 6
+  rtx.conf        c4fe6fdeab22424471de6cc3a0be9294  (+ drawCallCacheRequireShapeMatch = False)
+  shim asi/ini/map unchanged from build 5's test (dd24a3fa / c305c5ac / 9c646034)
+Exactly one behavioural change versus the previous run: the instance-history fix.
+
+================================================================================
+SESSION 2026-09-22 (cont.) - THE STRETCH IS REAL GEOMETRY, NOT A TEMPORAL
+ARTIFACT. TWO FIXES DISPROVEN. STOP GUESSING, MEASURE.
+================================================================================
+
+THE OBSERVATION THAT SETTLES THE CLASS OF BUG
+----------------------------------------------
+User, asked whether the stretched shape appears in Remix's Geometry Hash debug view:
+"The stretching of the decals happen on geometry hash view also."
+
+DEBUG_VIEW_GEOMETRY_HASH is written per-pixel from the PRIMARY RAY HIT
+(geometry_resolver.slangh:615, storeInDebugView(r5g6b5ToColor(surface.hashPacked))) with no
+temporal accumulation, no upscaler and no denoiser in the path. If the stretched shape is
+visible there, a REAL TRIANGLE covers those pixels. The artifact is bad GEOMETRY for one
+frame, not a smeared motion vector.
+
+THIS INVALIDATES THE ENTIRE LINE OF ATTACK OF THE PREVIOUS TWO FIXES. Both were aimed at
+motion vectors. The lead assumed "stretched across the screen" meant a denoiser smear and
+never verified that assumption before building on it twice. The verification cost one
+question and zero runs; it should have come first. See memory control-before-conclusion.
+
+DISPROVEN, DO NOT RE-CHASE
+---------------------------
+1. Remix DrawCallCache reusing a BlasEntry across unrelated batches
+   (drawcallcache-shape-match.diff, build 5, three-test gate incl. texcoord hash).
+   TESTED IN GAME: no change. Now PARKED OFF via rtx.drawCallCacheRequireShapeMatch = False.
+2. Remix instance history: an instance created this frame inheriting its shared BlasEntry's
+   previous-frame vertex positions (instance-history-requires-prior-frame.diff, build 6).
+   TESTED IN GAME: no change. LEFT ON - it is defensible on its own terms (Remix already
+   applies the equivalent rule to the transform via RtInstance::teleport(), and an instance
+   created this frame genuinely has no previous frame), but it is NOT this bug.
+3. The shim's WORLDMATRIX(0) / D3DTS_WORLD aliasing. Checked by reading, ruled out:
+   - UnbindSkinFF (sr3rtx.cpp:18371) restores D3DTS_WORLD from g_appliedWorld
+     UNCONDITIONALLY, and its own comment already documents this exact hazard.
+   - SkinViaFixedFunction has NO refuse path after its bone-staging loop: the only return
+     between the staging loop (~18596) and the end of the function is `return true` (18670),
+     so a draw can never stage bone 0 and then skip the restore.
+   - ApplyTransforms' redundancy skip (sr3rtx.cpp:3333) is therefore safe: the shadow
+     g_appliedWorld and the device agree by the time the next draw is processed.
+4. Remix referencing the game's vertex buffers directly and reading them after SR3 recycles
+   them during streaming. Ruled out in code: d3d9_rtx.cpp:637
+       m_forceGeometryCopy = RtxOptions::useBuffersDirectly() == false;
+   and rtx.conf has useBuffersDirectly = False, so m_forceGeometryCopy is TRUE, canUseBuffer
+   is always false, and processVertices ALWAYS memcpys into staging at draw time. Remix
+   renders exactly the bytes the shim handed it at the moment of the draw.
+5. Texture eviction collapsing the albedo hash (checked earlier, same session): the retention
+   path at rtx_texture_manager.cpp:1243-1277 only covers ManagedTextures with m_canDemote,
+   i.e. replacement assets streamed from disk. SR3's game textures never enter it.
+
+WHAT THAT LEAVES
+----------------
+Remix receives, at draw time, a copy of whatever the shim presents. The stretched triangle is
+therefore in the data the SHIM hands over - or in the draw parameters it hands over - for one
+frame, on a frame where decals load/unload/reload. Candidates not yet excluded: a stale shim
+cache keyed on buffer identity rather than content (the game reuses the same D3D9 buffer
+object across a stream in/out, so a pointer-keyed cache would not notice), an index/vertex
+range that references vertices the game has not filled yet, or a genuinely garbage vertex in
+the game's own dynamic buffer that the game itself never draws because its own draw call
+parameters differ from what the shim reconstructs.
+
+NEXT: STOP GUESSING - A SELF-TRIGGERING DETECTOR
+-------------------------------------------------
+Three hypotheses have now been wrong in a row, each costing a build/deploy/test cycle. Adding
+a detector to the shim that NAMES the bad draw instead: for every converted draw, compute the
+object-space and world-space AABB of the positions actually referenced, and dump everything
+about any draw whose world AABB diagonal exceeds a threshold or whose positions are
+non-finite - frame, draw index, shader, textures, ib/vb/offset/stride, the full world matrix,
+both AABBs, and THE WORST VERTEX (index, raw bytes, decoded object position, world position)
+against a typical vertex for contrast.
+
+It self-triggers, so catching a one-frame event does not depend on human reaction time.
+Switches: stretchDetect (default off), stretchDetectUnits (default 5000), stretchDetectDumps
+(default 20). Zero cost when off.
+
+If the detector fires: the dump names the draw and the vertex, and the cause follows from the
+raw bytes. If it never fires while the user still sees the stretch, then the shim's data is
+clean and the corruption is downstream inside Remix - which is itself a decisive result, and
+the next place to look is Remix's own geometry processing (interleaveGeometry /
+cacheVertexDataOnGPU) rather than anything in the shim.
+
+================================================================================
+SESSION 2026-09-23 - CAUSE OF THE STRETCHED DECALS FOUND: THE GAME PARKS UNUSED
+DECAL VERTICES AT Y=1e10, AND A PATH TRACER DOES NOT CLIP
+================================================================================
+
+HOW IT WAS FOUND
+----------------
+After three wrong hypotheses in a row (DrawCallCache reuse, instance history, WORLDMATRIX(0)
+aliasing), the lead stopped guessing and added a SELF-TRIGGERING detector to the shim
+(stretchDetect / stretchDetectUnits / stretchDetectDumps, plus a threshold-independent
+histogram and top-5 report so one run would also reveal the legitimate size distribution).
+It found the answer on the first run. Lesson already in memory as name-the-thing-dont-guess-it
+and control-before-conclusion; this is the third time in this project that measuring beat
+theorising, after a whole sequence of reasoned-but-wrong fixes.
+
+THE EVIDENCE
+------------
+    STRETCH DETECT #1: frame 1130 draw 5551 | ps='Diffuse_Map_1Sampler' | v=24 p=34
+      | ib=14EA6140 start=0 vb=0371BCF8 off=856720 baseVtx=0 stride=52 | path 'not-reproducible'
+      world matrix (finite): identity + translation (-256, 0, -768)
+      object AABB (25 finite verts) min(0.307 180.857 491.813) max(1182.943 10000000000.000 1420.464)
+      WORST vertex gv=24 raw(8D 4E 9D 3E  F9 02 15 50  1A E8 F5 43) obj(0.307 10000000000.000 491.813)
+      TYPICAL vertex gv=0                                            obj(1182.684 181.143 1419.896)
+
+The byte pattern F9 02 15 50 is float 1e10 EXACTLY, and it recurs across draws in either the Y
+or the Z slot while the other two components stay ordinary world coordinates:
+    gv=24  obj(0.307  1e10   491.813)
+    gv=32  obj(0.221  0.142  1e10)
+    gv=48  obj(0.432  1e10   246.584)
+That is not corruption. It is a SENTINEL: SR3 retires an unused decal slot by parking its
+vertices 1e10 units away. Under rasterisation the triangle is clipped and never seen. Under
+PATH TRACING nothing clips it - the BLAS contains a triangle reaching to 1e10, and rays hit it.
+Hence: real geometry (visible in the Geometry Hash debug view), one frame at a time, on
+load/unload/reload (exactly when slots are retired), rare, and camera-angle dependent - the
+user noticed it most when pointing the camera DOWN, which is consistent with a sliver that
+reaches to +Y.
+
+Note also gv=24 on a v=24 draw: the index buffer references the 25th vertex, one past the
+declared NumVertices window. Remix derives its vertex range from the INDICES (maxIndex-minIndex+1),
+not from NumVertices, so it faithfully includes the sentinel vertex that the game's own declared
+window excludes.
+
+RUN STATISTICS (stretchDetectUnits=5000, ~1,150 converted draws/frame scanned)
+-------------------------------------------------------------------------------
+    histogram of world-AABB diagonal:
+      [0-10)=5819972 [10-100)=5507241 [100-500)=3092154 [500-1000)=126452
+      [1000-2000)=20993 [2000-5000)=12004 [5000-20000)=1 [20000+)=815
+    2,543 draws flagged (0.017% of scanned), 20 dumped (cap reached)
+Legitimate geometry tops out in the [2000-5000) bucket; the [20000+) bucket with 815 entries is
+the anomaly population. A future threshold of ~6000 would be well clear of legitimate geometry.
+
+A SECOND, SEPARATE POPULATION - FALSE POSITIVES IN THE DETECTOR ITSELF
+-----------------------------------------------------------------------
+Some flagged draws carry values like
+    raw(00 80 80 80  FA 03 75 01  44 41 3D FF) -> -2.5e38
+which is not plausible float position data at all, and every one of them is tagged
+path 'not-reproducible' - the shim's OWN marker that it could not reproduce that draw's vertex
+data. These are draws where the detector read at the wrong offset (wrong posOffset/stride
+assumption for that shader family, ps='Diffuse_Map_1Sampler', stride=52), NOT game bugs. Do not
+chase them as corruption. If the detector is ever re-armed, it should skip or clearly separate
+draws whose path is 'not-reproducible'.
+
+THE FIX, WHEN WE COME BACK TO IT (user parked it: "we will treat it as okay for now")
+--------------------------------------------------------------------------------------
+The whole draw cannot simply be dropped - the other ~24 vertices are legitimate visible decals.
+Options, in preference order:
+1. SHIM, per-triangle index filtering: for a draw containing a sentinel vertex, build a filtered
+   index buffer in a shim-owned IB that omits only the triangles referencing any vertex beyond a
+   sanity bound (say |coord| > 1e6), and issue the draw with that. Costs one index scan plus a
+   temp IB only on affected draws, which are 0.017% of draws.
+2. REMIX, degenerate-triangle rejection at BLAS build: skip triangles whose vertices exceed a
+   world sanity bound. Catches every game with this idiom, not just SR3, and is a plausible
+   upstream contribution - but Remix-side changes have a worse track record in this project.
+3. Do nothing: the artifact is rare and the user has deprioritised it.
+The detector that found this is deployed but SWITCHED OFF (stretchDetect=0) because scanning
+every referenced vertex of every converted draw costs real frame time. Set it to 1 to re-arm.
+
+NOT FIXED BY THIS, STILL OPEN: the decal hashes still change every frame. That is the game's
+per-frame re-batching (measured earlier: identity churn 3,890 of 2,165 draws, texcoord flips
+2,416, index and descriptor flips both ZERO) and is a separate problem.
+
+================================================================================
+SESSION 2026-09-23 - HASH RULE CHANGE: PARTIAL SUCCESS, AND WHY FULL STABILITY IS
+IMPOSSIBLE WITHOUT SPLITTING THE BATCHES
+================================================================================
+
+WHAT WAS CHANGED
+----------------
+    rtx.geometryAssetHashRuleString = indices,texcoords,geometrydescriptor
+ -> rtx.geometryAssetHashRuleString = indices,geometrydescriptor
+    rtx.conf c4fe6fdeab22424471de6cc3a0be9294 -> cfb7a6e90e7be2b954dbcf6f58393698
+    backup rtx.conf.before-hashrule
+Justified by measurement: over two 60-frame bursts the index-hash and geometry-descriptor flips
+were BOTH ZERO while texcoord flips were 2,416. Texcoords were the only churning component, so
+removing them leaves the only stable rule available.
+
+Checked before changing it, so this is not a guess:
+- The DrawCallCache uses FIXED rules (rules::TopologicalHash / VertexDataHash / FullGeometryHash in
+  rtx_hashing.h), NOT the configurable asset rule - so this changes nothing about caching, BLAS
+  work or performance.
+- Sky detection would be affected (rtx_options.h:194 says skyBoxGeometries uses the asset hash
+  rule) but rtx.conf sets only skyBoxTextures, never skyBoxGeometries - so no sky risk here.
+- Every hash list in rtx.conf (skyBoxTextures, decalTextures, particleTextures, worldSpaceUi*,
+  ignoreLights) is TEXTURE-keyed. Nothing was invalidated.
+
+A CORRECTION THE LEAD MADE TO ITS OWN WARNING
+----------------------------------------------
+The lead first warned that this would collapse all same-size batches onto one hash. That was
+overstated: Remix's DrawCallState::getHash(rule) (rtx_types.h:635) is
+    geometryData.getHashForRule(rule) ^ materialData.getHash()
+and LegacyMaterialData's hash IS the albedo texture's image hash. So the texture remains part of
+the identity, and two batches collide only when they share BOTH the same triangle count AND the
+same texture - much closer to "decals that look the same" than to "all decals".
+
+Also corrected: there was never any per-decal identity to lose. A draw here is a BATCH - 184
+triangles is roughly 90 quads, i.e. dozens of decals under ONE hash - and the game reshuffles
+which decals land in which batch every frame. So the real choice was "a fresh hash every frame
+describing an arbitrary group" versus "a stable hash describing an arbitrary group", not
+"per-decal" versus "shared".
+
+Measured 1:1 mapping confirming the grouping is by batch size: 20 distinct index hashes for 20
+distinct primitive counts (prims=4 -> 22b7fc51f7ee9463, prims=12 -> e0f1a60ebe46c923,
+prims=52 -> c88bea77d09fbe23, prims=620 -> 82139790c4b61e4b, ...).
+
+THE RESULT (user): "while the hashes are more stable. they are not fully stable. they change as
+new ones load."
+------------------------------------------------------------------------------------------------
+That is exactly what the model predicts, and it closes the question. The index-hash component is
+computed over primitiveCount * 3 indices. When a decal loads it JOINS A BATCH, the batch's
+triangle count changes (e.g. 184 -> 192), so the index data covered by the hash changes, so the
+hash changes. Nothing in the rule can prevent that, because the hash describes a batch and the
+batch itself is variable-size.
+
+CONCLUSION - DO NOT KEEP TRYING TO FIX THIS WITH CONFIG: full hash stability for these decals is
+IMPOSSIBLE while the game's variable-size batches pass through as single draws. The only route to
+genuine per-decal, frame-stable identity is for the SHIM TO SPLIT THE BATCHES - emit one draw per
+decal, each with its own stable index/vertex range. That is a real piece of work with a draw-call
+cost and should be scoped deliberately, not bolted on. The current setting is the best a config
+change can do and is worth keeping unless the reduced discrimination bites.
+
+NEW FINDING WHILE INVESTIGATING: REMIX IGNORES THE DECLARED VERTEX WINDOW
+-------------------------------------------------------------------------
+d3d9_rtx.cpp:666
+    geoData.vertexCount = maxIndex - minIndex + 1;
+    vertexIndexOffset += minIndex;
+Remix derives its vertex range PURELY from the index buffer's min/max. DrawContext carries
+MinVertexIndex and NumVertices (d3d9_rtx.h:53-54) and NEITHER IS REFERENCED ANYWHERE in that file.
+So an index outside the window the game declared is faithfully included, its vertex is read, and
+the triangle is built into the BLAS.
+
+That is the delivery mechanism for the 1e10 sentinel documented in the previous entry, and it fits
+the evidence: in both samples the offending vertex index EQUALLED the declared vertex count
+(v=24 -> gv=24, v=76 -> gv=76), i.e. exactly one past the end of the declared window.
+
+Being tested now, in the shim (its build is ~1 minute against Remix's ~10, and three hypotheses
+have already been wrong, so measurement and fix ship together):
+  indexWindowProbe (default ON)  - count converted indexed draws whose indices fall outside
+                                   [MinVertexIndex, MinVertexIndex+NumVertices-1], with the worst
+                                   overshoot and examples. Index-only, never reads positions.
+  indexWindowClamp (default OFF) - for affected draws, issue the draw with a shim-owned index
+                                   buffer in which every triangle referencing an out-of-window
+                                   vertex is collapsed to degenerate (all three indices set to
+                                   MinVertexIndex). Zero-area triangles are never hit by a ray.
+One build answers the rate with the probe, then flipping the clamp in the ini answers whether it
+cures the visuals - no second rebuild.
+
+PROCESS NOTE - ARCHIVE THE LOG
+-------------------------------
+sr3-rtx.log is opened with _fsopen(..., "w") at startup (sr3rtx.cpp:24328), so EVERY RUN
+OVERWRITES IT. The stretchDetect dump blocks from the previous run were lost this way; only the
+lines already quoted into this worklog survived. From now on, copy the log into
+scratchpad/logsnap/ immediately after each run, before the next launch. First archive:
+scratchpad/logsnap/sr3-rtx-2026-09-23-2110-hashrule.log
+
+================================================================================
+SESSION 2026-09-25 - BISECTION BY HIDING SHADER FAMILIES, AND THE BLIND SPOT
+THAT MADE ALL OF IT INCOMPLETE
+================================================================================
+
+WHERE THE ARTIFACT HUNT STOOD
+------------------------------
+The transient stretched polygon survived: the anti-culling fix, the DrawCallCache shape gate,
+the instance-history fix, the index-window clamp (TRIANGLELIST), and the strip/fan expansion
+clamp. The strip clamp DID run (82,254 draws corrected) and its sentinel-proof dump showed the
+out-of-window vertices were NOT 1e10 sentinels but ORDINARY coordinates from elsewhere in the
+shared buffer - e.g. BAD obj(639.022 10.545 141.589) against TYPICAL obj(1219.663 181.113
+1419.627). So those triangles genuinely stretched and removing them was correct, but they were
+not the artifact the user sees.
+
+USER SCREENSHOT (2026-09-24): large flat pale wedges with straight edges cutting through the
+building facades, near-uniform colour. A stretched triangle collapses its UVs to a tiny texture
+region and therefore samples nearly one colour - consistent with "triangle built from vertices
+that do not belong together" rather than a misplaced object.
+
+THE BISECTION TOOL
+------------------
+Added `hideShaderContains` (string, comma-separated substrings, default empty = inert). Any draw
+whose sampler name contains a term is dropped in Classify(). Case-sensitive on purpose:
+Diffuse_mapSampler and Diffuse_MapSampler are different families differing only by one letter's
+case.
+
+RESULTS, each verified against the log's own HIDE-BY-SHADER-NAME counter (see the process note
+below - two reported results turned out to be re-runs of an unchanged config):
+    Diffuse_Map_1Sampler   19.6/frame hidden   -> polygons remained   EXCLUDED
+    Diffuse_mapSampler    192.0/frame hidden   -> polygons remained   EXCLUDED
+    Diffuse_MapSampler   1638.2/frame hidden   -> polygons remained   EXCLUDED
+    IR_GBuffer_DSF_Data     0.0/frame hidden   -> NEVER ACTUALLY TESTED
+
+A BUG IN THE LEAD'S OWN TOOL, FOUND BY READING THE COUNTER
+-----------------------------------------------------------
+IR_GBuffer_DSF_Data matched ZERO draws, which looked like a clean exclusion but was an EMPTY
+TEST. Cause: the rolling draw record's ps= field is g_curPS.firstSampler (RingRecordDraw's own
+strncpy_s at sr3rtx.cpp:14387), but the hide check matched g_curPS.albedoSampler. Every candidate
+name read off a ring record is a FIRST-sampler name. For most families the two coincide; for the
+deferred G-buffer family they do not. The ring also truncates ps= to 19 chars (char ps[20]).
+FIXED: the check now tests BOTH fields and the report breaks each term down by which field
+matched, so a silently-empty test cannot recur. Do not revert this to a single field.
+
+THE BLIND SPOT - USER-POINTER DRAWS WERE NEVER IN ANY OF THIS
+--------------------------------------------------------------
+From the shim's own periodic report:
+    USER-POINTER DRAWS (never hooked before 2026-09-04, so never classified, never in the frame
+    dump): DrawPrimitiveUP 119.3/frame (3292924 total), DrawIndexedPrimitiveUP 0.0/frame
+      of those, the HUD (screen space + depth test OFF) demoted to a UI overlay 36.5/frame
+      depth-tested in-world quads left alone 82.8/frame (2284309 total)
+
+82.8 IN-WORLD, DEPTH-TESTED QUADS PER FRAME come through DrawPrimitiveUP. They are:
+  - NOT in the rolling draw record, so every ring/frame diff performed during this hunt was blind
+    to them (the "draws unique to the artifact frame" analysis could never have seen them);
+  - NOT routed through Classify(), so hideShaderContains cannot hide them and no bisection result
+    so far says anything about them;
+  - issued as Disp::PassThrough (sr3rtx.cpp:14095), i.e. the game's own draw is let through.
+A flat in-world quad is exactly the shape in the user's screenshot.
+
+CAVEAT, NOT YET RESOLVED: whether Remix ray-traces them at all. rtx.useVertexCapture = False, so
+a draw with a vertex shader is not captured as ray-traced geometry - which is precisely why the
+shim REBUILDS the HUD ones as fixed function ("so Remix accepts it with vertex capture OFF").
+If the in-world UP quads carry a vertex shader they would not reach the BVH and cannot be the
+artifact; if they are fixed-function they would. THIS MUST BE CHECKED BEFORE SPENDING ANOTHER RUN
+ON THEM - it is a code question, not a run question.
+
+PROCESS FAILURES WORTH KEEPING
+-------------------------------
+1. TWO reported results were re-runs of an unchanged config. sr3-rtx.log is opened "w" at startup,
+   so its TIMESTAMP is proof of whether a run happened, and the HIDE-BY-SHADER-NAME line is proof
+   of what config it ran with. VERIFY BOTH BEFORE REASONING FROM A RESULT. The lead now makes the
+   ini edits itself rather than handing the user lines to paste.
+2. A counter reading 0.00/frame is not a clean exclusion, it is a broken test. Check that a
+   bisection term actually matched something before believing the result.
+3. The candidate list was built from a data source (the ring) that structurally excludes an entire
+   draw population (user-pointer draws). Before bisecting over a list, check what the list's source
+   cannot see.
+
+================================================================================
+SESSION 2026-09-25 - THE STRETCHED DECALS: STALE vertexCount ON THE INCREMENTAL
+BVH UPDATE PATH. A FIFTH GENUINE UPSTREAM REMIX BUG.
+================================================================================
+
+THE USER SENTENCE THAT CRACKED IT
+----------------------------------
+"the random polygons are the decals stretching as stated before and they happen when the decals
+are churning."
+
+Two facts in one line that the lead had been treating as separate problems: the stray polygons
+ARE the decal stretching, and they are triggered BY THE CHURN. Every previous fix targeted
+IDENTITY - which instance, which cache entry, which index window - and all five missed, because
+the entry match can be perfectly legitimate and the geometry still comes out wrong.
+
+THE BUG, verified by reading (not inferred)
+--------------------------------------------
+SceneManager::processGeometryInfo, rtx_scene_manager.cpp:
+
+  case KBuildBVH:
+      output.vertexCount = input.vertexCount;                                       // line 391
+      output.indexCount  = input.isTopologyRaytraceReady()
+                             ? input.indexCount
+                             : RtxGeometryUtils::getOptimalTriangleListSize(input); // line 396
+      ... creates indexCacheBuffer + historyBuffer[0], uploads BOTH indices and vertices ...
+
+  case kUpdateBVH:
+      ... resizes historyBuffer[0] only if its BYTE SIZE differs, swaps historyBuffer[0]/[1],
+          cacheVertexDataOnGPU, sets previousPositionBuffer ...
+      // NEVER assigns output.vertexCount or output.indexCount
+      // NEVER re-uploads the index buffer
+
+Those two assignments are the ONLY ones in the entire file - grep for output.vertexCount /
+output.indexCount returns lines 391 and 396 and nothing else.
+
+The acceleration structure is then built from that count:
+  rtx_accel_manager.cpp:233 and :271
+      triangleData.maxVertex = blasEntry.modifiedGeometryData.vertexCount - 1;
+
+So when a cached BlasEntry is reused for a draw whose vertex count differs from the one the entry
+was BUILT with, the BLAS is built with a STALE maxVertex over freshly uploaded vertex data of a
+DIFFERENT size. Too large, and the build reads vertices that are not there - stale or
+uninitialised memory - and emits triangles stretched across the world. The cached index buffer is
+likewise never refreshed, so a changed index count leaves indices describing a mesh that no
+longer exists.
+
+WHY THIS FITS WHEN NOTHING ELSE DID
+------------------------------------
+SR3 rebuilds batched world decals into a recycled dynamic buffer every frame, so their vertex and
+index counts change constantly (measured: 3,890 identity churns across 2,165 tracked draws, 2,416
+texcoord flips, index and descriptor hashes both perfectly stable). Every churn that lands on the
+kUpdateBVH path is a chance to build a BLAS with the wrong vertex count. Hence: stretching AT THE
+MOMENT OF CHURN, rare, on the same decal families, independent of camera motion, and visible in
+the Geometry Hash debug view because it is REAL GEOMETRY.
+
+It also explains the partial results. drawcallcache-shape-match.diff DOES compare vertexCount and
+indexCount - but only on the material-hash-only match path. A candidate can still win the
+multi-entry bucket loop on its POSITION-hash or TEXCOORD bonus without passing that gate, and
+exactMatch/vertexDataMatches paths bypass it entirely. So the gate blocked some count-mismatched
+reuses and not others, which is exactly the "it got rarer but did not stop" behaviour observed.
+
+THE FIX (bvh-count-rebuild.diff)
+---------------------------------
+In processGeometryInfo, before the switch: if result == kUpdateBVH and either the incoming vertex
+count or the incoming index count differs from output's current value, promote result to
+KBuildBVH and release the buffers that case asserts are empty (indexCacheBuffer,
+historyBuffer[0], historyBuffer[1]). The incoming index count must be computed with the SAME
+expression KBuildBVH uses, or the comparison mis-triggers on topologies Remix converts.
+
+Fixing at the point of HARM rather than at the point of MATCH is deliberate: it catches every
+route into kUpdateBVH regardless of how the entry was matched, which is precisely what the
+identity-side fixes could not do.
+
+Option: rtx.rebuildBvhOnGeometryCountChange, default true; false restores upstream behaviour.
+
+This is the FIFTH genuine upstream Remix bug found in this project, after the staging leak, the
+skinning normal format, the anti-culling/pinned-entry interaction, and the ignored declared
+vertex window.
+
+STATUS: implemented and building; NOT yet validated in game. Expect a performance cost - churning
+decals will now take full BVH builds where they previously took incremental updates. Measure it.
+
+================================================================================
+SESSION 2026-09-25 - THE ARCHITECTURAL FACT THAT REFRAMES THE WHOLE ARTIFACT
+HUNT: SR3 RECORDS D3D9 CALLS AND REPLAYS THEM ON ANOTHER THREAD
+================================================================================
+
+SOURCE: the user pointed at the TEAM A rendering documentation. It should have been consulted
+at the START of this hunt - there is a standing HARD RULE and a memory (consult-team-a-specs)
+saying exactly that, and the lead spent eight runs and six fixes without opening it.
+D:\Project Crreish\TEAM A\spec-render-pipeline.md  (READ ONLY - never write there)
+
+WHAT THE SPEC ESTABLISHES (all marked CONFIRMED by disassembly in the spec itself)
+-----------------------------------------------------------------------------------
+Section 6, "The Deferred Render-Command-Buffer Architecture":
+  - There is NO per-frame function that walks visible objects and calls D3D9 directly.
+  - The game/logic thread RECORDS opcodes into a growable command buffer (producer, ~58 callers
+    of the reserve helper FUN_0049c890).
+  - A dedicated thread named "rl_command_thread" (FUN_0049dde0) REPLAYS them later, dispatching
+    through a 74-entry opcode table at 0x013509F8.
+  - DrawIndexedPrimitive is OPCODE 42, handler 0x0049D650. It reads six argument dwords back out
+    of the record - PrimitiveType, BaseVertexIndex, MinVertexIndex, NumVertices, startIndex,
+    primCount - and calls vtable +0x148.
+  - EVERY per-draw state call goes through the same table: SetVertexShader, SetPixelShader,
+    SetTexture, SetSamplerState, SetVertexShaderConstantF, SetPixelShaderConstantF. There is no
+    immediate-mode path that bypasses the command buffer.
+  - Resource creation is the exception: CreateVertexDeclaration and buffer/texture creation are
+    called DIRECTLY on the device, not recorded.
+
+WHY THIS MATTERS FOR THE STRETCHED DECALS
+------------------------------------------
+The shim and Remix both hook the DRAW. That hook therefore runs on rl_command_thread, at REPLAY
+time - which is a different thread, and later, than when the game thread wrote the vertex data
+for that draw.
+
+Remix snapshots vertex data at draw time: with rtx.useBuffersDirectly = False,
+m_forceGeometryCopy is true and processVertices memcpys from ctx.mappedSlice.mapPtr - the
+buffer's CURRENT physical slice - at the moment the draw is replayed. If the game thread has
+since called Lock(D3DLOCK_DISCARD) and refilled that buffer for a later batch, the buffer object
+now points at a NEW slice, and Remix copies the WRONG GENERATION of data.
+
+The game itself still renders correctly, because D3D9's DISCARD semantics keep the old allocation
+alive for draws already submitted against it. Only an observer reading the CPU-side mapped
+pointer at replay time sees the newer contents. That observer is Remix.
+
+CORROBORATION ALREADY IN OUR OWN LOGS (not new measurement - it was there all along):
+    VB LOCK HOOK: 447647 invalidations deferred to the render thread, 258551 coalesced
+    (the game locks vertex buffers from more than one thread - see the 2026-08-28 crash)
+The shim measured multi-threaded vertex-buffer locking months ago and it is printed every run.
+
+This explains the shape of every failure in this hunt:
+  - It is REAL geometry (visible in the Geometry Hash view): Remix built a BLAS from real bytes,
+    just the wrong generation of them.
+  - It happens WHEN THE DECALS CHURN: churn IS the game refilling those buffers, which is exactly
+    the window in which record and replay disagree.
+  - It is independent of camera motion, and recurs on the same families.
+  - SIX fixes aimed at identity (anti-culling, cache shape gate, instance history, index window,
+    strip expansion, stale vertexCount) could never have fixed it, because the entry match, the
+    instance and the counts can all be correct while the DATA is from the wrong moment.
+  - It survived hiding every named shader family: hiding changes which draws are submitted, not
+    the record-vs-replay skew of the ones that remain.
+
+NOTE: the stale-vertexCount bug (bvh-count-rebuild.diff, build 7) is still a REAL upstream bug
+found this session and worth keeping - but it is now a second, independent defect rather than
+necessarily the explanation for what the user sees.
+
+WHAT WOULD ACTUALLY FIX IT (not yet implemented - scope this deliberately)
+---------------------------------------------------------------------------
+The shim must hand Remix geometry that matches the RECORDED draw rather than letting Remix read
+the live buffer at replay time. The shim already has every primitive needed:
+  - SnoopCopy captures dynamic buffer contents at Lock/Unlock time, on the writing thread;
+  - it already builds and binds shim-owned buffers (the UV buffer, the shape-bake buffers);
+  - it already tracks per-buffer write/discard generation counters.
+The work is to bind a shim-owned stream-0 snapshot for dynamic draws, taken from the generation
+current when the draw was recorded, so Remix's copy is of the right bytes.
+OPEN QUESTION TO SETTLE FIRST, CHEAPLY: how far apart are record and replay in practice? If the
+replay thread drains within the same frame and the game only discards at frame boundaries, the
+skew may only bite at specific moments - which would match "rare". Measure the skew before
+building the fix.
+
+ALSO NOTED FROM THE SPEC, for future work: the producer-side call site that decides WHEN to
+record an opcode-42 draw and computes its six arguments was NOT identified by TEAM A - it is
+their highest-value OPEN item (spec section 14 item 1). If we ever need to intercept draws at
+RECORD time rather than replay time, that is the function to find.
+
+================================================================================
+SESSION 2026-09-25 - BUILD 7 TESTED: NO CHANGE. THE ARTIFACT IS PARKED.
+================================================================================
+
+RESULT: user, after running fork build 7 (573bb6fda301abe22b37119a923465f7, the stale-vertexCount
+rebuild fix): "there was no change to the stretching artifact."
+
+Performance was fine - 41-48 fps, frame 20.6-24.5 ms, skin 1.78 ms (down from 8.22 earlier in the
+session). The full BVH rebuilds the fix forces on churning decals cost nothing measurable, so the
+fix is cheap to keep.
+
+THE SCOREBOARD - SIX FIXES, NONE FIXED IT
+------------------------------------------
+1. anti-culling off                  - fixed MISPLACED BUILDINGS (a different, real bug)
+2. drawCallCacheRequireShapeMatch    - no change to the artifact
+3. instanceHistoryRequiresPriorFrame - no change
+4. indexWindowClamp (TRIANGLELIST)   - never ran; every affected draw was a strip
+5. indexWindowClampStrips            - ran, 82,254 draws corrected, no change
+6. rebuildBvhOnGeometryCountChange   - no change
+
+Bisection by hiding shader families also excluded, each verified against the log's own counter:
+Diffuse_Map_1Sampler, Diffuse_mapSampler, Diffuse_MapSampler. User-pointer draws excluded by code
+(they carry a vertex shader and rtx.useVertexCapture = False, so they never reach the BVH).
+
+WHAT IS KEPT AND WHY
+--------------------
+All six remain deployed. 2, 3 and 6 are genuine upstream Remix defects found by reading the code
+and are correctness improvements regardless of this artifact; 5 removes 82,254 genuinely malformed
+triangles per run (triangles reaching a vertex outside the draw's declared window, confirmed by
+the sentinel-proof dump to be ordinary coordinates belonging to OTHER geometry) and the user
+reported no holes or missing decals from it. Every one is switchable from rtx.conf or the ini.
+UNPROVEN, flagged as such: drawCallCacheRequireShapeMatch was never confirmed against the
+window-shuffling symptom it was re-enabled for - the user was asked and that run did not report
+back on it. It costs extra BLAS builds. Turn it off first if anything looks wrong later.
+
+THE LEADING THEORY, UNTESTED (see the previous entry for the full derivation)
+------------------------------------------------------------------------------
+SR3 records D3D9 calls into a command buffer and replays them on "rl_command_thread"
+(TEAM A spec-render-pipeline.md section 6, CONFIRMED by disassembly). The draw hook therefore runs
+LATER, on a different thread, than when the game wrote that draw's vertex data. Remix memcpys from
+the buffer's CURRENT mapped slice at replay time, so a discard-and-refill in between means Remix
+copies the WRONG GENERATION of bytes while the game itself still renders correctly.
+That is consistent with every observation: real geometry, at the moment of churn, camera
+independent, immune to all six identity fixes, immune to hiding families, and it also explains the
+unstable PRIMITIVE INDEX hash the user reported (different bytes -> different triangles).
+
+TO TEST IT, IN ORDER:
+  1. CHEAP: add a shim counter measuring the skew between record and replay - specifically, for a
+     dynamic stream-0 buffer, whether its physical slice changed between the draw being recorded
+     and the draw being replayed. If the skew is always zero, the theory is dead and this whole
+     line closes. This is a counter, not a fix; do it before anything else.
+  2. ONLY IF STEP 1 SHOWS SKEW: have the shim bind its own stream-0 snapshot for dynamic draws,
+     taken at the generation current when the draw was recorded. All the primitives exist -
+     SnoopCopy captures at lock time, the shim already binds its own buffers for UVs and shape
+     bakes, and it already keeps per-buffer write/discard generation counters. This is a large
+     change on the hot path for every dynamic draw; scope it deliberately.
+
+PROCESS NOTE: Remix's own Logger output goes NOWHERE - DXVK file logging is off, so
+[RTX-Geometry-Count-Rebuild] and every other Logger::info never reaches a file. Any future Remix
+-side counter must be routed somewhere readable, or set DXVK_LOG_LEVEL/DXVK_LOG_PATH before
+launching, or it is invisible.
+
+================================================================================
+SESSION 2026-09-28 - NEW ISSUE: WORLD SURFACES CHANGE TINT. TEN CANDIDATES
+ELIMINATED, CAUSE STILL OPEN.
+================================================================================
+
+THE SYMPTOM, as the user described and refined it
+--------------------------------------------------
+World textures shift "from dark to bright tinted - not black or white, just tinted".
+  - INDIVIDUAL SURFACES, not the whole screen (so not a post-process).
+  - INSTANT SNAP, not a gradual fade (so not exposure adaptation).
+  - The TEXTURE IS INTACT: detail/pattern still visible, only the tint changes.
+  - Remix's OBJECT PICKER reports the SAME TEXTURE in both states.
+  - Remix's "Diffuse Albedo" debug view SHOWS THE CHANGE - so it is the material, not lighting.
+  - Depends on movement AND camera angle - and CHANGES UNDER PURE ROTATION, standing still.
+
+That last point is the hard constraint and it is anomalous: albedo is a material property and
+must not depend on where the camera is. Either something view-dependent is folded into the
+material, or the debug view is not showing what its name implies.
+
+ELIMINATED (in order, each with the evidence)
+----------------------------------------------
+ 1. Auto-exposure + ACES tonemapping. Killed by the user's own answers: whole-screen and gradual
+    is the signature; this is per-surface and instant.
+ 2. Low-mip texture streaming. TEAM A spec-low-mips.md: type 17 (.cvbl_pc/.gvbl_pc) is a
+    REGISTERED BUT UNUSED type - nothing ships. Killed by reading, no run.
+ 3. Albedo texture swap. The shim's own counter: "churned to a different texture than last frame
+    0/frame" across 1,550 tracked identities. The 10 ALBEDO CHURN examples in the log are early
+    transients, not steady state.
+ 4. Albedo blanking. Only three shaders ever hit it - IR_GBuffer_DSF_DataSampler,
+    Damage_Normal_MapSampler, Dual_Paraboloid_Map_BackSam - all legitimately non-colour passes.
+ 5. The constant-colour path (43-73 draws/frame). Killed by the user: the texture's detail stays
+    visible, so the albedo is not being replaced by a flat constant.
+ 6. Vertex-colour baked lighting. rtx.vertexColorIsBakedLighting divides each component by the
+    largest, which turns a dark vertex colour into a bright hue-preserved one - a perfect verbal
+    match for the symptom. TESTED IN GAME with rtx.ignoreAllVertexColorBakedLighting = True:
+    NO CHANGE. Reverted.
+ 7. The shim's tintFallbackAlbedo path (modulates the texture by a shader constant via TFACTOR).
+    Setting is 0 and the counter reads "tinted fallback 0/frame". Not firing.
+ 8. Stale TEXTUREFACTOR. REAL GAP FOUND AND FIXED: SetupTextureStages' own contract says the
+    register "holds either the opaque alpha for a normal draw or the base colour of a constant-
+    coloured material, and it is written per converted draw. One register, one owner." - but only
+    the two constant-colour branches wrote it; the ordinary textured branch never did, so a normal
+    draw inherited the last constant-colour draw's value. Remix reads that register for EVERY draw
+    (d3d9_rtx_utils.cpp:175) and enables texture-factor blending whenever a live stage's args
+    reference D3DTA_TFACTOR (d3d9_rtx.cpp:963). Fixed via resetTFactorOnTexturedDraws (default 1,
+    writes opaque white - the identity for both documented uses). TESTED: NO CHANGE to the tint.
+    KEPT ANYWAY - it closes a genuine contract violation.
+ 9. Mip selection and anisotropic filtering. rtx.useAnisotropicFiltering defaults true and exists
+    for "less blurring at grazing angles", which matched the angle dependence. TESTED with
+    rtx.nativeMipBias = -16 and rtx.upscalingMipBias = -16 (pins the base mip): NO CHANGE.
+    Reverted.
+10. Leaked texture-stage state. Ruled out by reading: SetupTextureStages disables stages 1-7
+    (D3DTOP_DISABLE on both COLOROP and ALPHAOP) on every converted draw.
+11. Thin-film interference - the one genuinely angle-dependent term in the opaque material.
+    rtx.legacyMaterial.enableThinFilm and .alphaIsThinFilmThickness both default FALSE and
+    rtx.conf sets no rtx.legacyMaterial.* overrides.
+12. Coplanar z-fighting between a decal and its wall. ALREADY DISPROVEN 2026-09-14 and recorded
+    in the ini next to decalOffsetPermille: an exaggerated 30-permille offset made the decal
+    VISIBLY SEPARATE from the wall and the fault persisted. "Z-fighting cannot survive a visible
+    gap." The ini comment explicitly says not to turn those switches back on for this.
+13. Texture coordinate generation (view-dependent UVs would explain rotation dependence exactly).
+    Ruled out by reading: the shim forces D3DTSS_TEXCOORDINDEX = 0 on stage 0, so no generation.
+
+WHAT THE DEBUG VIEW ACTUALLY SHOWS - worth knowing before resuming
+-------------------------------------------------------------------
+DEBUG_VIEW_ALBEDO (geometry_resolver.slangh:785 and :1383) stores
+    opaqueSurfaceMaterialInteractionCreate(polymorphicSurfaceMaterialInteraction).albedo
+i.e. the albedo of the MATERIAL INTERACTION, not the raw material. So anything the interaction
+folds in is included. Thin film is the obvious angle-dependent term and it is off. IF THE HUNT
+RESUMES, START BY READING opaqueSurfaceMaterialInteractionCreate AND ENUMERATING EVERY INPUT IT
+TAKES - the answer is a view-dependent term in there, or the premise "the albedo changes" is
+wrong.
+
+SECOND THING TO CHECK ON RESUMING: pin down what "changes under pure rotation" means precisely.
+Rotating the camera changes which surfaces and which PARTS of a surface are in view, so "the wall
+looks different" can mean "a different part of the wall is in frame". The distinguishing test is
+a single identifiable feature - one window, one sign - watched across a rotation that keeps it on
+screen throughout. If THAT feature's tint changes, the constraint is real and genuinely anomalous.
+If it does not, the whole rotation-dependence line is a misreading and candidate 3 (per-draw state)
+comes back into play.
+
+DEPLOYED STATE AT THE END OF THIS ISSUE
+----------------------------------------
+  sr3-rtx.asi  e8f234b4a2d704ac88c1106867188e72  (adds resetTFactorOnTexturedDraws, default 1)
+  sr3-rtx.ini  8d1ae4932d1e15935d9743ec38bc8ca4
+  rtx.conf     ea92d93bf88f9ebd0d6abd3fa75c385e  (baseline - both diagnostics reverted)
+  .trex/d3d9.dll 573bb6fda301abe22b37119a923465f7 (fork build 7)
+
+PROCESS NOTE: the TFACTOR fix shipped with a counter (g_tfactorReset) but NO REPORT LINE, so the
+log could not show whether it fired and the user had to ask whether the build had even deployed.
+Verified by hash instead. ANY SHIPPED CHANGE MUST PRINT WHAT IT DID - a counter with no reporter
+is not a measurement.
+
+================================================================================
+SESSION 2026-09-29 - TINT: THE SHIM IS EXONERATED. THE CAUSE IS INSIDE REMIX.
+================================================================================
+USER CONFIRMED: the tint shift DOES NOT HAPPEN in the regular (unmodded) game. "it is not
+supposed to change color." So it is a defect introduced by the mod, not the game's own
+view-dependent shading.
+
+THE DECISIVE MEASUREMENT - five full frame dumps (sr3-rtx-frame-25..29, frames 13852, 14067,
+14289, 14557, 14744) taken while the user stood still and ROTATED: camera positions
+89.7-90.1 / 147.5-147.7 / 41.6-41.7, i.e. effectively one position at five view angles.
+Parsed every draw, keyed on (disposition, v, p, pixel-shader, world position, tex0), and diffed
+EVERY key=value field across the five angles, excluding only the cam()/proj() group.
+    identities present in >= 3 of the 5 dumps: 574
+    fields that changed across the rotations:
+        bake   1 draw  (a skinned character's morph-bake counter)
+        pal    1 draw  (a skinned character's bone-palette offset)
+        s0off  1 draw  (a depth-only draw that is SKIPPED and never reaches Remix)
+NOTHING about any world surface changed: textures, stage ops, UV transform (ttff=2 on all 843
+converted draws, su/sv constant), blend, depth, alpha args, albedo stage - all byte-identical.
+A separate pass keyed on the texture transform alone: 167 identities in >=3 dumps, 0 changed.
+
+CONCLUSION: the shim hands Remix CONSTANT state for every world surface across view angles, yet
+Remix's "Diffuse Albedo" view changes with angle. The view-dependence is produced INSIDE REMIX
+from constant inputs. Stop investigating shim-side material/stage/UV state for this bug.
+
+REMIX-SIDE TERMS ALREADY RULED OUT: decal material blending (tested off, no change), thin film
+(off), mip/anisotropic sampling (pinned to base mip, no change), vertex-colour baked lighting
+(tested, no change). Not yet examined: primary-surface resolution through alpha-tested or
+translucent layers (a ray that passes a cutout at one angle and not another lands on a different
+surface - which would change the pixel's albedo without any input changing), and anything the
+frame dump does not record, notably VERTEX DATA (positions/normals/texcoords are not in the dump).
+
+AFFECTED-TEXTURE SAMPLES from the user (Remix hashes; removed from config, kept as identifiers):
+    0x30E812E37ED7FF71   0x9BDD710C6151F1EE   -0xE2B21CEFD47CE275
+The frame dump records D3D9 texture POINTERS, not Remix hashes, so these cannot yet be matched to
+draws - a hash<->pointer map would be the first tool to build if this resumes.
+
+################################################################################
+SESSION SUMMARY 2026-09-22 TO 2026-09-30 - A MAP OF THIS WHOLE SESSION
+Read this first. Every item below has a detailed dated entry ABOVE it in this file.
+################################################################################
+
+DEPLOYED AT THE END OF THE SESSION (all hash-verified)
+------------------------------------------------------
+  sr3-rtx.asi     e8f234b4a2d704ac88c1106867188e72   710,656 bytes
+  sr3-rtx.ini     8d1ae4932d1e15935d9743ec38bc8ca4
+  sr3-rtx.map     1ac4832bc212c325055f2b554c003718
+  rtx.conf        ea92d93bf88f9ebd0d6abd3fa75c385e   clean baseline, all diagnostics reverted
+  .trex/d3d9.dll  573bb6fda301abe22b37119a923465f7   190,481,920 = OUR FORK BUILD 7
+Fork diffs in C:\remix-fork\: staging-release, skinning-normal-format, drawcallcache-shape-match,
+  instance-history-requires-prior-frame, bvh-count-rebuild, identity-pinning (dormant),
+  build-environment-workarounds. rtx_options.h hunks OVERLAP between the newer ones.
+
+1. FIXED AND CONFIRMED BY THE USER
+----------------------------------
+- MISPLACED BUILDINGS. Root cause: rtx.antiCulling.object.enable = True in the ORIGINAL SR3
+  rtx.conf (Remix's default is False). An anti-culled instance pins its BlasEntry; DrawCallCache
+  buckets on indices+geometrydescriptor only and accepts a MATERIAL match alone, so another
+  decal's draw overwrites the pinned entry's vertices. Fix: set it False. Confirmed solved.
+  (Carried from earlier in the session and documented there: the overlay, bracelet/lens, floating
+  car parts, the 25 GB staging leak, hard shading on GPU-skinned characters, ~2x performance.)
+
+2. GENUINE REMIX DEFECTS FOUND BY READING THE CODE (all in NVIDIA's shipped build)
+----------------------------------------------------------------------------------
+  a. RtxStagingDataAlloc acquire never released -> 32 MiB leak per fill.  [fixed, PROVEN]
+  b. Skinning kernel reads normals as float regardless of format -> hard shading.  [fixed, PROVEN]
+  c. Anti-culling pins BlasEntries that DrawCallCache then reuses across unrelated draws.
+  d. processVertices ignores the draw's declared MinVertexIndex/NumVertices
+     (d3d9_rtx.cpp:666 derives the range from the INDEX BUFFER alone) - DrawContext carries both
+     fields and neither is ever read. SR3 references exactly one vertex past the window (measured
+     4.67 draws/frame, overshoot always 1, all triangle STRIPS).
+  e. processGeometryInfo assigns output.vertexCount/indexCount ONLY in KBuildBVH; kUpdateBVH
+     re-uploads vertices but builds the BLAS with the STALE maxVertex
+     (rtx_accel_manager.cpp:233/271). Fixed as rebuildBvhOnGeometryCountChange. Did NOT fix the
+     artifact, but it is a real bug.
+  Plus one SHIM bug: SetupTextureStages violated its own documented "one register, one owner"
+  contract - the ordinary textured branch never wrote TEXTUREFACTOR, so it inherited the last
+  constant-colour draw's value. Fixed as resetTFactorOnTexturedDraws=1.
+  NOT YET REPORTED UPSTREAM. Also: onSceneObjectUpdated asserts result != KBuildBVH, which (e)'s
+  fix can now return - fine in release, would trip a debug build.
+
+3. PARKED - THE STRETCHED-DECAL ARTIFACT (one-frame flat polygon at decal churn)
+--------------------------------------------------------------------------------
+Confirmed REAL GEOMETRY (visible in the Geometry Hash debug view, which has no temporal pass).
+SIX FIXES, NONE WORKED: shape-match gate; instance history; index-window clamp (never ran - every
+affected draw was a strip); strip/fan expansion clamp (ran, 82,254 draws corrected); stale
+vertexCount rebuild; hiding every named shader family by bisection. User-pointer draws excluded
+by code (they carry a vertex shader; useVertexCapture=False keeps them out of the BVH).
+LEADING UNTESTED THEORY, from TEAM A spec-render-pipeline.md section 6: SR3 RECORDS D3D9 calls and
+REPLAYS them on "rl_command_thread" (DrawIndexedPrimitive = opcode 42). Remix copies the buffer's
+CURRENT mapped slice at replay time, so a discard-and-refill between record and replay copies the
+wrong generation. Corroborated by the shim's own long-standing log line "the game locks vertex
+buffers from more than one thread". NEXT: a cheap record-vs-replay skew counter BEFORE any fix.
+
+4. DECAL HASH INSTABILITY - AS GOOD AS CONFIGURATION CAN MAKE IT
+----------------------------------------------------------------
+Measured: index and descriptor flips ZERO, texcoord flips 2,416, identity churn 3,890 of 2,165.
+SR3 rebuilds batched world decals into a recycled dynamic buffer each frame. Removed texcoords from
+rtx.geometryAssetHashRuleString (now indices,geometrydescriptor): much more stable, not fully -
+the hash covers a BATCH and loading a decal changes the batch's triangle count. Full stability
+needs the shim to split batches into one draw per decal. There was never per-decal identity to
+lose: one draw is dozens of decals.
+
+5. OPEN - WORLD SURFACES CHANGE TINT (long-standing, predates the session)
+--------------------------------------------------------------------------
+Some surfaces (not all) shift to a DARK tint; texture intact; object picker reports the same
+texture; visible in the Diffuse Albedo view; changes under PURE ROTATION. Does NOT happen in the
+unmodded game - a mod-introduced defect. FOURTEEN candidates eliminated (list in the 2026-09-28
+entry). DECISIVE RESULT (2026-09-29): five frame dumps at one position and five view angles; of
+574 draws present in >=3 dumps, only three fields changed, none on a world surface. THE SHIM
+HANDS REMIX BYTE-IDENTICAL STATE ACROSS VIEW ANGLES - the view-dependence is created INSIDE REMIX.
+NEXT: ask whether affected surfaces involve a cutout/translucent layer (a ray passing a cutout at
+one angle and not another changes the pixel's albedo with no input changing); build a Remix-hash
+to D3D9-pointer map so the user's sample hashes (0x30E812E37ED7FF71, 0x9BDD710C6151F1EE,
+-0xE2B21CEFD47CE275) can be matched to draws.
+
+6. OPEN - CHARACTER BODY/HEAD COLOUR MISMATCH
+---------------------------------------------
+Concrete, unexplored lead from the asset-hash probe: the SAME mesh at the SAME position binds a
+DIFFERENT albedo within ONE frame (DUP examples at 3,400 and 291 prims - body and head).
+
+7. REUSABLE TOOLS BUILT THIS SESSION (all behind ini/rtx.conf switches, default-safe)
+-------------------------------------------------------------------------------------
+Shim:  assetHashProbeWorld / assetHashProbeAlbedo (probe widened + albedo component);
+       stretchDetect (+ threshold-independent histogram and top-5; off - it costs fps);
+       indexWindowProbe / indexWindowClamp / indexWindowClampStrips;
+       hideShaderContains (bisection; matches BOTH firstSampler and albedoSampler);
+       resetTFactorOnTexturedDraws.
+Remix: rtx.drawCallCacheRequireShapeMatch, rtx.instanceHistoryRequiresPriorFrame,
+       rtx.rebuildBvhOnGeometryCountChange.
+Scratchpad parsers: ring_unique_vs_all.py (draws unique to an artifact frame vs the other 59),
+       allfields_diff.py (every field of every draw across several frame dumps),
+       uvxform_across_dumps.py, ring_diff_artifact.py.
+
+8. PROCESS LESSONS - EACH COST REAL RUNS BEFORE IT WAS LEARNED
+---------------------------------------------------------------
+- CONSULT TEAM A FIRST. spec-render-pipeline.md reframed the artifact hunt in one read after
+  eight runs and six fixes without it; spec-low-mips.md killed a tint theory with no run.
+- READ THE CODE FOR WHERE A THING CAN LEGITIMATELY HAPPEN. The rotation test proved albedo was
+  view-dependent, which eliminated most candidates at once and led to the exoneration result.
+- A single user sentence repeatedly did more than a build: "they happen when the decals are
+  churning", "it happens on the geometry hash view", "same texture even in object picker",
+  "yes, just by rotation", "it does not happen in the regular game". ASK FOR THE SYMPTOM.
+- VERIFY A RESULT BEFORE REASONING FROM IT. sr3-rtx.log is opened "w" each launch: its TIMESTAMP
+  proves a run happened and the relevant counter line proves which config. Two reported results
+  were re-runs of an unchanged config; one "exclusion" was an empty test.
+- A counter reading 0.00/frame is a BROKEN TEST, not a clean exclusion.
+- Anything shipped must PRINT what it did. A counter with no report line is not a measurement -
+  the user had to ask whether a build had even deployed.
+- Before bisecting over a candidate list, check what the list's SOURCE cannot see. The ring
+  record excludes user-pointer draws, and its ps= field is firstSampler truncated to 19 chars.
+- The Remix UI REWRITES rtx.conf when the user tags a texture - it also silently dropped
+  rtx.profiler.memory.enable and reordered decalTextures. Diff before restoring a hash.
+- Remix's Logger output goes NOWHERE (DXVK file logging off). Route Remix-side counters elsewhere.
+- Convert raw-string newlines to CRLF in patch scripts (18 lone LFs once - caught, restored).
+- Delegation worked best when a subagent PUSHED BACK with a line citation: it correctly refused a
+  previousPositionBuffer reset I asked for, proving from line 375 that the value was already
+  cleared before the switch.

@@ -628,6 +628,52 @@ struct Settings {
     // g_tightRefuseWidenBeyondBuffer), so this can never declare a vertex that does not exist.
     // OFF restores today's refuse-and-fall-back for an A/B.
     bool widenUnderDeclaredWindow = true;
+    // INDEX WINDOW PROBE - THE 1e10 SLIVER, measured and dated: SR3 hides an unused world-decal
+    // quad by parking its vertices at exactly 1e10 (float bytes F9 02 15 50, seen in the Y or Z
+    // slot of an otherwise ordinary vertex) so the rasteriser clips it away; nothing clips a
+    // path-traced triangle, so it appears as a sliver stretched across the screen for one frame -
+    // confirmed real geometry in Remix's Geometry Hash debug view. Two independent samples found
+    // the offending vertex INDEX equal to the draw's own declared NumVertices (v=24 -> bad vertex
+    // gv=24; v=76 -> bad vertex gv=76) - exactly one past the end of [MinVertexIndex,
+    // MinVertexIndex+NumVertices). Remix never looks at that declared window at all:
+    // dxvk-remix/src/d3d9/d3d9_rtx.cpp:666 computes geoData.vertexCount purely from the bound
+    // index buffer's own min/max (DrawContext DOES carry MinVertexIndex/NumVertices,
+    // d3d9_rtx.h:53-54, but neither is referenced anywhere in that file) - so the sentinel vertex
+    // is faithfully included and its triangle gets built. This is the MEASUREMENT half: for every
+    // CONVERTED indexed draw, is the referenced index range actually inside the declared window.
+    // Cheap by construction: a RIGID (non-skinned) draw reuses the g_tightWin entry
+    // TightenConvertedWindow (above) already Locked and cached for this exact identity a few
+    // lines earlier in Hook_DrawIndexedPrimitive - one hash-map lookup, no extra Lock. Only a
+    // SKINNED draw, which TightenConvertedWindow deliberately never touches, pays for a fresh
+    // min/max-only scan (no allocation, no hashing - see ScanIndexMinMaxCheap). ON by default:
+    // see CheckIndexWindow's own comment, above Hook_DrawIndexedPrimitive, for the full picture.
+    bool indexWindowProbe = true;
+    // INDEX WINDOW CLAMP - the fix. OFF (the default): measured only, every draw issued exactly
+    // as today, byte for byte. ON: a converted, non-skinned, D3DPT_TRIANGLELIST draw the probe
+    // above found referencing an out-of-window index is re-issued from a SHIM-OWNED index buffer
+    // in which every triangle touching that index has all three of its own indices replaced with
+    // MinVertexIndex - a zero-area triangle, never hit by a ray, harmless under rasterisation.
+    // Narrowing or widening the WINDOW parameter (widenUnderDeclaredWindow, above) cannot fix
+    // this bug: Remix ignores that parameter completely (see the comment above), so only
+    // rewriting the actual index VALUES removes the sliver. Primitive count, vertex window and
+    // every other draw parameter are left exactly as the game declared them - see
+    // IssueIndexWindowClampedDraw's own comment for exactly what changes and what does not.
+    bool indexWindowClamp = false;
+    // INDEX WINDOW CLAMP, STRIPS AND FANS (indexWindowClampStrips) - default OFF, so today's
+    // deployed indexWindowClamp=1 keeps behaving byte for byte the same until this is switched on
+    // separately. MEASURED in game, first run with indexWindowProbe+indexWindowClamp both on:
+    // 864.5/frame examined, 4.67/frame had an index OUTSIDE the declared window (worst overshoot
+    // 1 - always the sentinel-at-NumVertices case, see CheckIndexWindow's own comment), and
+    // 266342 flagged draws over that run were left uncorrected because EVERY one of them was a
+    // D3DPT_TRIANGLESTRIP or D3DPT_TRIANGLEFAN - IssueIndexWindowClampedDraw's own
+    // TRIANGLELIST-only restriction means the fix above never actually ran. ON: a flagged
+    // strip/fan is first EXPANDED into an explicit triangle list in the same shim-owned ring the
+    // TRIANGLELIST path already uses (see ExpandStripOrFanToTriangleList's own comment for the
+    // winding fix a strip needs and a fan does not), then collapsed triangle-by-triangle exactly
+    // the way a native TRIANGLELIST draw already is - no separate collapse logic, no separate
+    // counters (g_iwcDrawsCorrected/g_iwcTrianglesCollapsed cover both). OFF leaves a flagged
+    // strip/fan counted apart in g_iwcTopologyRefused and issued unchanged, same as today.
+    bool indexWindowClampStrips = false;
     // ORPHAN SWEEP (2026-09-21): every pointer-keyed cache in this file AddRefs a game-owned
     // resource so a recycled address can never be handed an old buffer's cached data - correct,
     // but for STATIC resources the only release paths were "the game writes the buffer again"
@@ -689,6 +735,23 @@ struct Settings {
     // returns on its first line.
     bool assetHashProbe = true;
     int assetHashProbeFrames = 60;       // frames captured per F9-armed burst
+    // ASSET HASH PROBE WORLD: the probe above only ever sampled decal-named or skinned draws, on
+    // the unverified assumption that a plain building surface (a window, a wall - never decal-
+    // named, never skinned) would not need watching. OFF by default so ProbeAssetHash's filter is
+    // BIT-FOR-BIT identical to before; ON, it additionally admits any other non-skinned converted
+    // draw that binds an albedo texture, so the hypothesis that building geometry churns Remix's
+    // Geometry Hash can actually be measured rather than assumed away. See ProbeAssetHash's own
+    // comment for the exact three-way OR.
+    bool assetHashProbeWorld = false;
+    // ASSET HASH PROBE ALBEDO: the probe above reproduced two of Remix's three geometry-hash
+    // inputs (indices, texcoords/descriptor) but never the MATERIAL half - materialData.getHash()
+    // in Remix's own drawCall.getHash() XOR is simply the albedo texture's image hash, and this
+    // shim was never recording which texture it bound as albedo for a probed draw, let alone
+    // whether that identity changed frame to frame. ON by default: reuses EffectiveAlbedo()'s own
+    // selection (g_lastEffectiveAlbedo) rather than re-deriving it, costs one pointer compare and
+    // a couple of short strncpy_s calls per probed draw, and is the whole point of this pass - see
+    // ProbeAssetHash's cur.albedoOk/albedoHash and LogAssetHashProbeSummary's TOP CHURNER block.
+    bool assetHashProbeAlbedo = true;
     // Frame stepping: frameStepPauseKey (F7) freezes the game at Present with the frame on
     // screen; frameStepKey (F8) releases exactly one frame; every stepped frame gets a full
     // frame dump when frameStepDumpEachStep=1; the capture key still writes the rolling
@@ -756,6 +819,25 @@ struct Settings {
     // every build before 2026-08-27 did.
     bool applyMorph = true;
     bool tintFallbackAlbedo = false;  // OFF: measured to darken clothing, see SetupTextureStages
+    // RESET TEXTUREFACTOR ON A NORMAL TEXTURED DRAW. SetupTextureStages' own contract, stated in
+    // the comment above BeginFFP's D3DRS_LIGHTING block, is that TEXTUREFACTOR "holds either the
+    // opaque alpha for a normal draw or the base colour of a constant-coloured material, and it is
+    // written per converted draw. One register, one owner." The constant-colour and tint-fallback
+    // branches below DO write it. The ordinary textured branch never did - so a normal draw
+    // inherited whatever the LAST constant-colour draw left in the register.
+    //
+    // That matters because Remix reads the register for EVERY draw
+    // (d3d9_rtx_utils.cpp:175, materialData.tFactor = renderStates[D3DRS_TEXTUREFACTOR]) and turns
+    // on texture-factor blending whenever any live texture stage's args reference D3DTA_TFACTOR
+    // (d3d9_rtx.cpp:963). A stale colour left in that register therefore tints a textured surface
+    // whose own stage setup never asked for it, and WHICH draw leaks onto which depends on draw
+    // ORDER - so the tint changes as the camera moves and turns, which is exactly the reported
+    // symptom: same texture (confirmed with Remix's object picker), detail intact, only the tint
+    // changing, distance and angle dependent.
+    //
+    // Opaque white is the identity for both uses: as a colour it is a no-op modulate, and its
+    // alpha is the opaque alpha the contract asks for. 0 restores the leak for an A/B.
+    bool resetTFactorOnTexturedDraws = true;
     bool skinRigidSingleBone = true;  // ON by default as of 2026-09-17, synced to the deployed ini - 0 means cars do not render; the "correlated with clothing vanishing" concern that shipped this OFF is unresolved, see GetBaseMesh
     // Any frame at or above this many ms writes one line partitioning where the time went.
     // 40 ms is ~2.3 frames at the measured 58 fps: long enough that the player sees a hitch,
@@ -792,6 +874,36 @@ struct Settings {
     // RIGHT moment on every frame instead of by camera-angle accident. Default ON: this is the
     // permanent fix, not a tuning knob.
     bool injectControl = true;
+    // STRETCH DETECT: hunts the one-frame "world decals stretch across the screen" bug by
+    // finding the CONVERTED draw that does it and dumping everything about it - see
+    // ProbeStretchDetect's own comment, above Hook_DrawIndexedPrimitive, for the full story.
+    // OFF by default: this is a diagnostic aimed at one bug, not a permanent behaviour.
+    bool stretchDetect = false;
+    // World-space AABB diagonal (game units) above which a converted draw is "stretched".
+    // Steelport's own geometry runs to the low thousands (MeasureWorldExtent's own comment,
+    // above); 5000 is comfortably past any real object while still well short of "the whole
+    // map", which is what this bug actually produces.
+    int stretchDetectUnits = 5000;
+    // Hard cap on dump BLOCKS written to the log, not on detection itself - flagged draws are
+    // still counted past this cap (see g_stretchDetectFlagged), only the Log() calls stop, so a
+    // systemic false positive cannot flood the log the way an uncapped version would.
+    int stretchDetectDumps = 20;
+
+    // hideShaderContains - DIAGNOSTIC bisection switch, not a fix. This project is hunting a
+    // TRANSIENT artifact: a large flat polygon that appears for a frame or two, stretching
+    // across the screen and intersecting buildings. Aggregate measurements have repeatedly
+    // pointed at populations that turned out not to be the thing on screen, so instead of
+    // measuring again this ELIMINATES: name a shader family by its ALBEDO SAMPLER here (a
+    // comma-separated list of substrings) and every draw that carries it is hidden -
+    // Disp::Hide, the same disposition HiddenDisp's case 1 already uses, so the draw still
+    // executes for the engine but never reaches the path tracer - instead of converted. Run
+    // with and without a name in this list and see whether the artifact stops. EMPTY by
+    // default: the feature is then completely inert (see the check inside Classify, which
+    // costs one length test when this list is empty). See that check for why the match is
+    // case-sensitive.
+    static constexpr int kMaxHideShaderTerms = 8;
+    char hideShaderTerms[kMaxHideShaderTerms][32] = {};  // trimmed substrings, parsed in LoadSettings
+    int hideShaderTermCount = 0;
 } g_settings;
 
 void LoadSettings() {
@@ -940,6 +1052,9 @@ void LoadSettings() {
     g_settings.tightenWindowPinIndexBuffers = flag("tightenWindowPinIndexBuffers", true);
     g_settings.tightWinEvictByAge = flag("tightWinEvictByAge", true);
     g_settings.widenUnderDeclaredWindow = flag("widenUnderDeclaredWindow", true);
+    g_settings.indexWindowProbe = flag("indexWindowProbe", true);
+    g_settings.indexWindowClamp = flag("indexWindowClamp", false);
+    g_settings.indexWindowClampStrips = flag("indexWindowClampStrips", false);
     g_settings.orphanSweep = flag("orphanSweep", true);
     g_settings.orphanSweepFrames = static_cast<int>(num("orphanSweepFrames", 120));
     g_settings.orphanSweepReportOnly = flag("orphanSweepReportOnly", false);
@@ -951,6 +1066,8 @@ void LoadSettings() {
     g_settings.ringFrames = static_cast<int>(num("ringFrames", 60));
     g_settings.assetHashProbe = flag("assetHashProbe", true);
     g_settings.assetHashProbeFrames = static_cast<int>(num("assetHashProbeFrames", 60));
+    g_settings.assetHashProbeWorld = flag("assetHashProbeWorld", false);
+    g_settings.assetHashProbeAlbedo = flag("assetHashProbeAlbedo", true);
     g_settings.frameStepPauseKey = static_cast<int>(num("frameStepPauseKey", 0x76));
     g_settings.frameStepKey = static_cast<int>(num("frameStepKey", 0x77));
     g_settings.frameStepDumpEachStep = flag("frameStepDumpEachStep", true);
@@ -974,11 +1091,15 @@ void LoadSettings() {
     g_settings.morphBakeMaxPerFrame = num("morphBakeMaxPerFrame", 2);
     g_settings.morphProbe = flag("morphProbe", false);
     g_settings.tintFallbackAlbedo = flag("tintFallbackAlbedo", false);
+    g_settings.resetTFactorOnTexturedDraws = flag("resetTFactorOnTexturedDraws", true);
     g_settings.skinRigidSingleBone = flag("skinRigidSingleBone", true);
     g_settings.hiddenPassMode = num("hiddenPassMode", 2);
     g_settings.blockEngineOutputToScreen = flag("blockEngineOutputToScreen", true);
     g_settings.injectProbe = flag("injectProbe", true);
     g_settings.injectControl = flag("injectControl", true);
+    g_settings.stretchDetect = flag("stretchDetect", false);
+    g_settings.stretchDetectUnits = static_cast<int>(num("stretchDetectUnits", 5000));
+    g_settings.stretchDetectDumps = static_cast<int>(num("stretchDetectDumps", 20));
     {
         char list[128]{};
         if (!checkPresent("probeVerts"))
@@ -989,6 +1110,32 @@ void LoadSettings() {
              tok && g_settings.probeVertCount < 8; tok = strtok_s(nullptr, ", \t", &ctx)) {
             const int v = atoi(tok);
             if (v > 0) g_settings.probeVerts[g_settings.probeVertCount++] = v;
+        }
+    }
+    {
+        // Reuses the exact mechanism probeVerts (immediately above) reads its list with -
+        // GetPrivateProfileStringA into a local buffer, then split by hand - because that is
+        // the only string-list reader this file already has; inventing a second one for the
+        // same job would be the thing worth avoiding. Unlike probeVerts this is SUBSTRINGS,
+        // not numbers, and split on ',' ONLY (not space/tab too, unlike probeVerts), so
+        // trimming below is unambiguous about what is delimiter and what is whitespace to
+        // strip from an entry's ends.
+        char list[256]{};
+        if (!checkPresent("hideShaderContains"))
+            Log("ini: key 'hideShaderContains' ABSENT - using built-in default (empty - feature inert)");
+        GetPrivateProfileStringA("sr3-rtx", "hideShaderContains", "", list, sizeof(list), path);
+        char* ctx = nullptr;
+        for (char* tok = strtok_s(list, ",", &ctx);
+             tok && g_settings.hideShaderTermCount < Settings::kMaxHideShaderTerms;
+             tok = strtok_s(nullptr, ",", &ctx)) {
+            while (*tok == ' ' || *tok == '\t') ++tok;              // trim leading whitespace
+            size_t len = strlen(tok);
+            while (len > 0 && (tok[len - 1] == ' ' || tok[len - 1] == '\t' ||
+                                tok[len - 1] == '\r' || tok[len - 1] == '\n'))
+                tok[--len] = '\0';                                  // trim trailing whitespace
+            if (len > 0)   // ignore empty entries (",," or a trailing comma)
+                strncpy_s(g_settings.hideShaderTerms[g_settings.hideShaderTermCount++], tok,
+                          sizeof(g_settings.hideShaderTerms[0]) - 1);
         }
     }
 
@@ -2304,6 +2451,7 @@ unsigned g_frames = 0;
 
 // Statistics.
 unsigned g_drawsTotal = 0, g_ffpConverted = 0, g_albedoBlanked = 0, g_albedoMoved = 0;
+unsigned g_tfactorReset = 0;   // resetTFactorOnTexturedDraws: normal textured draws given opaque white
 // FIX B: draws routed to alpha-from-texture in SetupTextureStages because the chosen albedo
 // sampler names a Decal map AND the draw is genuinely blended by its FACTORS - not merely
 // alpha-test cutouts (shaderCutout already counts those separately). See decalAlphaFromTexture.
@@ -7711,6 +7859,13 @@ void SetupTextureStages(IDirect3DDevice9* dev) {
         ++g_tintedAlbedo;
     } else {
         ShadowSetTSS(dev, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        // Honour this function's own "one register, one owner" contract for the ordinary textured
+        // draw too - see resetTFactorOnTexturedDraws' comment in Settings for why a stale value
+        // here tints a surface that never asked for it, and why the tint tracks camera movement.
+        if (g_settings.resetTFactorOnTexturedDraws) {
+            ShadowSetRS(dev, D3DRS_TEXTUREFACTOR, 0xFFFFFFFF);
+            ++g_tfactorReset;
+        }
         // Which texture is about to carry colour: the same rule EffectiveAlbedo() applies for
         // a real texture pick (named colour sampler by rank, else raw stage 0 with no shader
         // reflection to guide it), duplicated narrowly rather than called, because
@@ -9236,6 +9391,17 @@ void ResetCommandBlocks() {
     g_cmdBlockCount = 0;
 }
 
+// HIDE-BY-SHADER-NAME counters (hideShaderContains) - see that setting's own comment in
+// struct Settings, and the check inside Classify, for what this exists to answer. Never
+// touched while the list is empty, so a run that is not using this diagnostic reports 0
+// here and prints no report line for it (see the periodic report in Hook_Present).
+unsigned long long g_hideShaderContainsHidden = 0;                                    // total, all terms combined
+unsigned long long g_hideShaderContainsHitCount[Settings::kMaxHideShaderTerms] = {};   // per matched substring
+// Which FIELD matched, per term - so a bisection result says whether a family was caught by
+// its albedo sampler, its first sampler, or both. See the comment on the check in Classify().
+unsigned long long g_hideShaderContainsByAlbedo[Settings::kMaxHideShaderTerms] = {};
+unsigned long long g_hideShaderContainsByFirst[Settings::kMaxHideShaderTerms] = {};
+
 Disp Classify(IDirect3DDevice9* dev) {
     g_dispReason = "converted";
     g_markClearAllStages = false;
@@ -9252,6 +9418,55 @@ Disp Classify(IDirect3DDevice9* dev) {
         ApplyCameraOnly(dev);
         return Because("cameraOnly: camera handed to Remix, draw left untouched",
                        Disp::PassThrough);
+    }
+
+    // HIDE-BY-SHADER-NAME (hideShaderContains): bisection-by-elimination for the transient
+    // large flat polygon this project is hunting (see the setting's own comment in struct
+    // Settings). Placed here, immediately after cameraOnly - early enough that a hidden draw
+    // does none of the classification work below (sky, screen-space, skinning, MRT, ...), but
+    // only AFTER cameraOnly's own return, because cameraOnly's whole contract is "nothing
+    // skipped, nothing hidden, nothing replaced" (see its comment above BeginFFP) and this
+    // diagnostic must not be the thing that breaks that guarantee. g_curPS.albedoSampler is
+    // already fully resolved by this point: it is set from the shader's CTAB when
+    // Hook_SetPixelShader binds the shader, not per draw, so it is exactly as valid here at
+    // Classify's entry as it is anywhere else in this function.
+    //
+    // CASE-SENSITIVE ON PURPOSE - strstr, not StrStrIA. Diffuse_mapSampler and
+    // Diffuse_MapSampler differ by exactly one letter's case and are DIFFERENT shader
+    // families (ring-record analysis narrowed the artifact to exactly this trio); the whole
+    // point of this tool is to tell them apart, so a case-insensitive match would defeat it
+    // outright. Plain substring matching is safe with this list: Diffuse_MapSampler is not a
+    // substring of anything else this project has named, and Diffuse_Map_1Sampler does NOT
+    // contain Diffuse_MapSampler - the "_1" sits between "Map" and "Sampler" so the
+    // characters differ - so the short name can never silently swallow the long one. Do not
+    // loosen this to a case-insensitive or fuzzier match without re-checking that property.
+    //
+    // MATCH BOTH firstSampler AND albedoSampler. Measured 2026-09-25, the hard way: the rolling
+    // draw record's ps= field is g_curPS.firstSampler (see RingRecordDraw's own strncpy_s), NOT
+    // albedoSampler, so every candidate name read off a ring record is a FIRST-sampler name. For
+    // most families the two coincide and matching either works, but they genuinely differ for the
+    // deferred G-buffer family: a term of "IR_GBuffer_DSF_Data" taken from a ring record matched
+    // 0.00 draws/frame against albedoSampler alone, silently producing an empty test that looked
+    // like a clean exclusion. Testing both fields is what makes a name copied out of a ring record
+    // mean what the reader thinks it means. Also note the ring truncates ps= to 19 characters
+    // (char ps[20]), so a name read from there may be a prefix - substring matching handles that,
+    // which is another reason not to tighten this into an exact compare.
+    if (g_settings.hideShaderTermCount && g_curPS.isPixelShader) {
+        for (int i = 0; i < g_settings.hideShaderTermCount; ++i) {
+            const char* term = g_settings.hideShaderTerms[i];
+            const bool byAlbedo = g_curPS.albedoSampler[0] && strstr(g_curPS.albedoSampler, term);
+            const bool byFirst  = g_curPS.firstSampler[0] && strstr(g_curPS.firstSampler, term);
+            if (byAlbedo || byFirst) {
+                ++g_hideShaderContainsHidden;
+                ++g_hideShaderContainsHitCount[i];
+                if (byAlbedo) ++g_hideShaderContainsByAlbedo[i];
+                if (byFirst)  ++g_hideShaderContainsByFirst[i];
+                return Because(byAlbedo
+                                   ? "hideShaderContains: albedo sampler matched a bisection term"
+                                   : "hideShaderContains: first sampler matched a bisection term",
+                               Disp::Hide);
+            }
+        }
     }
 
     // ---------------------------------------------------------------- the rasterized-frame invariant
@@ -21302,12 +21517,24 @@ struct AssetHashSecondaryHash {
 // can reach; the HASH above always covers every unique vertex regardless.
 struct AssetHashUvSample { UINT gv; float u, v; };
 constexpr unsigned kHashProbeUvSampleCap = 64;
+// TOP CHURNERS (assetHashProbeAlbedo): distinct albedo pointers remembered per identity across a
+// burst, for LogAssetHashProbeSummary's top-churner report. Small on purpose - this is "which
+// textures did we see", not a full history.
+constexpr unsigned kHashProbeAlbedoPtrCap = 4;
 
 struct AssetHashComponents {
     bool indexOk = false;   unsigned long long indexHash = 0; UINT indexLo = 0, indexHi = 0;
     bool descOk = false;    unsigned long long descHash = 0;
     bool convOk = false;    unsigned long long convHash = 0;   // texcoords the shim INTENDS Remix to read
     bool srcOk = false;     unsigned long long srcHash = 0;    // raw source texcoords, pre-conversion
+    // THE MATERIAL HALF (assetHashProbeAlbedo): Remix's drawCall.getHash() XORs the geometry hash
+    // above with materialData.getHash(), which is simply the albedo texture's image hash. This
+    // shim cannot compute Remix's own image hash, but the bound texture's IDENTITY changing frame
+    // to frame is a necessary condition for that hash to change - so the bound albedo POINTER
+    // (reused from EffectiveAlbedo()'s own g_lastEffectiveAlbedo, not re-derived here) stands in
+    // for it. "Hash" only to match the four fields above; it is the raw pointer value, and a null
+    // pointer (no albedo bound) is itself a valid, comparable identity.
+    bool albedoOk = false;  unsigned long long albedoHash = 0;
     // uvStatic/uvDynamic/native/skinRingCPU/skinFF/raw-short2-fallback/not-reproducible
     char path[24] = "";
     const char* refuseWhy = nullptr;   // set on the INDEX component only ("dynamic IB, not read", etc.)
@@ -21320,6 +21547,14 @@ struct AssetHashState {
     unsigned lastDrawFrame = 0xFFFFFFFFu;
     int cls = 0;   // 0 decal-named, 1 skinned-CPU, 2 skinned-FF
     std::vector<AssetHashUvSample> uvSample;   // last draw's converted uv, ascending global vertex
+    // TOP CHURNERS (assetHashProbeAlbedo) - see LogAssetHashProbeSummary's own comment. Updated
+    // every draw of this identity, not only on a flip, so an identity that never flips still
+    // reports correctly if it ever needs to.
+    unsigned flipCount = 0;                 // cross-frame flip events this burst (any component)
+    char firstSampler[28] = "";             // g_curPS.firstSampler as of this identity's last draw
+    char albedoSamplerName[28] = "";        // g_curPS.albedoSampler (the winning colour map) likewise
+    IDirect3DBaseTexture9* albedoPtrsSeen[kHashProbeAlbedoPtrCap] = {};
+    unsigned albedoPtrCount = 0;            // distinct pointers recorded above, capped at kHashProbeAlbedoPtrCap
 };
 
 struct AssetHashDetailRecord {
@@ -21328,9 +21563,9 @@ struct AssetHashDetailRecord {
     UINT numVerts, primCount;
     void* ib; UINT startIndex; UINT primitiveCount; void* vb; UINT streamOffset; INT baseVertex;
     float at[3];
-    bool indexDiff, descDiff, convDiff, srcDiff, pathDiff;
+    bool indexDiff, descDiff, convDiff, srcDiff, albedoDiff, pathDiff;
     unsigned long long oldIndexHash, newIndexHash, oldDescHash, newDescHash, oldConvHash, newConvHash,
-        oldSrcHash, newSrcHash;
+        oldSrcHash, newSrcHash, oldAlbedoHash, newAlbedoHash;
     char oldPath[24], newPath[24];
     char uvDetail[160];   // "first differing vertex N: (u0,v0) -> (u1,v1)", or "" if not available
     bool sameFrame;       // true: a same-frame duplicate with a different hash, not a cross-frame flip
@@ -21357,8 +21592,8 @@ std::vector<AssetHashExample> g_hashProbeChurnExamples;
 
 unsigned g_hashProbeIdentitiesSeen[3] = {0, 0, 0};
 unsigned g_hashProbeIdentitiesFlipped[3] = {0, 0, 0};
-// component order: 0 index, 1 descriptor, 2 texcoord-conversion, 3 texcoord-source
-unsigned g_hashProbeFlipsByComponent[3][4] = {};
+// component order: 0 index, 1 descriptor, 2 texcoord-conversion, 3 texcoord-source, 4 albedo
+unsigned g_hashProbeFlipsByComponent[3][5] = {};
 unsigned g_hashProbeFlipsByPath[3] = {0, 0, 0};
 unsigned g_hashProbeChurnCount[3] = {0, 0, 0};
 unsigned g_hashProbeDupSameFrame[3] = {0, 0, 0};
@@ -21377,7 +21612,7 @@ void ResetAssetHashProbeBurst() {
     for (int c = 0; c < 3; ++c) {
         g_hashProbeIdentitiesSeen[c] = 0;
         g_hashProbeIdentitiesFlipped[c] = 0;
-        for (int k = 0; k < 4; ++k) g_hashProbeFlipsByComponent[c][k] = 0;
+        for (int k = 0; k < 5; ++k) g_hashProbeFlipsByComponent[c][k] = 0;
         g_hashProbeFlipsByPath[c] = 0;
         g_hashProbeChurnCount[c] = 0;
         g_hashProbeDupSameFrame[c] = 0;
@@ -21392,7 +21627,12 @@ void LogAssetHashProbeSummary() {
     const unsigned framesCovered = (g_frames > g_hashProbeArmFrame)
                                        ? (g_frames - g_hashProbeArmFrame)
                                        : static_cast<unsigned>(g_settings.assetHashProbeFrames);
-    static const char* kClsName[3] = {"decal-named", "skinned-CPU", "skinned-FF "};
+    // cls 0's label depends on assetHashProbeWorld: OFF, it only ever holds decal-named draws (the
+    // original filter); ON, ProbeAssetHash's widened filter also drops plain textured world draws
+    // into the SAME bucket (see worldCandidate there) - not "static" any more because the label
+    // has to say which population is actually in it.
+    const char* kClsName[3] = {g_settings.assetHashProbeWorld ? "decal/world" : "decal-named",
+                               "skinned-CPU", "skinned-FF "};
     unsigned totalSeen = 0, totalFlipped = 0;
     for (int c = 0; c < 3; ++c) {
         totalSeen += g_hashProbeIdentitiesSeen[c];
@@ -21411,15 +21651,16 @@ void LogAssetHashProbeSummary() {
         if (!g_hashProbeIdentitiesSeen[c] && !g_hashProbeChurnCount[c] && !g_hashProbeDupSameFrame[c])
             continue;
         Log("    class %s: identities=%u flipped=%u (%.1f%%) | flips by component: index=%u "
-            "descriptor=%u texcoord-conversion=%u texcoord-source=%u | draws whose PATH changed=%u "
-            "| identity churn (same secondary key, different identity)=%u | same identity drawn "
-            "more than once this frame with a different hash=%u",
+            "descriptor=%u texcoord-conversion=%u texcoord-source=%u albedo=%u | draws whose PATH "
+            "changed=%u | identity churn (same secondary key, different identity)=%u | same "
+            "identity drawn more than once this frame with a different hash=%u",
             kClsName[c], g_hashProbeIdentitiesSeen[c], g_hashProbeIdentitiesFlipped[c],
             g_hashProbeIdentitiesSeen[c]
                 ? 100.0 * g_hashProbeIdentitiesFlipped[c] / g_hashProbeIdentitiesSeen[c]
                 : 0.0,
             g_hashProbeFlipsByComponent[c][0], g_hashProbeFlipsByComponent[c][1],
             g_hashProbeFlipsByComponent[c][2], g_hashProbeFlipsByComponent[c][3],
+            g_hashProbeFlipsByComponent[c][4],
             g_hashProbeFlipsByPath[c], g_hashProbeChurnCount[c], g_hashProbeDupSameFrame[c]);
     }
     unsigned shown = 0;
@@ -21428,31 +21669,64 @@ void LogAssetHashProbeSummary() {
         ++shown;
         Log("    %s #%u [%s]: ps='%s' v=%u p=%u | ib=%p start=%u prims=%u vb=%p off=%u baseVtx=%d | "
             "at(%.2f %.2f %.2f) | index %s(%llx->%llx) desc %s(%llx->%llx) texConv %s(%llx->%llx) "
-            "texSrc %s(%llx->%llx) | path '%s'->'%s'%s%s",
-            d.sameFrame ? "SAME-FRAME DUP" : "FLIP", shown,
-            d.cls == 0 ? "decal-named" : (d.cls == 1 ? "skinned-CPU" : "skinned-FF"), d.ps,
+            "texSrc %s(%llx->%llx) albedo %s(%llx->%llx) | path '%s'->'%s'%s%s",
+            d.sameFrame ? "SAME-FRAME DUP" : "FLIP", shown, kClsName[d.cls], d.ps,
             d.numVerts, d.primCount, d.ib, d.startIndex, d.primitiveCount, d.vb, d.streamOffset,
             d.baseVertex, d.at[0], d.at[1], d.at[2], d.indexDiff ? "CHANGED" : "same",
             d.oldIndexHash, d.newIndexHash, d.descDiff ? "CHANGED" : "same", d.oldDescHash,
             d.newDescHash, d.convDiff ? "CHANGED" : "same", d.oldConvHash, d.newConvHash,
-            d.srcDiff ? "CHANGED" : "same", d.oldSrcHash, d.newSrcHash, d.oldPath, d.newPath,
-            d.uvDetail[0] ? " | " : "", d.uvDetail);
+            d.srcDiff ? "CHANGED" : "same", d.oldSrcHash, d.newSrcHash,
+            d.albedoDiff ? "CHANGED" : "same", d.oldAlbedoHash, d.newAlbedoHash,
+            d.oldPath, d.newPath, d.uvDetail[0] ? " | " : "", d.uvDetail);
     }
     unsigned shownDup = 0;
     for (const auto& e : g_hashProbeDupExamples) {
         if (shownDup >= kHashProbeExampleCap) break;
         ++shownDup;
         Log("    DUP EXAMPLE #%u [%s]: ps='%s' at(%.2f %.2f %.2f) prims=%u | %s", shownDup,
-            e.cls == 0 ? "decal-named" : (e.cls == 1 ? "skinned-CPU" : "skinned-FF"), e.ps,
-            e.at[0], e.at[1], e.at[2], e.primCount, e.note);
+            kClsName[e.cls], e.ps, e.at[0], e.at[1], e.at[2], e.primCount, e.note);
     }
     unsigned shownChurn = 0;
     for (const auto& e : g_hashProbeChurnExamples) {
         if (shownChurn >= kHashProbeExampleCap) break;
         ++shownChurn;
         Log("    CHURN EXAMPLE #%u [%s]: ps='%s' at(%.2f %.2f %.2f) prims=%u | %s", shownChurn,
-            e.cls == 0 ? "decal-named" : (e.cls == 1 ? "skinned-CPU" : "skinned-FF"), e.ps,
-            e.at[0], e.at[1], e.at[2], e.primCount, e.note);
+            kClsName[e.cls], e.ps, e.at[0], e.at[1], e.at[2], e.primCount, e.note);
+    }
+    // TOP CHURNERS (assetHashProbeAlbedo): everything above says HOW MANY draws changed and BY
+    // WHICH component; this names WHICH identities changed most, with the two inputs Remix's own
+    // drawCall-hash XOR is built from side by side - the pixel shader and albedo sampler that drew
+    // them, and every distinct albedo texture pointer this identity was seen bound to across the
+    // burst. Off (assetHashProbeAlbedo=0), st.flipCount/firstSampler/albedoSamplerName/
+    // albedoPtrsSeen are never populated (see ProbeAssetHash), so this block is skipped rather
+    // than print an all-zero table.
+    if (g_settings.assetHashProbeAlbedo) {
+        std::vector<const AssetHashState*> churners;
+        try {
+            churners.reserve(g_hashProbeIdentities.size());
+            for (const auto& kv : g_hashProbeIdentities)
+                if (kv.second.flipCount) churners.push_back(&kv.second);
+            std::sort(churners.begin(), churners.end(),
+                      [](const AssetHashState* a, const AssetHashState* b) {
+                          return a->flipCount > b->flipCount;
+                      });
+        } catch (...) { churners.clear(); }
+        unsigned shownTop = 0;
+        for (const AssetHashState* st : churners) {
+            if (shownTop >= kHashProbeExampleCap) break;
+            ++shownTop;
+            char ptrs[4 * 20] = "";
+            size_t off = 0;
+            for (unsigned i = 0; i < st->albedoPtrCount && off + 20 < sizeof(ptrs); ++i) {
+                const int n = _snprintf_s(ptrs + off, sizeof(ptrs) - off, _TRUNCATE, "%s%p",
+                                          i ? ", " : "", static_cast<void*>(st->albedoPtrsSeen[i]));
+                if (n > 0) off += static_cast<size_t>(n);
+            }
+            Log("    TOP CHURNER #%u [%s]: flips=%u | pixel shader='%s' albedo sampler='%s' | "
+                "albedo pointers seen: %s",
+                shownTop, kClsName[st->cls], st->flipCount, st->firstSampler, st->albedoSamplerName,
+                ptrs[0] ? ptrs : "(none recorded)");
+        }
     }
 }
 
@@ -21466,8 +21740,11 @@ void ArmAssetHashProbe() {
     g_hashProbeEndFrame = g_frames + static_cast<unsigned>(g_settings.assetHashProbeFrames) - 1u;
     g_hashProbeActive = true;
     Log("ASSET HASH PROBE armed: next %d frames, every CONVERTED draw whose albedo names a Decal "
-        "map or that is skinned - see the ASSET HASH PROBE summary at the end of the burst",
-        g_settings.assetHashProbeFrames);
+        "map or that is skinned%s - see the ASSET HASH PROBE summary at the end of the burst",
+        g_settings.assetHashProbeFrames,
+        g_settings.assetHashProbeWorld
+            ? " (assetHashProbeWorld ON: plus any other non-skinned draw with a bound albedo)"
+            : "");
 }
 
 void TickAssetHashProbeBurst() {
@@ -21759,7 +22036,14 @@ void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex
     const bool decalNamed = g_curPS.isPixelShader && g_curPS.albedoSampler[0] &&
                             StrStrIA(g_curPS.albedoSampler, "Decal") != nullptr;
     const bool isSkinned = g_curLayout.skinned;
-    if (!decalNamed && !isSkinned) return;
+    // assetHashProbeWorld: with it OFF this adds nothing - worldCandidate is always false, so the
+    // line below reduces to exactly the original "if (!decalNamed && !isSkinned) return;". With it
+    // ON, a non-skinned draw that binds SOME albedo (g_lastEffectiveAlbedo, already fresh for THIS
+    // draw - EffectiveAlbedo() runs earlier in BeginFFP, before this hook) is admitted too, even
+    // when its shader names nothing "Decal": a building's wall/window material never matched
+    // decalNamed and was never skinned, so it was never sampled at all until now.
+    const bool worldCandidate = g_settings.assetHashProbeWorld && !isSkinned && g_lastEffectiveAlbedo;
+    if (!decalNamed && !isSkinned && !worldCandidate) return;
 
     const LONGLONG t0 = Now();
     // A skinned draw that took neither skin path never reaches here as Disp::Convert (the caller
@@ -21800,14 +22084,25 @@ void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex
     cur.srcOk = uv.srcOk; cur.srcHash = uv.srcHash;
     strcpy_s(cur.path, uv.path);
 
+    // THE MATERIAL HALF (assetHashProbeAlbedo): reuses EffectiveAlbedo()'s own pick rather than
+    // re-deriving which sampler wins - g_lastEffectiveAlbedo is already fresh for THIS draw, set
+    // earlier in BeginFFP before this hook ever runs. Recorded even when null: "no albedo bound"
+    // is itself a stable identity, and a flip into or out of null is exactly the kind of churn
+    // this exists to catch.
+    cur.albedoOk = g_settings.assetHashProbeAlbedo;
+    cur.albedoHash = cur.albedoOk ? static_cast<unsigned long long>(
+                                        reinterpret_cast<uintptr_t>(g_lastEffectiveAlbedo))
+                                  : 0;
+
     const bool sameFrame = (st.lastDrawFrame == g_frames);
     if (st.hasLast) {
         const bool indexDiff = cur.indexOk && st.last.indexOk && cur.indexHash != st.last.indexHash;
         const bool descDiff = cur.descOk && st.last.descOk && cur.descHash != st.last.descHash;
         const bool convDiff = cur.convOk && st.last.convOk && cur.convHash != st.last.convHash;
         const bool srcDiff = cur.srcOk && st.last.srcOk && cur.srcHash != st.last.srcHash;
+        const bool albedoDiff = cur.albedoOk && st.last.albedoOk && cur.albedoHash != st.last.albedoHash;
         const bool pathDiff = strcmp(cur.path, st.last.path) != 0;
-        if (indexDiff || descDiff || convDiff || srcDiff || pathDiff) {
+        if (indexDiff || descDiff || convDiff || srcDiff || albedoDiff || pathDiff) {
             if (sameFrame) {
                 ++g_hashProbeDupSameFrame[cls];
                 if (g_hashProbeDupExamples.size() < kHashProbeExampleCap) {
@@ -21816,17 +22111,20 @@ void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex
                     strncpy_s(e.ps, g_curPS.albedoSampler, _TRUNCATE);
                     e.at[0] = g_lastWorld._41; e.at[1] = g_lastWorld._42; e.at[2] = g_lastWorld._43;
                     e.primCount = primitiveCount;
-                    _snprintf_s(e.note, _TRUNCATE, "%s%s%s%schanged within the same frame",
+                    _snprintf_s(e.note, _TRUNCATE, "%s%s%s%s%schanged within the same frame",
                                 indexDiff ? "index " : "", descDiff ? "descriptor " : "",
-                                (convDiff || srcDiff) ? "texcoord " : "", pathDiff ? "path " : "");
+                                (convDiff || srcDiff) ? "texcoord " : "", albedoDiff ? "albedo " : "",
+                                pathDiff ? "path " : "");
                     try { g_hashProbeDupExamples.push_back(e); } catch (...) {}
                 }
             } else {
                 if (!st.everFlipped) { st.everFlipped = true; ++g_hashProbeIdentitiesFlipped[cls]; }
+                ++st.flipCount;   // TOP CHURNERS: every cross-frame flip, any component, this burst
                 if (indexDiff) ++g_hashProbeFlipsByComponent[cls][0];
                 if (descDiff) ++g_hashProbeFlipsByComponent[cls][1];
                 if (convDiff) ++g_hashProbeFlipsByComponent[cls][2];
                 if (srcDiff) ++g_hashProbeFlipsByComponent[cls][3];
+                if (albedoDiff) ++g_hashProbeFlipsByComponent[cls][4];
                 if (pathDiff) ++g_hashProbeFlipsByPath[cls];
                 if (g_hashProbeDetail.size() < kHashProbeDetailCap) {
                     AssetHashDetailRecord d{};
@@ -21837,11 +22135,12 @@ void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex
                     d.vb = g_stream0; d.streamOffset = g_stream0Offset; d.baseVertex = baseVertex;
                     d.at[0] = g_lastWorld._41; d.at[1] = g_lastWorld._42; d.at[2] = g_lastWorld._43;
                     d.indexDiff = indexDiff; d.descDiff = descDiff; d.convDiff = convDiff;
-                    d.srcDiff = srcDiff; d.pathDiff = pathDiff;
+                    d.srcDiff = srcDiff; d.albedoDiff = albedoDiff; d.pathDiff = pathDiff;
                     d.oldIndexHash = st.last.indexHash; d.newIndexHash = cur.indexHash;
                     d.oldDescHash = st.last.descHash; d.newDescHash = cur.descHash;
                     d.oldConvHash = st.last.convHash; d.newConvHash = cur.convHash;
                     d.oldSrcHash = st.last.srcHash; d.newSrcHash = cur.srcHash;
+                    d.oldAlbedoHash = st.last.albedoHash; d.newAlbedoHash = cur.albedoHash;
                     strncpy_s(d.oldPath, st.last.path, _TRUNCATE);
                     strncpy_s(d.newPath, cur.path, _TRUNCATE);
                     d.uvDetail[0] = '\0';
@@ -21873,6 +22172,17 @@ void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex
     st.hasLast = true;
     st.lastDrawFrame = g_frames;
     st.uvSample = uv.sample;
+    // TOP CHURNERS bookkeeping (assetHashProbeAlbedo): which shader/sampler last drew this
+    // identity, and every distinct albedo pointer it has been bound to this burst.
+    if (g_settings.assetHashProbeAlbedo) {
+        strncpy_s(st.firstSampler, g_curPS.firstSampler, _TRUNCATE);
+        strncpy_s(st.albedoSamplerName, g_curPS.albedoSampler, _TRUNCATE);
+        bool seenPtr = false;
+        for (unsigned i = 0; i < st.albedoPtrCount; ++i)
+            if (st.albedoPtrsSeen[i] == g_lastEffectiveAlbedo) { seenPtr = true; break; }
+        if (!seenPtr && st.albedoPtrCount < kHashProbeAlbedoPtrCap)
+            st.albedoPtrsSeen[st.albedoPtrCount++] = g_lastEffectiveAlbedo;
+    }
 
     // Secondary key: same visible object, different identity = the game rebuilt the draw.
     AssetHashSecondaryKey sk{g_lastEffectiveAlbedo, AssetHashRoundCm(g_lastWorld._41),
@@ -21900,6 +22210,910 @@ void ProbeAssetHash(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex
     }
 
     g_hashProbeMs += MsSince(t0);
+}
+
+// ================================================================== STRETCH DETECT
+// THE BUG: world decals "stretch across the screen" for exactly one frame when they load,
+// unload or reload. Confirmed real geometry - the stretched shape shows in Remix's own
+// Geometry Hash debug view, which is written per-pixel from the primary ray hit with no
+// temporal accumulation to blame - and confirmed NOT the three suspects already disproven:
+// Remix's DrawCallCache reusing an entry, Remix's instance-history/previous-position buffer,
+// and this shim's own WORLDMATRIX(0)/D3DTS_WORLD aliasing (UnbindSkinFF restores it
+// unconditionally and SkinViaFixedFunction has no refuse path after its staging loop). So for
+// one frame, some draw hands Remix a vertex position or a transform that places a triangle
+// across a huge swathe of the world. The reported population: batched world decals, the
+// 'uvDynamic' path, world space, identity-ish transform, 12-234 triangles, a shared dynamic
+// vertex buffer.
+//
+// This is the detector, not the fix - find the draw ITSELF, on the frame it happens, and dump
+// everything about it, so no human reflex has to catch a one-frame event. stretchDetect gates
+// all of it; OFF (the default) costs one bool test at the call site, above ProbeAssetHash's
+// own call, and this function is never entered.
+//
+// READ-ONLY, the same rule ProbeAssetHash's own comment states above it: every buffer here is
+// either locked D3DLOCK_READONLY (a STATIC source) or read from the existing snoop copy (a
+// DYNAMIC source, via SnoopCopy) - never a direct Lock of a dynamic buffer. Binds nothing,
+// issues no draw, changes no render state.
+//
+// WHY A NEW READ: UvBufferFor and ReadRigidTexcoordsRaw already walk this draw's vertices for
+// TEXCOORD; nothing in this file already walks them for POSITION the same safe way, so this
+// adds ONE new pass (ReadRigidPositionsRaw, below) - modelled line for line on
+// ReadRigidTexcoordsRaw's own dynamic-snoop/static-lock split, just at g_curLayout.posOffset.
+// Everything else is reused rather than re-derived: ComputeAssetHashIndexComponent supplies
+// the unique referenced-vertex list (the very same index-buffer read ProbeAssetHash performs
+// for this population when assetHashProbe is on - the two probes are gated independently and
+// cost each other nothing), ComputeAssetHashUvComponent supplies the PATH tag unchanged,
+// GetBaseMesh supplies the CPU-skin bind pose from its existing decoded cache (not a device
+// read at all), and IsFinite/TransformPoint are the same helpers ApplyTransforms and
+// MeasureWorldExtent already use.
+//
+// MeasureWorldExtent (above, near g_extentReports) already tried to answer this exact question
+// and is why this is not built the same way: it read-locks g_stream0 UNCONDITIONALLY, without
+// checking IsDynamicVB first - one of "roughly a dozen probes" the g_settings comment above
+// vbUnlockOwnerThread names as a known hazard class (a DYNAMIC buffer's pending game-thread
+// Lock consumed by this shim's own internal Unlock, the proximate cause of the September 14
+// crash on a different buffer). It also only SAMPLES (a stride of numVertices/32) rather than
+// scanning every vertex the draw references, so a single-vertex corruption can be stepped
+// clean over, and it reports one scalar with no vertex identity - nothing to grep for. This
+// fixes all three: dynamic-safe, exhaustive over the draw's own referenced vertices, and names
+// the vertex.
+
+// Raw bytes for exactly one vertex's POSITION field, captured at the moment it is decoded - no
+// second read. 12 bytes is the float3 every converted draw is guaranteed to have: BeginFFP's
+// own "position not float3/float4 in stream 0" gate (see its comment, above) refuses anything
+// else before a draw can ever reach Disp::Convert, so nothing that reaches this probe needs a
+// short/compressed branch the way ReadRigidTexcoordsRaw needs one for texcoords.
+struct StretchVertexRaw { unsigned char b[12]; };
+
+// Mirrors ReadRigidTexcoordsRaw exactly - same dynamic-snoop/static-lock split, same
+// D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK flags and g_internal guard - just reading POSITION
+// instead of a texcoord. rawOut is filled in the same pass so the worst vertex's raw bytes
+// cost nothing extra to keep.
+bool ReadRigidPositionsRaw(const std::vector<UINT>& globalVerts, int posOffset, UINT stride,
+                           bool dynamicSrc, std::vector<D3DVECTOR>* out,
+                           std::vector<StretchVertexRaw>* rawOut) {
+    if (globalVerts.empty() || !g_stream0 || !stride) return false;
+    const UINT lo = globalVerts.front(), hi = globalVerts.back();
+    const UINT span = hi - lo + 1;
+    if (span == 0 || span > 2000000) return false;
+    try { out->resize(globalVerts.size()); rawOut->resize(globalVerts.size()); }
+    catch (...) { return false; }
+    if (dynamicSrc) {
+        std::vector<unsigned char> staging;
+        try { staging.resize(static_cast<size_t>(span) * stride); } catch (...) { return false; }
+        bool fresh = false;
+        if (!SnoopCopy(g_stream0, g_stream0Offset + lo * stride, staging.data(),
+                       static_cast<UINT>(staging.size()), &fresh) ||
+            !fresh)
+            return false;
+        for (size_t i = 0; i < globalVerts.size(); ++i) {
+            const UINT rel = globalVerts[i] - lo;
+            const unsigned char* p = staging.data() + static_cast<size_t>(rel) * stride + posOffset;
+            const float* pf = reinterpret_cast<const float*>(p);
+            (*out)[i] = D3DVECTOR{pf[0], pf[1], pf[2]};
+            memcpy((*rawOut)[i].b, p, sizeof(StretchVertexRaw::b));
+        }
+        return true;
+    }
+    if (!VertexRangeFits(g_stream0, g_stream0Offset, lo, span, stride)) return false;
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* m = nullptr;
+    const HRESULT hr = g_stream0->Lock(g_stream0Offset + lo * stride, span * stride, &m,
+                                       D3DLOCK_READONLY | D3DLOCK_NOSYSLOCK);
+    if (FAILED(hr) || !m) { g_internal = wasInt; return false; }
+    const unsigned char* base = static_cast<const unsigned char*>(m);
+    for (size_t i = 0; i < globalVerts.size(); ++i) {
+        const UINT rel = globalVerts[i] - lo;
+        const unsigned char* p = base + static_cast<size_t>(rel) * stride + posOffset;
+        const float* pf = reinterpret_cast<const float*>(p);
+        (*out)[i] = D3DVECTOR{pf[0], pf[1], pf[2]};
+        memcpy((*rawOut)[i].b, p, sizeof(StretchVertexRaw::b));
+    }
+    g_stream0->Unlock();
+    g_internal = wasInt;
+    return true;
+}
+
+unsigned long long g_stretchDetectChecked = 0;     // converted draws actually scanned
+unsigned long long g_stretchDetectUnreadable = 0;  // no position data AND a finite matrix - no verdict possible
+unsigned long long g_stretchDetectFlagged = 0;     // flagged, all-time - NOT capped by stretchDetectDumps
+unsigned g_stretchDetectDumped = 0;                // Log() blocks actually written, capped at stretchDetectDumps
+
+// THE DISTRIBUTION: stretchDetectUnits (the flag threshold) is a guess dressed as a default -
+// nothing before this measured the LEGITIMATE world-AABB diagonal spread of a batched world
+// decal, so there was no evidence to set it from. This answers that independently of the
+// threshold, in the same run that hunts the bug: every scanned draw with a computable diagonal
+// (nFinite>0 - the ones with no position data at all are already counted apart, in
+// g_stretchDetectUnreadable, and cannot contribute a diagonal) feeds both a histogram and a
+// top-5 table, flagged or not. Both are O(1) per draw and allocate nothing on the draw path -
+// see StretchHistBucket and StretchTopInsert, called from ProbeStretchDetect right after diag
+// is computed.
+constexpr int kStretchHistBuckets = 8;
+// Upper edge of every bucket but the last: [0-10) [10-100) [100-500) [500-1000) [1000-2000)
+// [2000-5000) [5000-20000) [20000+) - the task's own bucket list, verbatim.
+constexpr float kStretchHistEdges[kStretchHistBuckets - 1] = {
+    10.0f, 100.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 20000.0f};
+unsigned long long g_stretchHist[kStretchHistBuckets] = {};
+
+int StretchHistBucket(float diag) {
+    for (int i = 0; i < kStretchHistBuckets - 1; ++i)
+        if (diag < kStretchHistEdges[i]) return i;
+    return kStretchHistBuckets - 1;
+}
+
+// THE TOP 5 largest world-AABB diagonals ever scanned, flagged or not - a fixed array updated
+// in place (insertion sort over 5 elements), never a heap allocation. diag<0 marks an empty
+// slot, which sorts below every real draw (a real diagonal is never negative) so the array
+// fills left-to-right before anything is ever evicted.
+struct StretchTopEntry {
+    float diag = -1.0f;
+    char ps[28] = "";
+    UINT v = 0, p = 0;
+    char path[24] = "";
+    D3DVECTOR worldMin{}, worldMax{};
+};
+StretchTopEntry g_stretchTop5[5];
+
+void StretchTopInsert(float diag, const char* ps, UINT v, UINT p, const char* path,
+                      const D3DVECTOR& wMin, const D3DVECTOR& wMax) {
+    if (diag <= g_stretchTop5[4].diag) return;   // does not beat the current 5th place
+    int pos = 4;
+    while (pos > 0 && g_stretchTop5[pos - 1].diag < diag) {
+        g_stretchTop5[pos] = g_stretchTop5[pos - 1];
+        --pos;
+    }
+    StretchTopEntry& e = g_stretchTop5[pos];
+    e.diag = diag;
+    strncpy_s(e.ps, ps, _TRUNCATE);
+    e.v = v; e.p = p;
+    strncpy_s(e.path, path, _TRUNCATE);
+    e.worldMin = wMin; e.worldMax = wMax;
+}
+
+void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex, UINT minIndex,
+                        UINT numVertices, UINT startIndex, UINT primitiveCount, bool skinnedLocal,
+                        bool skinnedFFLocal, const FFPScope& scope) {
+    ++g_stretchDetectChecked;
+    const D3DMATRIX& world = g_lastWorld;
+    const bool worldFinite = IsFinite(world);
+
+    // Reused, not re-derived: the same IB read ProbeAssetHash performs for this population
+    // when assetHashProbe is on - gated independently, so the two probes pay for this once
+    // each.
+    const AssetHashIndexResult idx =
+        ComputeAssetHashIndexComponent(g_curIB, type, startIndex, primitiveCount);
+    std::vector<UINT> gv;
+    if (idx.ok && !idx.uniqueRaw.empty()) {
+        try {
+            gv.reserve(idx.uniqueRaw.size());
+            for (const UINT v : idx.uniqueRaw) {
+                const long long g = static_cast<long long>(baseVertex) + static_cast<long long>(v);
+                if (g < 0 || g > 0xFFFFFFFFll) continue;
+                gv.push_back(static_cast<UINT>(g));
+            }
+        } catch (...) { gv.clear(); }
+    }
+
+    // THE PATH TAG: exactly what ProbeAssetHash's own UV component computes for this identical
+    // draw, reused verbatim so a stretch dump and an asset-hash dump name the same draw the
+    // same way instead of inventing a second taxonomy for one bug hunt.
+    const AssetHashUvResult uvPath = ComputeAssetHashUvComponent(
+        idx.uniqueRaw, baseVertex, minIndex, numVertices, skinnedLocal, skinnedFFLocal, scope);
+
+    std::vector<D3DVECTOR> obj, worldPos;
+    std::vector<StretchVertexRaw> raw;
+    std::vector<UINT> gvFinal;   // kept in lockstep with obj[]/raw[] - NOT always == gv (the
+                                 // skinRingCPU branch below can skip an out-of-window index)
+    bool havePositions = false;
+    const char* posSource = "unavailable";
+
+    if (!gv.empty()) {
+        if (skinnedLocal) {
+            // THE CPU RING (SkinAndBind) writes into g_skinVB, DYNAMIC|WRITEONLY - never
+            // safely readable: the hard rule is no direct Lock of a dynamic buffer, and
+            // WRITEONLY makes a read meaningless even where the driver tolerates it. The
+            // nearest safe substitute is the BIND POSE GetBaseMesh already decoded and cached
+            // for SkinAndBind's own use - an already-in-memory array, not a device Lock at
+            // all - which is this mesh BEFORE this draw's bone transform. Good enough to catch
+            // a corrupt SOURCE mesh or a corrupt WORLD matrix; BLIND to a corruption introduced
+            // by the skin arithmetic itself. Said here rather than guessed past: inventing a
+            // read of the ring would break the hard rule, and pretending this proxy sees
+            // everything would be worse than saying so.
+            posSource = "bind pose (pre-skin proxy - the CPU ring itself is not readable)";
+            const long long fv = static_cast<long long>(baseVertex) + static_cast<long long>(minIndex);
+            const BaseMesh* mesh = (fv >= 0) ? GetBaseMesh(static_cast<UINT>(fv), numVertices) : nullptr;
+            if (mesh && mesh->verts.size() == numVertices) {
+                try {
+                    obj.reserve(gv.size()); raw.reserve(gv.size()); gvFinal.reserve(gv.size());
+                    for (const UINT g : gv) {
+                        if (g < minIndex || g >= minIndex + numVertices) continue;
+                        const BaseVertex& b = mesh->verts[g - minIndex];
+                        obj.push_back(D3DVECTOR{b.pos[0], b.pos[1], b.pos[2]});
+                        StretchVertexRaw r{}; memcpy(r.b, b.pos, sizeof(r.b));
+                        raw.push_back(r);
+                        gvFinal.push_back(g);
+                    }
+                } catch (...) { obj.clear(); raw.clear(); gvFinal.clear(); }
+                havePositions = !obj.empty();
+            }
+        } else if (g_curLayout.posStream == 0 && g_curLayout.posOffset >= 0 && g_stream0Stride) {
+            // Rigid and hardware-skinned (skinFF) both leave stream 0's POSITION exactly as
+            // the game bound it - skinFF's bone palette is applied by the fixed-function
+            // pipeline at draw time, the same reason ComputeAssetHashUvComponent's own skinFF
+            // branch reads stream 0 directly for texcoords instead of the ring.
+            const bool dynamicSrc = IsDynamicVB(g_stream0);
+            havePositions = ReadRigidPositionsRaw(gv, g_curLayout.posOffset, g_stream0Stride,
+                                                  dynamicSrc, &obj, &raw);
+            if (havePositions) gvFinal = gv;   // ReadRigidPositionsRaw fills 1:1 with gv, in order
+            posSource = dynamicSrc ? "stream0 (dynamic, snooped)" : "stream0 (static, locked)";
+        }
+    }
+
+    bool anyNonFinite = !worldFinite;
+    D3DVECTOR objMin{1e30f, 1e30f, 1e30f}, objMax{-1e30f, -1e30f, -1e30f};
+    D3DVECTOR worldMin{1e30f, 1e30f, 1e30f}, worldMax{-1e30f, -1e30f, -1e30f};
+    UINT worstIdx = 0; D3DVECTOR worstObj{}, worstWorld{}; StretchVertexRaw worstRaw{};
+    bool haveWorst = false;
+    double sumX = 0.0, sumY = 0.0, sumZ = 0.0;
+    unsigned nFinite = 0;
+
+    if (havePositions) {
+        try { worldPos.reserve(obj.size()); } catch (...) {}
+        for (size_t i = 0; i < obj.size(); ++i) {
+            const D3DVECTOR w = TransformPoint(&obj[i].x, world);
+            try { worldPos.push_back(w); } catch (...) {}
+            const bool vFinite = std::isfinite(obj[i].x) && std::isfinite(obj[i].y) &&
+                                 std::isfinite(obj[i].z) && std::isfinite(w.x) &&
+                                 std::isfinite(w.y) && std::isfinite(w.z);
+            if (!vFinite) {
+                anyNonFinite = true;
+                if (!haveWorst) {   // the FIRST non-finite vertex names the bug on its own -
+                                    // no "worse" one to keep looking for
+                    haveWorst = true;
+                    worstIdx = gvFinal[i]; worstObj = obj[i]; worstWorld = w; worstRaw = raw[i];
+                }
+                continue;
+            }
+            objMin.x = min(objMin.x, obj[i].x); objMin.y = min(objMin.y, obj[i].y);
+            objMin.z = min(objMin.z, obj[i].z);
+            objMax.x = max(objMax.x, obj[i].x); objMax.y = max(objMax.y, obj[i].y);
+            objMax.z = max(objMax.z, obj[i].z);
+            worldMin.x = min(worldMin.x, w.x); worldMin.y = min(worldMin.y, w.y);
+            worldMin.z = min(worldMin.z, w.z);
+            worldMax.x = max(worldMax.x, w.x); worldMax.y = max(worldMax.y, w.y);
+            worldMax.z = max(worldMax.z, w.z);
+            sumX += w.x; sumY += w.y; sumZ += w.z;
+            ++nFinite;
+            if (!anyNonFinite) {   // magnitude-worst only matters while nothing NaN has won yet
+                const float m = max(max(std::fabs(w.x), std::fabs(w.y)), std::fabs(w.z));
+                const float worstM = haveWorst ? max(max(std::fabs(worstWorld.x),
+                                                         std::fabs(worstWorld.y)),
+                                                     std::fabs(worstWorld.z))
+                                               : -1.0f;
+                if (m > worstM) {
+                    haveWorst = true;
+                    worstIdx = gvFinal[i]; worstObj = obj[i]; worstWorld = w; worstRaw = raw[i];
+                }
+            }
+        }
+    }
+
+    if (!havePositions && !anyNonFinite) { ++g_stretchDetectUnreadable; return; }
+
+    const float diag = (nFinite > 0)
+        ? std::sqrt((worldMax.x - worldMin.x) * (worldMax.x - worldMin.x) +
+                    (worldMax.y - worldMin.y) * (worldMax.y - worldMin.y) +
+                    (worldMax.z - worldMin.z) * (worldMax.z - worldMin.z))
+        : 0.0f;
+
+    // THE DISTRIBUTION, updated for every scanned draw with a computable diagonal, BEFORE
+    // the flag threshold below decides whether this one is "interesting" - this is what
+    // makes the histogram and top-5 independent of stretchDetectUnits, per their own comment
+    // above.
+    if (nFinite > 0) {
+        ++g_stretchHist[StretchHistBucket(diag)];
+        StretchTopInsert(diag, g_curPS.albedoSampler, numVertices, primitiveCount,
+                         uvPath.path[0] ? uvPath.path : "not-reproducible", worldMin, worldMax);
+    }
+
+    const bool flagged = anyNonFinite ||
+                         (nFinite > 0 && diag > static_cast<float>(g_settings.stretchDetectUnits));
+    if (!flagged) return;
+
+    ++g_stretchDetectFlagged;
+    if (g_stretchDetectDumped >= static_cast<unsigned>(max(0, g_settings.stretchDetectDumps))) return;
+    ++g_stretchDetectDumped;
+
+    // THE TYPICAL VERTEX: the finite vertex closest to the mean of every finite vertex in this
+    // draw - contrast for the worst one, read straight out of the arrays already in memory, no
+    // second device read.
+    UINT typicalIdx = 0; D3DVECTOR typicalObj{}, typicalWorld{}; bool haveTypical = false;
+    if (nFinite > 0) {
+        const D3DVECTOR mean{static_cast<float>(sumX / nFinite), static_cast<float>(sumY / nFinite),
+                             static_cast<float>(sumZ / nFinite)};
+        float best = -1.0f;
+        for (size_t i = 0; i < worldPos.size(); ++i) {
+            const D3DVECTOR& w = worldPos[i];
+            if (!std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z)) continue;
+            const float dx = w.x - mean.x, dy = w.y - mean.y, dz = w.z - mean.z;
+            const float d = dx * dx + dy * dy + dz * dz;
+            if (best < 0.0f || d < best) {
+                best = d; haveTypical = true;
+                typicalIdx = gvFinal[i]; typicalObj = obj[i]; typicalWorld = w;
+            }
+        }
+    }
+
+    const float* wf = &world._11;
+    Log("STRETCH DETECT #%u: frame %u draw %u | ps(albedo sampler)='%s' shader=%p alb=%p | v=%u "
+        "p=%u | ib=%p start=%u vb=%p off=%u baseVtx=%d stride=%u | path '%s' | positions: %s",
+        g_stretchDetectDumped, g_frames, g_drawIndexThisFrame, g_curPS.albedoSampler,
+        static_cast<void*>(g_lastPS), static_cast<void*>(g_lastEffectiveAlbedo), numVertices,
+        primitiveCount, static_cast<void*>(g_curIB), startIndex, static_cast<void*>(g_stream0),
+        g_stream0Offset, baseVertex, g_stream0Stride,
+        uvPath.path[0] ? uvPath.path : "not-reproducible", posSource);
+    Log("    world matrix (%s): [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f] "
+        "[%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f]",
+        worldFinite ? "finite" : "NON-FINITE", wf[0], wf[1], wf[2], wf[3], wf[4], wf[5], wf[6],
+        wf[7], wf[8], wf[9], wf[10], wf[11], wf[12], wf[13], wf[14], wf[15]);
+    if (nFinite > 0)
+        Log("    object AABB (%u finite verts) min(%.3f %.3f %.3f) max(%.3f %.3f %.3f) | world "
+            "AABB min(%.1f %.1f %.1f) max(%.1f %.1f %.1f) diag=%.1f (limit %d)",
+            nFinite, objMin.x, objMin.y, objMin.z, objMax.x, objMax.y, objMax.z, worldMin.x,
+            worldMin.y, worldMin.z, worldMax.x, worldMax.y, worldMax.z, diag,
+            g_settings.stretchDetectUnits);
+    else
+        Log("    object/world AABB: no finite vertex in this draw's referenced set (%u sampled)",
+            static_cast<unsigned>(obj.size()));
+    if (haveWorst)
+        Log("    WORST vertex gv=%u raw(%02X %02X %02X %02X  %02X %02X %02X %02X  %02X %02X "
+            "%02X %02X) obj(%.3f %.3f %.3f) world(%.1f %.1f %.1f)",
+            worstIdx, worstRaw.b[0], worstRaw.b[1], worstRaw.b[2], worstRaw.b[3], worstRaw.b[4],
+            worstRaw.b[5], worstRaw.b[6], worstRaw.b[7], worstRaw.b[8], worstRaw.b[9],
+            worstRaw.b[10], worstRaw.b[11], worstObj.x, worstObj.y, worstObj.z, worstWorld.x,
+            worstWorld.y, worstWorld.z);
+    else
+        Log("    WORST vertex: none available - positions %s", posSource);
+    if (haveTypical)
+        Log("    TYPICAL vertex gv=%u obj(%.3f %.3f %.3f) world(%.1f %.1f %.1f) - for contrast "
+            "against the worst vertex above",
+            typicalIdx, typicalObj.x, typicalObj.y, typicalObj.z, typicalWorld.x, typicalWorld.y,
+            typicalWorld.z);
+}
+
+// ---------------------------------------------------------------- index window probe / clamp
+//
+// THE 1e10 SLIVER (measured, not re-derived - see the settings comment on indexWindowProbe,
+// above, for the full citation): SR3 hides an unused world-decal quad by parking its vertices at
+// exactly 1e10 so the rasteriser clips it away. Path tracing does not clip, so for one frame a
+// triangle addressing that vertex stretches across the screen - confirmed real geometry in
+// Remix's Geometry Hash debug view. Two independent samples found the offending vertex INDEX
+// equal to the draw's own declared NumVertices, i.e. exactly one past the end of the window
+// [MinVertexIndex, MinVertexIndex+NumVertices) the game declared for the draw. Remix never reads
+// that window: dxvk-remix/src/d3d9/d3d9_rtx.cpp:666 sets geoData.vertexCount from the bound index
+// buffer's own min/max, computed from the indices themselves, and vertexIndexOffset from that
+// same min - MinVertexIndex and NumVertices (present on the DrawContext, d3d9_rtx.h:53-54) are
+// simply never referenced in that file. So this probe/fix operates on the game's ORIGINAL,
+// UNTIGHTENED minIndex/numVertices (the Hook_DrawIndexedPrimitive parameters), never
+// tightMinIndex/tightNumVertices - TightenConvertedWindow's narrow/widen only changes what this
+// shim TELLS the device the window is, which Remix does not consult for this bug either way.
+//
+// MEASUREMENT COST: for a RIGID (non-skinned) converted draw, TightenConvertedWindow (the block
+// immediately above this one in Hook_DrawIndexedPrimitive) has ALREADY Locked and scanned this
+// exact (ib, startIndex, primitiveCount, type, size, format) identity THIS SAME CALL - see
+// g_tightWin - so CheckIndexWindow below costs one hash-map lookup and nothing else: no Lock, no
+// allocation. A SKINNED draw is excluded from TightenConvertedWindow by design (see its own "the
+// bind pose" note) so there is no cache entry to reuse there; ScanIndexMinMaxCheap pays for a
+// fresh Lock + min/max scan instead - still no allocation, no hashing, no dedup, exactly the
+// "single cheap scan of indices" the cost budget allows for a population no existing cache
+// covers. If TightenConvertedWindow itself refused this identity (no IB, bad type, GetDesc
+// failure, its own 32-lock-a-frame budget spent) there is no cache entry either, and this probe
+// correctly reports the same draw as "not measured" rather than paying for a second Lock.
+//
+// READ-ONLY for the probe: every Lock here is D3DLOCK_READONLY on a buffer already known
+// non-dynamic (GetTightIbShape's own dynamic flag), the same hard rule TightenConvertedWindow/
+// ComputeAssetHashIndexComponent/ProbeAssetHash already honour above - a DYNAMIC index buffer is
+// refused outright, never Locked, because (as TightenConvertedWindow's own comment states) no
+// Lock/Unlock hook exists on index buffers in this shim, so there is no snoop copy to substitute
+// and no way to know a cached scan of one has gone stale.
+
+struct IndexWindowVerdict {
+    bool measured = false;   // false: refused (no IB, bad type, dynamic, GetDesc/lock failed) - no verdict, not counted as examined
+    bool outside = false;    // true: the referenced index range [lo,hi] is not entirely inside [minIndex, minIndex+numVertices)
+    bool below = false;      // lo < minIndex (a SEPARATE, rarer population from the sentinel-at-the-end case)
+    UINT lo = 0, hi = 0;     // the draw's own referenced index range (raw values, relative to baseVertex - same frame minIndex is in)
+    UINT overshoot = 0;      // maxIndex - (MinVertexIndex+NumVertices-1), 0 unless hi is at or past the end of the window
+};
+
+unsigned long long g_iwpExamined = 0;        // converted indexed draws measured (rigid reuse + skinned fresh scan, combined)
+unsigned long long g_iwpOutside = 0;         // ...of those, had ANY index outside the declared window
+unsigned long long g_iwpBelow = 0;           // ...of the outside population, had an index BELOW MinVertexIndex (subset, reported apart)
+unsigned g_iwpWorstOvershoot = 0;            // worst (maxIndex - (MinVertexIndex+NumVertices-1)) ever seen, all-time
+unsigned g_iwpReports = 0;                   // INDEX WINDOW PROBE example lines written, capped at 10 for the whole session (not re-armed - see g_albedoChurnReports for the same style)
+unsigned long long g_iwpRigidReuse = 0;      // measured via the g_tightWin cache TightenConvertedWindow already populated - zero extra Locks
+unsigned long long g_iwpSkinnedScan = 0;     // measured via a fresh ScanIndexMinMaxCheap Lock
+unsigned long long g_iwpRefuseDynamic = 0;   // skinned draw, DYNAMIC index buffer - not measured (no snoop copy for index buffers)
+unsigned long long g_iwpRefuseOther = 0;     // no IB / unhandled or empty primitive type / GetDesc failed / index slice past buffer end / lock failed
+
+unsigned long long g_iwcDrawsCorrected = 0;      // indexWindowClamp/indexWindowClampStrips: draws actually re-issued from the corrected ring buffer (native TRIANGLELIST or an expanded strip/fan - one shared counter, see IssueClampedTriangleListFromRing)
+unsigned long long g_iwcTrianglesCollapsed = 0;  // triangles replaced with (MinVertexIndex,MinVertexIndex,MinVertexIndex) across those draws
+unsigned long long g_iwcAllocFail = 0;           // read/expand/ring-create/ring-lock failed - fell back to the ORIGINAL draw, unchanged
+unsigned long long g_iwcTopologyRefused = 0;     // flagged by the probe, not a TRIANGLELIST, and NOT corrected because it is not a strip/fan OR indexWindowClampStrips is off - fell back unchanged. A strip/fan corrected under indexWindowClampStrips=1 counts in g_iwcDrawsCorrected instead, never here.
+unsigned g_iwcSentinelProofLogged = 0;           // INDEX WINDOW CLAMP SENTINEL PROOF blocks written this session - hard-capped at 10, see LogIndexWindowClampSentinelProof's own comment
+
+// The cheap min/max-only scan used for a SKINNED draw only (see the file comment above). Modelled
+// line for line on TightenConvertedWindow's own cache-miss scan body: D3DLOCK_READONLY, refuse
+// DYNAMIC outright, two locals accumulate lo/hi over the raw index slice - no vector, no hash.
+bool ScanIndexMinMaxCheap(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, UINT startIndex,
+                          UINT primitiveCount, UINT* outLo, UINT* outHi) {
+    if (!ib) { ++g_iwpRefuseOther; return false; }
+    if (type != D3DPT_TRIANGLELIST && type != D3DPT_TRIANGLESTRIP && type != D3DPT_TRIANGLEFAN) {
+        ++g_iwpRefuseOther;
+        return false;
+    }
+    const UINT nIdx = VertsForPrimitives(type, primitiveCount);
+    if (!nIdx) { ++g_iwpRefuseOther; return false; }
+    const TightIbShape* shape = GetTightIbShape(ib);
+    if (!shape) { ++g_iwpRefuseOther; return false; }
+    if (shape->dynamic) { ++g_iwpRefuseDynamic; return false; }
+    const UINT isz = (shape->format == D3DFMT_INDEX32) ? 4 : 2;
+    if (static_cast<unsigned long long>(startIndex) * isz + static_cast<unsigned long long>(nIdx) * isz >
+        shape->size) {
+        ++g_iwpRefuseOther;
+        return false;
+    }
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* m = nullptr;
+    if (FAILED(ib->Lock(startIndex * isz, nIdx * isz, &m, D3DLOCK_READONLY)) || !m) {
+        g_internal = wasInt;
+        ++g_iwpRefuseOther;
+        return false;
+    }
+    UINT lo = 0xFFFFFFFFu, hi = 0;
+    for (UINT i = 0; i < nIdx; ++i) {
+        const unsigned v = (isz == 4) ? static_cast<const unsigned*>(m)[i]
+                                      : static_cast<const unsigned short*>(m)[i];
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    ib->Unlock();
+    g_internal = wasInt;
+    *outLo = lo; *outHi = hi;
+    return true;
+}
+
+// THE MEASUREMENT. See the file comment above for the population, the cost, and why this uses
+// the game's ORIGINAL minIndex/numVertices rather than any tightened/widened substitute.
+IndexWindowVerdict CheckIndexWindow(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, UINT minIndex,
+                                    UINT numVertices, UINT startIndex, UINT primitiveCount,
+                                    bool skinnedAny) {
+    IndexWindowVerdict v;
+    if (!g_settings.indexWindowProbe || !ib || !numVertices) return v;
+    UINT lo = 0, hi = 0;
+    bool have = false;
+    if (!skinnedAny) {
+        // Reuse, not re-derive: TightenConvertedWindow (immediately above, in
+        // Hook_DrawIndexedPrimitive) always runs first for a rigid converted draw and always
+        // caches its scan in g_tightWin under this exact key, regardless of tightenConvertedWindow
+        // - so this lookup is a guaranteed hit costing one hash computation, never a Lock.
+        const TightIbShape* shape = GetTightIbShape(ib);
+        if (shape) {
+            const TightWinKey key{ib, startIndex, primitiveCount, static_cast<int>(type), shape->size,
+                                  shape->format};
+            const auto it = g_tightWin.find(key);
+            if (it != g_tightWin.end() && it->second.ok) {
+                lo = it->second.lo; hi = it->second.hi;
+                have = true;
+                ++g_iwpRigidReuse;
+            }
+        }
+    } else if (ScanIndexMinMaxCheap(ib, type, startIndex, primitiveCount, &lo, &hi)) {
+        have = true;
+        ++g_iwpSkinnedScan;
+    }
+    if (!have) return v;
+
+    v.measured = true;
+    v.lo = lo; v.hi = hi;
+    ++g_iwpExamined;
+    // One past the last legal index value - matches TightenConvertedWindow's own declaredEnd.
+    const unsigned long long declaredEnd = static_cast<unsigned long long>(minIndex) + numVertices;
+    if (lo < minIndex) v.below = true;
+    if (static_cast<unsigned long long>(hi) + 1ull > declaredEnd) {
+        v.overshoot = static_cast<unsigned>((static_cast<unsigned long long>(hi) + 1ull) - declaredEnd);
+    }
+    v.outside = v.below || (v.overshoot > 0);
+    if (v.outside) {
+        ++g_iwpOutside;
+        if (v.below) ++g_iwpBelow;
+        if (v.overshoot > g_iwpWorstOvershoot) g_iwpWorstOvershoot = v.overshoot;
+    }
+    return v;
+}
+
+// ---- the fix: a shim-owned index buffer, degenerate-collapsed
+//
+// THE RING. Same NOOVERWRITE-append/DISCARD-on-wrap scheme g_uvRing (UvBufferFor's "THE UV
+// RING") and g_skinVB already use, sized for this population instead of copied from theirs: the
+// draws this ever touches are 2-4 triangles for a building decal up to a couple hundred for the
+// stretch-detect population, never a whole mesh, so 1 MB (262,144 INDEX32 entries) is generous
+// headroom rather than the 8 MB the UV ring needs for whole converted vertex streams. Always
+// INDEX32 regardless of the game's own index width - the source is widened once, here, rather
+// than making every later reader branch on width the way the game's own buffers require.
+//
+// indexWindowClampStrips (below) reuses this SAME ring for its EXPANDED buffer rather than a
+// second one of its own: a strip/fan's own raw index count is only P+2, but the explicit
+// triangle list ExpandStripOrFanToTriangleList builds from it needs 3*P - up to roughly 1.5x more
+// for the small P this population actually has (a couple hundred triangles at most, the same
+// population this ring was already sized generously for), so the existing 1 MB headroom already
+// covers it. IssueClampedTriangleListFromRing's own `need > kIwcRingBytes` check is what makes an
+// expanded draw that still would not fit degrade safely - falling back to the ORIGINAL, unmodified
+// draw exactly like every other allocation failure here, never a skipped one.
+IDirect3DIndexBuffer9* g_iwcRing = nullptr;
+bool g_iwcRingTried = false;
+constexpr UINT kIwcRingBytes = 1u * 1024u * 1024u;
+UINT g_iwcRingPos = 0;
+unsigned g_iwcRingWraps = 0, g_iwcRingAppends = 0;
+
+// A FULL read of this draw's own index slice - unlike the probe above, the fix needs every
+// individual index value (to decide, per TRIANGLE, whether to collapse it), not just the
+// range's min/max, so this is a genuinely new Lock. Only reached for a draw the cheap probe
+// above already flagged (rare - see g_iwpOutside), never for the general population, so it
+// does not touch the cost budget that gates the probe itself. Refuses a DYNAMIC index buffer
+// outright, the same hard rule as ScanIndexMinMaxCheap/TightenConvertedWindow - no snoop copy
+// exists for an index buffer in this shim.
+//
+// Serves TWO callers now: IssueIndexWindowClampedDraw reads a TRIANGLELIST's own P*3 indices
+// unchanged; IssueIndexWindowClampedStripFanDraw (indexWindowClampStrips) reads a
+// TRIANGLESTRIP/TRIANGLEFAN's P+2 indices before expanding them into a triangle list -
+// VertsForPrimitives already returns the right count for either shape, so nothing else here
+// needed to change to admit the second caller.
+bool ReadIndexRawForClamp(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, UINT startIndex,
+                          UINT primitiveCount, std::vector<UINT>* out) {
+    if (!ib ||
+        (type != D3DPT_TRIANGLELIST && type != D3DPT_TRIANGLESTRIP && type != D3DPT_TRIANGLEFAN))
+        return false;
+    const UINT nIdx = VertsForPrimitives(type, primitiveCount);
+    if (!nIdx) return false;
+    const TightIbShape* shape = GetTightIbShape(ib);
+    if (!shape || shape->dynamic) return false;
+    const UINT isz = (shape->format == D3DFMT_INDEX32) ? 4 : 2;
+    if (static_cast<unsigned long long>(startIndex) * isz + static_cast<unsigned long long>(nIdx) * isz >
+        shape->size)
+        return false;
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* m = nullptr;
+    if (FAILED(ib->Lock(startIndex * isz, nIdx * isz, &m, D3DLOCK_READONLY)) || !m) {
+        g_internal = wasInt;
+        return false;
+    }
+    try { out->resize(nIdx); }
+    catch (...) { ib->Unlock(); g_internal = wasInt; return false; }
+    for (UINT i = 0; i < nIdx; ++i)
+        (*out)[i] = (isz == 4) ? static_cast<const unsigned*>(m)[i]
+                               : static_cast<const unsigned short*>(m)[i];
+    ib->Unlock();
+    g_internal = wasInt;
+    return true;
+}
+
+// THE FIX ITSELF. Called only for a converted, non-skinned draw the probe above found
+// referencing an index outside its declared window (this draw's iwVerdict.outside in
+// Hook_DrawIndexedPrimitive). Two callers below share everything except how the corrected
+// triangle list is OBTAINED:
+//   - IssueIndexWindowClampedDraw: the draw is already a D3DPT_TRIANGLELIST, so its own raw
+//     indices ARE the triangle list - nothing to expand.
+//   - IssueIndexWindowClampedStripFanDraw (indexWindowClampStrips, default OFF): the draw is a
+//     D3DPT_TRIANGLESTRIP or D3DPT_TRIANGLEFAN, whose indices are SHARED between adjacent
+//     triangles (VertsForPrimitives gives prims+2 indices for prims triangles) - collapsing one
+//     triangle in place would corrupt its neighbours, so ExpandStripOrFanToTriangleList first
+//     turns it into an explicit, non-sharing triangle list (see its own comment for the winding
+//     fix a strip needs), and everything past that point is identical to the TRIANGLELIST path.
+// Both then call CollapseOutOfWindowTriangles (the shared per-triangle judgement) and
+// IssueClampedTriangleListFromRing (the shared ring write + draw + restore) - there is exactly
+// one collapse implementation and one ring implementation, not two.
+//
+// Every triangle that touches an out-of-window index gets all three of ITS OWN indices replaced
+// with MinVertexIndex - a zero-area triangle, never hit by a ray, harmless under rasterisation -
+// and every other triangle in the draw is copied through unchanged (INCLUDING a strip's own
+// naturally-degenerate stitching triangles, which repeat an index on purpose to join two strips
+// and are left exactly as they are unless one of their indices is ALSO out of window). Primitive
+// count, vertex window (minIndex/numVertices, passed straight through) and every other draw
+// parameter are identical to the original call; only the index VALUES the corrected buffer holds
+// differ.
+//
+// Both callers return false on ANY failure - the read lock, the expand, the ring's own
+// create/lock, or finding that no individual triangle actually crosses the window when read one
+// by one (belt and suspenders: the probe's lo/hi cannot lie about the range, but a defensive
+// false here still falls back cleanly rather than issuing a no-op buffer swap). The caller's own
+// fallback then issues the UNCHANGED original draw - the same disposition as every other refusal
+// path in this file, never a skipped draw.
+
+// THE PER-TRIANGLE JUDGEMENT, shared by both callers below: given an explicit triangle list
+// (already 3 indices per triangle - a native TRIANGLELIST's own raw, OR a strip/fan already
+// expanded by ExpandStripOrFanToTriangleList), collapse every triangle that touches an
+// out-of-window index to (MinVertexIndex, MinVertexIndex, MinVertexIndex) in place, and leave
+// every other triangle untouched - see the file comment above for why a strip's own stitching
+// degenerates are never specially detected or protected: they simply never trip the range test
+// unless one of their indices is genuinely out of window, in which case collapsing them further
+// is harmless (still degenerate). *firstBadIndex receives whichever of the FIRST collapsed
+// triangle's own three indices was actually out of window (left untouched if nothing is
+// collapsed) - proof-logging fodder for LogIndexWindowClampSentinelProof, not used for the
+// collapse decision itself.
+unsigned CollapseOutOfWindowTriangles(std::vector<UINT>& raw, UINT minIndex, UINT numVertices,
+                                      UINT* firstBadIndex) {
+    const UINT nIdx = static_cast<UINT>(raw.size());
+    const UINT lastLegal = minIndex + numVertices - 1;
+    unsigned trisCollapsed = 0;
+    bool haveFirst = false;
+    for (UINT t = 0; t + 3 <= nIdx; t += 3) {
+        const UINT a = raw[t], b = raw[t + 1], c = raw[t + 2];
+        const bool badA = a < minIndex || a > lastLegal;
+        const bool badB = b < minIndex || b > lastLegal;
+        const bool badC = c < minIndex || c > lastLegal;
+        if (badA || badB || badC) {
+            if (!haveFirst && firstBadIndex) {
+                *firstBadIndex = badA ? a : (badB ? b : c);
+                haveFirst = true;
+            }
+            raw[t] = raw[t + 1] = raw[t + 2] = minIndex;
+            ++trisCollapsed;
+        }
+    }
+    return trisCollapsed;
+}
+
+// THE SENTINEL-PROOF DUMP (2026-09-24) - direct evidence that the out-of-window index and THE
+// 1e10 SLIVER (see the file comment above CheckIndexWindow) are the same phenomenon, not two
+// coincidental findings: this reads and logs the actual object-space POSITION the out-of-window
+// index resolves to, for the first 10 draws indexWindowClamp/indexWindowClampStrips ever corrects
+// this session. Hard-capped at 10 (g_iwcSentinelProofLogged, checked first, before any read) -
+// this is proof, not telemetry, and must never become a per-frame cost the way indexWindowProbe's
+// own measurement is designed to be.
+//
+// Same population and the same dynamic-snoop/static-lock split as ReadRigidPositionsRaw already
+// uses for stretchDetect (see its own comment, above): a RIGID, CONVERTED draw leaves stream 0's
+// POSITION exactly as the game bound it, which is guaranteed readable this way only when
+// posStream==0 and posOffset is known - BeginFFP's own gate already refuses anything else before
+// a draw can reach Disp::Convert. Both callers of this function already require !skinned &&
+// !skinnedFF (see clampEligible in Hook_DrawIndexedPrimitive), so there is no bind-pose/CPU-ring
+// branch to consider the way ProbeStretchDetect needs one for a skinned draw. Two separate
+// single-vertex reads (the bad index, then a typical in-window index for contrast) rather than
+// one combined read: ReadRigidPositionsRaw assumes its globalVerts arg arrives front-to-back
+// sorted (it takes lo=front()/hi=back()), and the bad and typical vertices are not reliably
+// ordered relative to each other, so keeping the two reads apart is simpler than sorting and
+// unscrambling the result afterwards.
+void LogIndexWindowClampSentinelProof(INT baseVertex, UINT minIndex, UINT numVertices,
+                                      UINT badIndex) {
+    if (g_iwcSentinelProofLogged >= 10) return;
+    if (g_curLayout.posStream != 0 || g_curLayout.posOffset < 0 || !g_stream0Stride || !g_stream0)
+        return;
+
+    const long long badG = static_cast<long long>(baseVertex) + static_cast<long long>(badIndex);
+    // The middle of the declared window - NOT MinVertexIndex (the value every bad triangle gets
+    // collapsed TO), so this is a genuinely independent in-window vertex for contrast.
+    const UINT typicalIndex = minIndex + numVertices / 2;
+    const long long typicalG =
+        static_cast<long long>(baseVertex) + static_cast<long long>(typicalIndex);
+    if (badG < 0 || badG > 0xFFFFFFFFll) return;
+    const bool dynamicSrc = IsDynamicVB(g_stream0);
+
+    std::vector<UINT> gvBad{static_cast<UINT>(badG)};
+    std::vector<D3DVECTOR> objBad;
+    std::vector<StretchVertexRaw> rawBad;
+    if (!ReadRigidPositionsRaw(gvBad, g_curLayout.posOffset, g_stream0Stride, dynamicSrc, &objBad,
+                               &rawBad) ||
+        objBad.empty())
+        return;
+
+    bool haveTypical = false;
+    std::vector<D3DVECTOR> objTyp;
+    std::vector<StretchVertexRaw> rawTyp;
+    if (typicalG >= 0 && typicalG <= 0xFFFFFFFFll) {
+        std::vector<UINT> gvTyp{static_cast<UINT>(typicalG)};
+        haveTypical = ReadRigidPositionsRaw(gvTyp, g_curLayout.posOffset, g_stream0Stride,
+                                            dynamicSrc, &objTyp, &rawTyp) &&
+                     !objTyp.empty();
+    }
+
+    ++g_iwcSentinelProofLogged;
+    Log("INDEX WINDOW CLAMP SENTINEL PROOF #%u: frame %u draw %u | ps(albedo sampler)='%s' | "
+        "corrected draw v=%u minIndex=%u baseVtx=%d | BAD index=%u (global vtx=%u, one past "
+        "declared window end=%u) raw(%02X %02X %02X %02X  %02X %02X %02X %02X  %02X %02X %02X "
+        "%02X) obj(%.3f %.3f %.3f)",
+        g_iwcSentinelProofLogged, g_frames, g_drawIndexThisFrame, g_curPS.albedoSampler,
+        numVertices, minIndex, baseVertex, badIndex, static_cast<UINT>(badG),
+        minIndex + numVertices, rawBad[0].b[0], rawBad[0].b[1], rawBad[0].b[2], rawBad[0].b[3],
+        rawBad[0].b[4], rawBad[0].b[5], rawBad[0].b[6], rawBad[0].b[7], rawBad[0].b[8],
+        rawBad[0].b[9], rawBad[0].b[10], rawBad[0].b[11], objBad[0].x, objBad[0].y, objBad[0].z);
+    if (haveTypical)
+        Log("    TYPICAL in-window vertex idx=%u (global vtx=%u) raw(%02X %02X %02X %02X  %02X "
+            "%02X %02X %02X  %02X %02X %02X %02X) obj(%.3f %.3f %.3f) - for contrast against the "
+            "BAD vertex above",
+            typicalIndex, static_cast<UINT>(typicalG), rawTyp[0].b[0], rawTyp[0].b[1],
+            rawTyp[0].b[2], rawTyp[0].b[3], rawTyp[0].b[4], rawTyp[0].b[5], rawTyp[0].b[6],
+            rawTyp[0].b[7], rawTyp[0].b[8], rawTyp[0].b[9], rawTyp[0].b[10], rawTyp[0].b[11],
+            objTyp[0].x, objTyp[0].y, objTyp[0].z);
+    else
+        Log("    TYPICAL in-window vertex: unavailable (global vtx %lld out of range or read "
+            "failed)",
+            typicalG);
+}
+
+// THE RING TAIL, shared by both callers below: given an explicit triangle list already collapsed
+// by CollapseOutOfWindowTriangles (trisCollapsed of its triangles rewritten to MinVertexIndex),
+// write it into the shim-owned ring (see THE RING, above), issue it as D3DPT_TRIANGLELIST with
+// baseVertex/minIndex/numVertices passed straight through, and restore the game's own index
+// buffer binding before returning - unconditionally, on every exit path, exactly as before this
+// was split out of IssueIndexWindowClampedDraw. trisCollapsed==0 is refused here (nothing to
+// correct - the caller's own probe-driven eligibility should make this unreachable, but a
+// defensive false costs nothing and avoids a no-op buffer swap). raw.size() is always a multiple
+// of 3 by construction in both callers (a native TRIANGLELIST's own P*3, or the P*3
+// ExpandStripOrFanToTriangleList builds), so primitiveCount is recovered as raw.size()/3 rather
+// than threaded through as a separate parameter.
+bool IssueClampedTriangleListFromRing(IDirect3DDevice9* dev, IDirect3DIndexBuffer9* gameIB,
+                                      INT baseVertex, UINT minIndex, UINT numVertices,
+                                      const std::vector<UINT>& raw, unsigned trisCollapsed,
+                                      UINT firstBadIndex, HRESULT* outHr) {
+    if (!trisCollapsed) { ++g_iwcAllocFail; return false; }
+    const UINT nIdx = static_cast<UINT>(raw.size());
+
+    if (!g_iwcRing && !g_iwcRingTried) {
+        g_iwcRingTried = true;
+        const bool wasInt = g_internal;
+        g_internal = true;
+        g_internalThread = GetCurrentThreadId();
+        if (FAILED(dev->CreateIndexBuffer(kIwcRingBytes, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
+                                          D3DFMT_INDEX32, D3DPOOL_DEFAULT, &g_iwcRing, nullptr)))
+            g_iwcRing = nullptr;
+        g_internal = wasInt;
+        Log("index window clamp ring: %s (%u KB)",
+            g_iwcRing ? "created" : "CREATE FAILED - indexWindowClamp falls back to the original draw",
+            kIwcRingBytes >> 10);
+    }
+    if (!g_iwcRing) { ++g_iwcAllocFail; return false; }
+
+    // Expanded lists need 3*P indices where the strip/fan itself only carried P+2 (see THE RING's
+    // own comment, above) - a draw large enough to exceed the ring even in its expanded form
+    // still degrades safely here, the same fall-back-to-the-original-draw path an oversized
+    // TRIANGLELIST read would already take.
+    const UINT need = nIdx * 4u;
+    if (need > kIwcRingBytes) { ++g_iwcAllocFail; return false; }
+    bool discard = false;
+    if (g_iwcRingPos + need > kIwcRingBytes) { discard = true; g_iwcRingPos = 0; ++g_iwcRingWraps; }
+    const bool wasInt = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    void* m = nullptr;
+    const HRESULT lockHr = discard ? g_iwcRing->Lock(0, 0, &m, D3DLOCK_DISCARD)
+                                   : g_iwcRing->Lock(g_iwcRingPos, need, &m, D3DLOCK_NOOVERWRITE);
+    if (FAILED(lockHr) || !m) {
+        g_internal = wasInt;
+        ++g_iwcAllocFail;
+        return false;
+    }
+    memcpy(m, raw.data(), need);
+    g_iwcRing->Unlock();
+    g_internal = wasInt;
+    const UINT ringStartIndex = g_iwcRingPos / 4u;
+    g_iwcRingPos += need;
+    ++g_iwcRingAppends;
+
+    // THE SWAP - same pattern as the cloth-remap swap a few lines below in
+    // Hook_DrawIndexedPrimitive (see its own comment): g_curIB already holds what the game last
+    // bound, so no GetIndices bridge round trip is needed to save it, and it is restored
+    // unconditionally the instant this draw returns - the same discipline UnbindSkinFF uses for
+    // render state.
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    g_origSetIndices(dev, g_iwcRing);
+    g_internal = false;
+    *outHr = g_origDrawIndexedPrimitive(dev, D3DPT_TRIANGLELIST, baseVertex, minIndex, numVertices,
+                                        ringStartIndex, nIdx / 3u);
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    g_origSetIndices(dev, gameIB);
+    g_internal = false;
+
+    ++g_iwcDrawsCorrected;
+    g_iwcTrianglesCollapsed += trisCollapsed;
+    LogIndexWindowClampSentinelProof(baseVertex, minIndex, numVertices, firstBadIndex);
+    return true;
+}
+
+bool IssueIndexWindowClampedDraw(IDirect3DDevice9* dev, IDirect3DIndexBuffer9* ib, INT baseVertex,
+                                 UINT minIndex, UINT numVertices, UINT startIndex,
+                                 UINT primitiveCount, HRESULT* outHr) {
+    std::vector<UINT> raw;
+    if (!ReadIndexRawForClamp(ib, D3DPT_TRIANGLELIST, startIndex, primitiveCount, &raw)) {
+        ++g_iwcAllocFail;
+        return false;
+    }
+    UINT firstBadIndex = 0;
+    const unsigned trisCollapsed =
+        CollapseOutOfWindowTriangles(raw, minIndex, numVertices, &firstBadIndex);
+    return IssueClampedTriangleListFromRing(dev, ib, baseVertex, minIndex, numVertices, raw,
+                                            trisCollapsed, firstBadIndex, outHr);
+}
+
+// THE STRIP/FAN EXPANSION (indexWindowClampStrips) - turns a D3DPT_TRIANGLESTRIP's or
+// D3DPT_TRIANGLEFAN's P+2 indices into an explicit P*3 TRIANGLELIST, so
+// CollapseOutOfWindowTriangles can then judge each triangle independently the way it already
+// does for a native TRIANGLELIST. src is the draw's own raw index slice, unmodified, exactly as
+// ReadIndexRawForClamp read it.
+//
+// WINDING: neither topology repeats vertices between triangles, so the device derives each
+// triangle from a 3-wide sliding window over the same index list. For a FAN the shared vertex is
+// always index 0, so triangle i is simply (idx[0], idx[i+1], idx[i+2]) for every i - the D3D9
+// SDK's own worked example (v0..v4 -> (v0,v1,v2), (v0,v2,v3), (v0,v3,v4)) is exactly this, no
+// rearrangement needed. A STRIP has no fixed shared vertex, so instead the runtime ALTERNATES
+// winding every other triangle to keep the whole strip's front face consistent without the app
+// repeating any vertex - the SDK's own strip example (v0..v4 -> (v0,v1,v2), (v2,v1,v3),
+// (v2,v3,v4)) shows this plainly: triangle 1 (odd) is (v2,v1,v3), NOT the raw sliding window
+// (v1,v2,v3) - its first two indices are swapped. An explicit TRIANGLELIST has no such implicit
+// alternation built in, so skipping that swap here would silently reverse the winding - and
+// therefore the backface-culled side and the geometric normal - of every other triangle in the
+// strip. Swapping any two of a triangle's three indices reverses its winding regardless of WHICH
+// two (all three "reversed" orderings are cyclic rotations of each other), so this swaps the
+// first two to match the SDK's own documented example exactly, rather than an
+// arbitrary-but-equivalent pair.
+bool ExpandStripOrFanToTriangleList(const std::vector<UINT>& src, D3DPRIMITIVETYPE type,
+                                    UINT primitiveCount, std::vector<UINT>* out) {
+    if (src.size() != static_cast<size_t>(primitiveCount) + 2) return false;
+    try { out->resize(static_cast<size_t>(primitiveCount) * 3); } catch (...) { return false; }
+    for (UINT i = 0; i < primitiveCount; ++i) {
+        UINT a = 0, b = src[i + 1], c = src[i + 2];
+        if (type == D3DPT_TRIANGLEFAN) {
+            a = src[0];
+        } else {   // D3DPT_TRIANGLESTRIP
+            a = src[i];
+            if (i & 1) std::swap(a, b);   // odd triangle: undo D3D9's implicit alternation (see
+                                          // the comment above) so this explicit list renders the
+                                          // same facing the strip itself would have
+        }
+        (*out)[i * 3 + 0] = a;
+        (*out)[i * 3 + 1] = b;
+        (*out)[i * 3 + 2] = c;
+    }
+    return true;
+}
+
+// THE FIX FOR A STRIP/FAN (indexWindowClampStrips, default OFF - see the setting's own comment
+// for the 266342-flagged-draws-never-corrected measurement that motivated this). Called only for
+// a converted, non-skinned D3DPT_TRIANGLESTRIP/D3DPT_TRIANGLEFAN draw the probe found referencing
+// an out-of-window index - the same clampEligible gate IssueIndexWindowClampedDraw uses, with the
+// topology check inverted (see Hook_DrawIndexedPrimitive's own call site). Expands to an explicit
+// triangle list first (ExpandStripOrFanToTriangleList, above), then reuses
+// CollapseOutOfWindowTriangles and IssueClampedTriangleListFromRing exactly as the TRIANGLELIST
+// path does - the fix itself is identical from that point on, only how the triangle list is
+// OBTAINED differs. Returns false (falling back to the ORIGINAL, unmodified strip/fan draw) on a
+// read failure, a malformed index count, or anything IssueClampedTriangleListFromRing itself
+// refuses - never a skipped draw.
+bool IssueIndexWindowClampedStripFanDraw(IDirect3DDevice9* dev, IDirect3DIndexBuffer9* ib,
+                                         D3DPRIMITIVETYPE type, INT baseVertex, UINT minIndex,
+                                         UINT numVertices, UINT startIndex, UINT primitiveCount,
+                                         HRESULT* outHr) {
+    std::vector<UINT> src;
+    if (!ReadIndexRawForClamp(ib, type, startIndex, primitiveCount, &src)) {
+        ++g_iwcAllocFail;
+        return false;
+    }
+    std::vector<UINT> raw;
+    if (!ExpandStripOrFanToTriangleList(src, type, primitiveCount, &raw)) {
+        ++g_iwcAllocFail;
+        return false;
+    }
+    UINT firstBadIndex = 0;
+    const unsigned trisCollapsed =
+        CollapseOutOfWindowTriangles(raw, minIndex, numVertices, &firstBadIndex);
+    return IssueClampedTriangleListFromRing(dev, ib, baseVertex, minIndex, numVertices, raw,
+                                            trisCollapsed, firstBadIndex, outHr);
 }
 
 HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type,
@@ -22212,6 +23426,38 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     if (ffp) ProbeAssetHash(dev, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount,
                             skinned, skinnedFF, scope);
 
+    // STRETCH DETECT: same eligibility (CONVERTED draws only) and the same parameter list as
+    // ProbeAssetHash immediately above - the two diagnostics are gated independently and pay
+    // nothing for each other. See ProbeStretchDetect's own comment, above, for what it looks
+    // for and why it is built the way it is.
+    if (ffp && g_settings.stretchDetect)
+        ProbeStretchDetect(dev, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount,
+                           skinned, skinnedFF, scope);
+
+    // INDEX WINDOW PROBE: same eligibility as ProbeAssetHash/ProbeStretchDetect above (CONVERTED
+    // draws only) but unconditionally measured whenever indexWindowProbe is on (default ON - see
+    // CheckIndexWindow's own comment for why this is cheap enough to leave on). Uses the game's
+    // ORIGINAL minIndex/numVertices, not tightMinIndex/tightNumVertices - see the file comment
+    // above CheckIndexWindow for why tightening/widening the reported window cannot affect this
+    // bug either way. iwVerdict is read again below, at the draw-issue site, to decide whether
+    // indexWindowClamp re-issues this draw from a corrected index buffer.
+    IndexWindowVerdict iwVerdict;
+    if (ffp) {
+        iwVerdict = CheckIndexWindow(g_curIB, type, minIndex, numVertices, startIndex, primitiveCount,
+                                     skinned || skinnedFF);
+        if (iwVerdict.outside && g_iwpReports < 10) {
+            ++g_iwpReports;
+            const unsigned belowBy = iwVerdict.below ? (minIndex - iwVerdict.lo) : 0;
+            Log("INDEX WINDOW PROBE #%u: frame %u draw %u | ps(albedo sampler)='%s' | v=%u "
+                "minIndex=%u prims=%u | referenced=[%u,%u] declared=[%u,%u) | below=%u "
+                "overshoot=%u | ib=%p startIndex=%u vb=%p off=%u",
+                g_iwpReports, g_frames, g_drawIndexThisFrame, g_curPS.albedoSampler, numVertices,
+                minIndex, primitiveCount, iwVerdict.lo, iwVerdict.hi, minIndex,
+                minIndex + numVertices, belowBy, iwVerdict.overshoot, static_cast<void*>(g_curIB),
+                startIndex, static_cast<void*>(g_stream0), g_stream0Offset);
+        }
+    }
+
     // Skip: never reaches the device, so Remix cannot capture it. Reporting success is correct -
     // the engine ignores the return value of a draw, and pretending it failed could send it down
     // an error path.
@@ -22259,6 +23505,13 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // ever runs when `skinned` is true, which only ever happens when d == Disp::Convert.
     const InjectSuppression injectSup = BeforeShimDraw(dev, d, primitiveCount);
     HRESULT hr;
+    // INDEX WINDOW CLAMP eligibility, computed once: a converted, non-skinned draw the probe
+    // above (iwVerdict) found referencing an index outside its declared window. Topology
+    // (TRIANGLELIST only) is checked separately, where this is used below, so a strip/fan can
+    // still be counted apart as "flagged but not correctable" instead of silently folded into
+    // "not eligible at all".
+    const bool clampEligible = ffp && !skinned && !skinnedFF && g_settings.indexWindowClamp &&
+                               iwVerdict.outside;
     if (skinned && g_clothRemap && g_clothRemap->ib && g_clothRemap->tris) {
         // g_curIB already holds what the game last bound (see its declaration comment: "what
         // the game last bound; no bridge call to ask") - GetIndices would only read the same
@@ -22280,14 +23533,40 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
         g_origSetIndices(dev, gameIB);
         g_internal = false;
     } else {
-        // minIndex/numVertices become tightMinIndex/tightNumVertices only for a rigid converted
-        // draw with tightenConvertedWindow on and a safe tight range computed above; every other
-        // draw through this branch (a pass-through, or a converted draw where tightening was
-        // refused or is disabled) keeps them identical to the game's own declared window, because
-        // tightMinIndex/tightNumVertices were seeded from minIndex/numVertices and only
-        // overwritten in that one case.
-        hr = g_origDrawIndexedPrimitive(dev, type, baseVertex, tightMinIndex, tightNumVertices,
-                                        startIndex, primitiveCount);
+        bool clampCorrected = false;
+        if (clampEligible) {
+            if (type == D3DPT_TRIANGLELIST) {
+                // On success the corrected draw has already been issued and the game's own index
+                // buffer already restored - both inside IssueIndexWindowClampedDraw itself.
+                clampCorrected = IssueIndexWindowClampedDraw(dev, g_curIB, baseVertex, minIndex,
+                                                              numVertices, startIndex, primitiveCount,
+                                                              &hr);
+            } else if (g_settings.indexWindowClampStrips &&
+                      (type == D3DPT_TRIANGLESTRIP || type == D3DPT_TRIANGLEFAN)) {
+                // indexWindowClampStrips: the population the TRIANGLELIST-only branch above can
+                // never reach - see its own setting comment for the 266342-flagged-draws
+                // measurement this exists to fix. Same "already issued and restored" contract as
+                // IssueIndexWindowClampedDraw above. g_iwcTopologyRefused is deliberately NOT
+                // incremented on a fallback here (its own g_iwcAllocFail already counts that) -
+                // that counter means "never attempted", and this was.
+                clampCorrected = IssueIndexWindowClampedStripFanDraw(dev, g_curIB, type, baseVertex,
+                                                                     minIndex, numVertices, startIndex,
+                                                                     primitiveCount, &hr);
+            } else {
+                ++g_iwcTopologyRefused;
+            }
+        }
+        if (!clampCorrected) {
+            // minIndex/numVertices become tightMinIndex/tightNumVertices only for a rigid converted
+            // draw with tightenConvertedWindow on and a safe tight range computed above; every other
+            // draw through this branch (a pass-through, a converted draw where tightening was
+            // refused or is disabled, or one the clamp itself was ineligible for / refused / fell
+            // back on) keeps them identical to the game's own declared window, because
+            // tightMinIndex/tightNumVertices were seeded from minIndex/numVertices and only
+            // overwritten in that one case.
+            hr = g_origDrawIndexedPrimitive(dev, type, baseVertex, tightMinIndex, tightNumVertices,
+                                            startIndex, primitiveCount);
+        }
     }
     AfterShimDrawSite(dev, injectSup);
     PhaseAdd(PH_DRAW, tP);
@@ -22929,6 +24208,62 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                 "draws are LEFT ALONE: the world's only converted copy is this pass",
                 g_gbufferHidden / f, g_settings.skipDeferredGBuffer ? "ON" : "OFF");
         }
+        // Printed even at zero, so long as stretchDetect is on: a run with zero hits has to
+        // be told apart from the detector not running at all. "unreadable" is a THIRD
+        // outcome, neither flagged nor cleared - the index buffer was dynamic, or no bind
+        // pose was cached yet, so no verdict was possible for that draw.
+        if (g_settings.stretchDetect) {
+            Log("    STRETCH DETECT (stretchDetectUnits=%d, dump cap %d): %.1f draws/frame "
+                "scanned, %.2f/frame unreadable (no verdict possible) | %llu flagged total "
+                "(%.4f%% of scanned) | %u dumped to the log%s",
+                g_settings.stretchDetectUnits, g_settings.stretchDetectDumps,
+                g_stretchDetectChecked / f, g_stretchDetectUnreadable / f, g_stretchDetectFlagged,
+                g_stretchDetectChecked
+                    ? 100.0 * g_stretchDetectFlagged / g_stretchDetectChecked
+                    : 0.0,
+                g_stretchDetectDumped,
+                g_stretchDetectDumped >= static_cast<unsigned>(max(0, g_settings.stretchDetectDumps))
+                    ? " (CAP REACHED - flagged draws are still counted above, just not logged)"
+                    : "");
+            // THE DISTRIBUTION: independent of stretchDetectUnits, so one run answers both
+            // "is anything abnormal happening" (the counters above) and "what does normal
+            // look like" (this) - the evidence stretchDetectUnits should be set from,
+            // instead of guessed.
+            Log("    STRETCH DETECT histogram (world-AABB diagonal, every scanned draw with "
+                "a computable diagonal): [0-10)=%llu [10-100)=%llu [100-500)=%llu "
+                "[500-1000)=%llu [1000-2000)=%llu [2000-5000)=%llu [5000-20000)=%llu "
+                "[20000+)=%llu",
+                g_stretchHist[0], g_stretchHist[1], g_stretchHist[2], g_stretchHist[3],
+                g_stretchHist[4], g_stretchHist[5], g_stretchHist[6], g_stretchHist[7]);
+            for (unsigned i = 0; i < 5; ++i) {
+                const StretchTopEntry& e = g_stretchTop5[i];
+                if (e.diag < 0.0f) break;   // slots fill left-to-right; an empty one ends the list
+                Log("    STRETCH DETECT top %u: diag=%.1f ps(albedo sampler)='%s' v=%u p=%u "
+                    "path '%s' | world AABB min(%.1f %.1f %.1f) max(%.1f %.1f %.1f)",
+                    i + 1, e.diag, e.ps, e.v, e.p, e.path, e.worldMin.x, e.worldMin.y,
+                    e.worldMin.z, e.worldMax.x, e.worldMax.y, e.worldMax.z);
+            }
+        }
+        // HIDE-BY-SHADER-NAME (hideShaderContains): the same hunt as STRETCH DETECT above,
+        // from the other direction - instead of measuring every converted draw's shape, this
+        // makes a NAMED shader family disappear so the tester can watch whether the artifact
+        // stops. Printed only when the list is non-empty; an empty list is fully inert and
+        // this line does not appear, so a normal run stays silent about it.
+        if (g_settings.hideShaderTermCount) {
+            char active[300] = "";
+            for (int i = 0; i < g_settings.hideShaderTermCount; ++i) {
+                if (i) strcat_s(active, ", ");
+                strcat_s(active, g_settings.hideShaderTerms[i]);
+            }
+            Log("    HIDE-BY-SHADER-NAME (hideShaderContains='%s'): %.2f draws/frame hidden, "
+                "%llu total",
+                active, g_hideShaderContainsHidden / f, g_hideShaderContainsHidden);
+            for (int i = 0; i < g_settings.hideShaderTermCount; ++i)
+                Log("        '%s': %.2f/frame (%llu total, albedo %llu / first %llu)",
+                    g_settings.hideShaderTerms[i], g_hideShaderContainsHitCount[i] / f,
+                    g_hideShaderContainsHitCount[i],
+                    g_hideShaderContainsByAlbedo[i], g_hideShaderContainsByFirst[i]);
+        }
         // The morph is SNOOPED now, not locked: the buffer is DYNAMIC and read-locking it is
         // what the previous attempt got wrong. "not snooped yet" is expected on the first
         // draws of a new character and should stay near zero afterwards; stale vertices mean
@@ -23124,6 +24459,25 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             g_tightWidened / f,
             g_tightWidened ? static_cast<double>(g_tightWidenedAddedSum) / g_tightWidened : 0.0,
             g_tightRefuseWidenBeyondBuffer / f, g_tightRefuseNotSubset / f);
+        Log("        INDEX WINDOW PROBE (indexWindowProbe=%s, every CONVERTED indexed draw - rigid "
+            "reused from TIGHTEN WINDOW's own scan above, skinned scanned fresh): %.1f/frame "
+            "examined, %.2f/frame had an index OUTSIDE the declared window (worst overshoot %u), "
+            "%.2f/frame of those below MinVertexIndex | reused (zero extra Locks) %.1f/frame, fresh "
+            "skinned scan %.1f/frame | refused: dynamic IB (skinned only) %.1f/frame, other "
+            "%.1f/frame",
+            g_settings.indexWindowProbe ? "ON" : "off", g_iwpExamined / f, g_iwpOutside / f,
+            g_iwpWorstOvershoot, g_iwpBelow / f, g_iwpRigidReuse / f, g_iwpSkinnedScan / f,
+            g_iwpRefuseDynamic / f, g_iwpRefuseOther / f);
+        Log("        INDEX WINDOW CLAMP (indexWindowClamp=%s, the fix - collapses an out-of-window "
+            "triangle to degenerate instead of narrowing/widening the window Remix never reads): "
+            "%llu draws corrected, %llu triangles collapsed | %llu fell back to the original draw on "
+            "an alloc/lock failure, %llu flagged draws left unchanged because they were not a "
+            "TRIANGLELIST and indexWindowClampStrips=%s (a strip/fan's indices are shared between "
+            "adjacent triangles - see IssueIndexWindowClampedStripFanDraw's own comment) | "
+            "sentinel-proof position dumps this session: %u/10",
+            g_settings.indexWindowClamp ? "ON" : "off", g_iwcDrawsCorrected, g_iwcTrianglesCollapsed,
+            g_iwcAllocFail, g_iwcTopologyRefused, g_settings.indexWindowClampStrips ? "ON" : "off",
+            g_iwcSentinelProofLogged);
         Log("        FRESH BUFFERS: %.2f converted draws/frame read a static stream-0 range written within %d frame(s); "
             "%.2f/frame skipped for it (deferFreshStaticDraws=%d) | recent-write table %u buffers | rolling record %d frames (F9 writes it)",
             g_freshSeen / f, g_settings.deferFreshFrames, g_deferredFresh / f, g_settings.deferFreshStaticDraws ? 1 : 0,

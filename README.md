@@ -48,10 +48,10 @@ see [Known issues](#known-issues) before you install, so you know what you are g
 **Install: [INSTALL.md](INSTALL.md)** · **What changed: [CHANGELOG.md](CHANGELOG.md)** ·
 **Credits: [CREDITS.md](CREDITS.md)** · **Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)**
 
-### v0.1.6 found two bugs in RTX Remix itself
+### This project has found five bugs in RTX Remix itself
 
-This project now runs a **patched Remix runtime**. Both bugs are in NVIDIA's shipped build *and* in
-`origin/main`, and neither is SR3-specific — any game that skins on the GPU through Remix hits both.
+It runs a **patched Remix runtime** — local build 7, five switchable fixes. Two are proven and
+neither is SR3-specific; any game that skins on the GPU through Remix hits both.
 
 - **A staging-buffer memory leak.** A slice of `RtxStagingDataAlloc` is acquired and never released
   on one path. On SR3 that reached **13.7 GB across 428 × 32 MB blocks** and crashed the game after
@@ -59,7 +59,13 @@ This project now runs a **patched Remix runtime**. Both bugs are in NVIDIA's shi
 - **The skinning kernel reads normals as floats only**, so packed normals arrive as garbage — hard,
   faceted shading on every GPU-skinned character.
 
-The patches are in [`remix-fork-patches/`](remix-fork-patches/), with the trade-off explained: the
+Three more are real defects found while chasing the stretched-decal artifact, which they did **not**
+fix — a stale vertex count surviving into BVH rebuild, instance history consulted without requiring
+a prior frame, and the DrawCallCache accepting a bucket on a material match without checking shape.
+They are kept because they are correct, and because a fix that didn't work is worth as much as one
+that did.
+
+All of them are in [`remix-fork-patches/`](remix-fork-patches/), with the trade-off explained: the
 stock runtime works and gives you everything the mod does, it just also gives you the crash and the
 faceted shading.
 
@@ -150,9 +156,9 @@ Stated plainly, because a compatibility mod that hides its gaps wastes everyone'
 | **No sky.** The `rfg-skybox` family (~50 draws/frame) is passed through rather than converted, and pass-through draws are skipped now that vertex capture is off. | open — needs conversion; the dome is 343 verts one unit from the camera, so it needs care |
 | **No in-game HUD.** Its draws are found and rebuilt now, but it does not appear, and sub-menu text and backgrounds are missing. The menu video works. Parked. | open — **v0.1.4 reported this as fixed and it was not** |
 | **Other outfits.** Every colour mechanism is general, but only one outfit is confirmed on screen. A garment needing more than 4 tiles, or with a visible panel wider than 12 texture widths, is refused by its own guard and falls back to a single tile. | open |
-| **Misplaced buildings.** Rare, sticks for a few seconds, angle- and location-dependent, seen while flying. | open — **the top correctness bug, and unattributed.** The shim's own data is correct and a 60-frame ring recording found no object moving, so whether the patched runtime is involved is not yet known |
-| **Body skin and head colours do not match** on characters. | open — probably the most visible remaining fault |
-| **Decal flicker** in Remix's Geometry Hash view. Proven *not* to be a hash change. | open |
+| **World surfaces shift tint.** Per-surface, instant, texture detail stays visible, and a fixed feature changes tint under pure camera rotation. Long-standing. | open — **the shim is exonerated**: it hands Remix byte-identical state across view angles, so the cause is inside Remix. 14 candidates ruled out with evidence; a cutout or translucent layer is the leading one left |
+| **The stretched-decal artifact** — a one-frame flat pale polygon at decal churn. Real geometry, visible in Remix's Geometry Hash view. | parked after six attempted fixes. Leading untested theory: SR3 records D3D9 calls and replays them on its own thread, so a discard-and-refill between record and replay has Remix copying the wrong buffer generation |
+| **Body skin and head colours do not match** on characters. | open |
 | **The Remix-API character path**, when enabled, is frozen and stands beside the game's own copy — handing Remix `MeshInfoSkinning` crashed its 64-bit server. It ships **off**, so this is not something you will see. | open, but not in the shipped config |
 | **First-time per-buffer conversions run on the game's render thread** when content streams in — worst spike 219 ms. They belong on a worker. | open |
 | **Performance.** The occlusion-query hook fabricates a "visible" answer to every query first (still necessary - see below), but the shim now runs its own occlusion test on a worker thread and refines that answer to 0 pixels for a box entirely behind opaque geometry (`occlusionCull=1`, `occlusionDryRun=0`). Some geometry the game would have culled itself still reaches the path tracer. | partially addressed |
@@ -168,6 +174,9 @@ hair with no strand detail (v0.1.4), and — in v0.1.5 — **the player's clothi
 In v0.1.6: the ~8-minute crash from a Remix memory leak, hard faceted shading on GPU-skinned
 characters, the raster overlay that stopped path tracing, stretched bracelets and glasses lenses,
 car parts floating with animation in the new GPU path, and roughly half the frame time.
+
+In v0.1.7: **misplaced buildings** — a config line inherited from the first session,
+`rtx.antiCulling.object.enable = True`, against a Remix default of `False`.
 
 Release history and what changed in each: **[CHANGELOG.md](CHANGELOG.md)**.
 
@@ -266,9 +275,10 @@ copy of the game.
 
 ## Roadmap
 
-1. **Attribute the misplaced buildings.** The top correctness bug. The control run — stock runtime,
-   memoization back on, same flight path — has not been done.
-2. **Character body/head colour mismatch**, the most visible remaining fault.
+1. **The world-surface tint shift.** The shim is exonerated; the next step is a
+   Remix-image-hash to D3D9-texture-pointer map so the tagged sample hashes can be matched to
+   specific draws, and a check of whether the affected surfaces involve a cutout.
+2. **Character body/head colour mismatch.**
 3. **The in-game HUD.** Its draws are found and rebuilt; it still does not appear. Parked.
 4. **Convert the sky** — the last population lost when vertex capture was turned off.
 5. **Report both Remix bugs upstream**, and restore index memoization properly by giving each

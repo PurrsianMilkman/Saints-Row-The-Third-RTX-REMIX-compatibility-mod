@@ -1,5 +1,84 @@
 # Changelog
 
+## v0.1.7 — 2026-09-30
+
+**The misplaced buildings are fixed** — the top open correctness bug from v0.1.6 — and it was a
+single config line that had been wrong since the beginning.
+
+### Fixed: misplaced buildings
+
+A building would sit in the wrong place for a few seconds, angle- and location-dependent, most
+visible while flying. The cause was **`rtx.antiCulling.object.enable = True`**, which was in the
+original SR3 `rtx.conf` from the very first session. Remix's own default is `False`.
+
+The mechanism: an anti-culled instance pins its `BlasEntry` and `DrawCallCache` buckets on
+`indices` + `geometrydescriptor` alone, so a *different* decal gets accepted into that bucket on a
+material match and overwrites the pinned vertices. Setting it `False` fixes it. **User confirmed.**
+
+Worth noting because it is the second time in this project that a setting inherited early and never
+questioned turned out to be the bug — the first being the `ffp=0` A/B that had no control.
+
+### Changed: the geometry asset hash rule, reversing a v0.1.1 decision
+
+`rtx.geometryAssetHashRuleString` goes from `indices,texcoords,geometrydescriptor` back to
+**`indices,geometrydescriptor`**. v0.1.1 added `texcoords` and called it "the rule to keep"; that was
+right for the problem it solved then (car parts sharing an index buffer) and wrong for decals.
+
+Measured: index and descriptor flips **zero**, texcoord flips **2,416**, identity churn 3,890 of
+2,165. SR3 rebuilds batched world decals into a recycled dynamic buffer every frame, so their
+texcoords move even when nothing about the geometry's identity has. Removing texcoords makes decal
+hashes much more stable — not *fully* stable, because the hash covers a whole batch and loading one
+decal changes the batch's triangle count. Full stability needs the shim to split batches into one
+draw per decal. There was never per-decal identity to lose: one draw is dozens of decals.
+
+### Three more Remix bugs found
+
+The fork is now **build 7**, with five switchable fixes. Two are proven (the memory leak and the
+skinning normal format, both shipped since v0.1.6). Three are new, and all three are **real defects
+that did not fix the artifact they were written for** — kept anyway, because they are correct and
+because nobody should re-derive them:
+
+- `drawcallcache-shape-match` — the DrawCallCache accepts a bucket on a material match without
+  requiring the shape to agree. Paired with `rtx.drawCallCacheRequireShapeMatch = True`.
+- `instance-history-requires-prior-frame` — instance history is consulted without requiring the
+  instance to have existed in the previous frame.
+- `bvh-count-rebuild` — a stale vertex count survives into BVH rebuild.
+
+All in [`remix-fork-patches/`](remix-fork-patches/). Note that their `rtx_options.h` hunks overlap.
+
+### Also
+
+`resetTFactorOnTexturedDraws=1` closes a real "one register, one owner" violation — a stale
+`TEXTUREFACTOR` could survive onto a textured draw. It was written as a candidate fix for the tint
+bug below, did not fix it, and is kept on its own merits.
+
+### Known issues
+
+**World surfaces shift tint.** Long-standing — it predates this release's work — and now
+characterised properly: per-surface, instant, texture detail stays visible, the object picker reports
+the same texture in both states, and a single fixed feature changes tint under **pure camera
+rotation**.
+
+**The shim is exonerated and the cause is inside Remix.** Five full frame dumps at one position and
+five view angles: of 574 draws present in three or more dumps, only three fields changed, and none of
+them on a world surface. The shim hands Remix byte-identical state across view angles, so the
+view-dependence is created downstream of it. Fourteen candidates are ruled out with evidence and
+recorded so they are not retried, including auto-exposure, low-mip streaming, albedo texture swaps,
+vertex-colour baked lighting, mip/aniso bias, coplanar z-fight and decal material blending.
+
+The leading remaining candidate is a **cutout or translucent layer**: a ray passing a cutout at one
+angle and not another lands on a different surface, which changes the pixel's albedo with no input
+changing. That fits "only some surfaces".
+
+**The stretched-decal artifact is parked** after six attempted fixes: a one-frame flat pale polygon
+at decal churn, real geometry, visible in Remix's Geometry Hash view. The leading untested theory is
+that SR3 records D3D9 calls and replays them on its own command thread, so a discard-and-refill
+between record and replay has Remix copying the wrong generation of the buffer.
+
+Still no **sky** and no **in-game HUD**.
+
+---
+
 ## v0.1.6 — 2026-09-22
 
 **Roughly twice the frame rate, and the game no longer crashes after eight minutes.** The biggest
