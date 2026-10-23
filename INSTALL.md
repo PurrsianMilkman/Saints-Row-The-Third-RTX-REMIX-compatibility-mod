@@ -20,11 +20,16 @@ Copy these files next to `SaintsRowTheThird.exe`:
 
 ```
 sr3-rtx.asi
+sr3-rtx-logic.dll
 sr3-rtx.ini
 rtx.conf
 dxvk.conf
 user.conf
 ```
+
+`sr3-rtx.asi` and `sr3-rtx-logic.dll` must sit together: the `.asi` is a small host that loads the
+logic DLL from its own folder. Copy only the `.asi` and the mod does nothing (the host writes the
+reason to `sr3-rtx-host.log`).
 
 Copy this one into the `.trex` folder (it unlocks the Remix API, which characters need):
 
@@ -43,6 +48,7 @@ Delete:
 
 ```
 sr3-rtx.asi
+sr3-rtx-logic.dll
 sr3-rtx.ini
 rtx.conf
 dxvk.conf

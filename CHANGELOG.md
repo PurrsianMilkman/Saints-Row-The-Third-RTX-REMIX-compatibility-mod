@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Mostly groundwork: no new visual fixes yet, but the code is easier to work on.
+
+### Changed: the shim is now two files
+
+`sr3-rtx.asi` is now a small **host** that loads **`sr3-rtx-logic.dll`** from its own folder.
+**Install both** (see [INSTALL.md](INSTALL.md)). The host owns every D3D9 vtable patch, and each
+patched slot points at an 8-byte jump inside the host rather than into the logic. Nothing in the
+game points into the logic DLL directly, so a later version can swap a rebuilt one in **without
+restarting the game**. That reload is not built yet; this is phase 1, confirmed working in game.
+
+### Changed: the source is split into 30 files
+
+The 25,600-line `sr3rtx.cpp` now `#include`s 30 ordered `parts/*.cpp` files. It is still one
+translation unit. Behaviour is unchanged: the preprocessed source is identical, and the only binary
+difference is the names MSVC derives for lambdas from file and line.
+
+### Fixed: TEXTUREFACTOR leaking between draws
+
+The ordinary textured path never wrote `D3DRS_TEXTUREFACTOR`, contrary to the shim's own documented
+contract, so a normal draw inherited whatever the last constant-colour draw left behind. It now writes
+opaque white (`resetTFactorOnTexturedDraws`, on by default).
+
+### Investigated, not yet fixed
+
+- **World surfaces shifting to a dark tint with camera angle.** Fourteen causes ruled out. Frame dumps
+  at one position and five view angles show the shim hands Remix identical state at every angle, so
+  the cause is inside Remix's processing. Still open.
+
 ## v0.1.7 — 2026-09-30
 
 **The misplaced buildings are fixed** — the top open correctness bug from v0.1.6 — and it was a

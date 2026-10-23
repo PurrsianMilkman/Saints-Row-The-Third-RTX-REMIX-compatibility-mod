@@ -195,8 +195,9 @@ See **[INSTALL.md](INSTALL.md)** for the full step-by-step, or grab the
 ## Repository layout
 
 ```
-├── src/sr3-rtx/         the shim: sr3rtx.cpp + build.ps1
-├── build/               the built sr3-rtx.asi (committed so a release needs no local build; NOT byte-reproducible - the PE timestamp changes on every compile, and the toolchain is whatever `vswhere -latest` finds)
+├── src/sr3-rtx/         the shim logic: sr3rtx.cpp, which #includes 30 ordered parts/*.cpp as ONE translation unit, + build.ps1
+├── src/sr3-rtx-host/    the small host .asi that owns every D3D9 vtable patch and loads the logic DLL
+├── build/               the built sr3-rtx.asi (host) + sr3-rtx-logic.dll (committed so a release needs no local build; NOT byte-reproducible - the PE timestamp changes on every compile, and the toolchain is whatever `vswhere -latest` finds)
 ├── configs/
 │   ├── sr3-rtx.ini          shim settings — every one documented with the measurement behind it
 │   ├── rtx.conf             the Remix config (texture categorisation, options)
@@ -251,7 +252,8 @@ Needs the MSVC Build Tools (x86 toolchain). It is a single translation unit and 
 powershell -File src\sr3-rtx\build.ps1
 ```
 
-Output lands in `build\sr3-rtx.asi`.
+Output lands in `build\sr3-rtx.asi` (the host) and `build\sr3-rtx-logic.dll` (the shim itself) -
+deploy both. Crash offsets in `sr3-rtx-crash.dmp` resolve against `build\sr3-rtx-logic.map`.
 
 ## Reverse engineering
 

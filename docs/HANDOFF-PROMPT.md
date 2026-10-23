@@ -57,7 +57,8 @@ reading a NORMAL MAP as albedo because SR3 binds normal maps at stage 0 in ~900 
 fixes that (fixAlbedoStage, "moved off stage 0" ~83-199/frame). Same symptom class - keep in mind.
 
 ## Deployed right now - all hash-verified
-    Saints Row 3/sr3-rtx.asi      e8f234b4a2d704ac88c1106867188e72  (adds resetTFactorOnTexturedDraws)
+    Saints Row 3/sr3-rtx.asi      25bb535b7eaa5e4ab734e23a4a5a3a53  (built from the SPLIT source 2026-10-20)
+    Saints Row 3/sr3-rtx.map      f3b3b6ddcd09ce4ea696d6a260eaae2c
     Saints Row 3/sr3-rtx.ini      8d1ae4932d1e15935d9743ec38bc8ca4
     Saints Row 3/rtx.conf         ea92d93bf88f9ebd0d6abd3fa75c385e  (clean baseline, samples removed)
     Saints Row 3/.trex/d3d9.dll   573bb6fda301abe22b37119a923465f7  = OUR FORK BUILD 7
@@ -75,6 +76,58 @@ fixes that (fixAlbedoStage, "moved off stage 0" ~83-199/frame). Same symptom cla
     GAME + NvRemixBridge.exe MUST BE CLOSED before copying - locked copies fail SILENTLY.
     Write ini/source with PYTHON only. Convert raw-string newlines to CRLF (a raw block once
     introduced 18 lone LFs - caught by the lone-LF check, restored from backup).
+
+## NEW REQUEST 2026-10-22 - HOT-RELOAD THE SHIM CODE (.asi) WITHOUT RESTARTING THE GAME
+User chose "shim code" over the cheaper "hot-reload sr3-rtx.ini" option. Bridge/Remix-runtime
+hot-swap was judged infeasible (restarting NvRemixBridge.exe loses every GPU resource the game made).
+Measured: vtable patching lives in ONE place (parts/05_device_state.cpp, 2 VirtualProtect sites);
+37 Hook_ functions; the shim creates few D3D resources itself; HAZARDS = the occlusion worker is a
+DETACHED std::thread (18_occlusion_cpu.cpp:749) and the skinning pool owns worker threads
+(21_cpu_skinning.cpp ~1281-1343) - both must become stoppable before any unload.
+DESIGN PROPOSED (not started): host sr3-rtx.asi stays loaded and owns ALL vtable patches -> stubs IN
+THE HOST forward through a function table into sr3-rtx-logic.dll (today's code); nothing in the game
+may point into the logic DLL. Host loads a numbered COPY of the logic DLL so builds can overwrite the
+original while loaded. Swap on a hotkey at Present: gate new entries to plain D3D9 passthrough,
+wait for an in-flight counter to drain, logic Shutdown (join threads, release own resources),
+FreeLibrary, load the new copy, Init + REPLAY recorded creation events (shader bytecode, vertex
+declarations) and current bound state so caches rebuild. Phases: (1) split with no reload, proven
+behaviour-identical; (2) clean shutdown; (3) swap; (4) replay.
+USER DECIDED 2026-10-22: NO Fable - lead plans; implement PHASE 1 now (host/logic split, no reload). Tuning UI = SEPARATE WINDOW (not overlay, not Alt+X tab); do it AFTER phase 1, with live settings reload. PHASE 1 delegated to a Sonnet subagent; verify its report (hashes, hook count, log init lines) before phase 2.
+ALSO REQUESTED 2026-10-22: (a) research the latest GTA IV RTX Remix compat mod (xoxor4d) and his
+talk of switching to the Remix API - a background research agent was launched; (b) a TUNING UI to
+edit how things are done live ("clothes brightness, etc."). KEY POINT: live tuning needs SETTINGS
+hot-reload (re-run LoadSettings / push values at runtime), NOT code hot-reload - fold it into the UI.
+UI options put to the user: in-game ImGui overlay (through the bridge, fights game input) vs a
+separate tuning window (local panel/second monitor/phone, safest) vs a tab in Remix's Alt+X menu
+(64-bit bridge process, no channel to the 32-bit shim - hardest). Recommended: separate window.
+
+## TEAM A MINED 2026-10-22 - see worklog entry 'TEAM A SPEC MINING'. TOP LEADS: tint = textureless families (ir_sr3diffcolonly etc.) inheriting the previous draw's stage-0 texture under camera-dependent draw order; THE 2026-09-29 DIFF WAS BLIND TO THIS (key included tex0) - RE-RUN 2026-10-22 KEYED WITHOUT tex0/alb: 165 draws in >=3 rotations, 0 change texture (7 flagged only change draw MULTIPLICITY - visibility, not texture). Exoneration HOLDS; texture-inheritance theory NOT supported by these dumps. Decals = no Lock opcode, VB writes outside the stream: log lock thread vs replay thread.
+## HOT-RELOAD PHASE 1 DONE + DEPLOYED + CONFIRMED IN GAME 2026-10-22 21:58 (no host log = no failure; logic loaded pid 37864, 164 ini keys, CreateDevice hooked, 42 fps, hooks firing via thunks). NEXT: phase 2 (clean shutdown). TUNING UI NOT BUILT YET - user asked how to use it; waiting on their list of what to tune.
+Shim is now TWO DLLs: host src/sr3-rtx-host/host.cpp -> sr3-rtx.asi (3126475f2191187eda2d826519cb644e,
+85,504 B) and logic (all of src/sr3-rtx) -> sr3-rtx-logic.dll (a3b820acc27c82d5d2f76f648303f6e3).
+Shared header src/sr3-rtx-host/host_api.h (versioned). Logic exports Sr3Logic_Attach (replaces its
+DllMain work). parts/05_device_state.cpp PatchVTable now calls g_host->PatchVtableSlot; the host owns
+ALL vtable writes: 8-byte thunks FF 25 <&g_table[i]> CC CC in one 256-slot RWX pool, table in host
+data, repeat patch of a slot reuses its thunk and returns the TRUE original. All 37 hooks covered.
+CRASH OFFSETS now resolve against sr3-rtx-logic.map (sr3-rtx.map is the host's).
+Rollback: Saints Row 3/sr3-rtx.asi.before-phase1.bak (25bb535b..., old single-file shim) - copy it
+over sr3-rtx.asi and delete sr3-rtx-logic.dll. Host logs failures to sr3-rtx-host.log.
+PHASE 2 MUST HANDLE pointers into the logic outside the vtable scheme: the CrashFilter
+(SetUnhandledExceptionFilter), the Init thread, the DETACHED occlusion worker, the skinning pool.
+Concern noted: host LoadLibrary+attach runs under the loader lock (as the old DllMain's CreateThread did).
+
+## SOURCE LAYOUT CHANGED 2026-10-20 - READ BEFORE PATCHING
+src/sr3-rtx/sr3rtx.cpp is now 111 lines: header, includes, `namespace {`, then
+`#include "parts/NN_name.cpp"` x30 IN ORDER, `}  // namespace`, DllMain. It is STILL ONE
+translation unit (build.ps1 unchanged); the parts are NOT standalone and must not be compiled
+separately. Order matters. Each part's 3-line header names the line range it held in the old
+monolith, so old "sr3rtx.cpp:NNNN" citations in the worklog map to parts/ via those headers.
+PATCH SCRIPTS MUST NOW TARGET THE RIGHT parts/*.cpp FILE, not sr3rtx.cpp - grep src/sr3-rtx/parts.
+Proof of no behaviour change: reassembled parts byte-identical to the original; /EP preprocessed
+token streams identical (md5 2b6a29a6...); same-path monolith vs split builds differ only in 62
+lambda closure names (MSVC hashes lambda names from file+line), which reorders COMDAT layout.
+Backup of the monolith: src/sr3-rtx/sr3rtx.cpp.before-split (md5 02567674f0b332fc37bcaef34e43855f).
+NOT COMMITTED to git yet - ask the user.
 
 ## (a) DONE AND CONFIRMED (do not re-open)
 Earlier sessions: overlay/lost camera; bracelet+lens; floating car parts; 25 GB leak + crash;

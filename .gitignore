@@ -33,6 +33,8 @@ docs/evidence/*.png
 
 # Per-change source backups. Git history already holds these, and they run to tens of MB.
 src/sr3-rtx/sr3rtx.cpp.before-*
+# any backup anywhere under src/ (parts/, build.ps1, the host) - e.g. *.before-phase1
+src/**/*.before-*
 src/sr3-rtx/sr3rtx.cpp.EXPERIMENT-*
 configs/*.bak
 configs/*.ini.before-*

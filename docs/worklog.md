@@ -14886,3 +14886,79 @@ Scratchpad parsers: ring_unique_vs_all.py (draws unique to an artifact frame vs 
 - Delegation worked best when a subagent PUSHED BACK with a line citation: it correctly refused a
   previousPositionBuffer reset I asked for, proving from line 375 that the value was already
   cleared before the switch.
+
+================================================================================
+2026-10-22 - RESEARCH: GTA IV RTX REMIX (xoxor4d) IS MOVING WORLD GEOMETRY TO THE REMIX API
+================================================================================
+Latest gta4-rtx release v1.5.2 (2026-08-31); master last commit 2026-09-03.
+CONFIRMED IN CODE (no public announcement found): his dxvk-remix branch game/gta4 merged
+game/gta4_plus_api on 2026-10-18 (a6b6516a), built on "Remix Plus" (Kim2091's community fork).
+Commits describe a 32-bit client "whose frame is drawn entirely through DrawInstance", ~3,800-9,800
+API instances/frame. The CLIENT side (gta4-rtx renderer_api) is NOT public yet; runtime side is.
+NEW API EXTENSIONS on that branch (docs RemixApi_gta4.md / RemixApiChangelog_gta4.md):
+  remixapi_MaterialInfoGameTexturesEXT  - pass the game's IDirect3DTexture9*; material behaves like a
+                                          non-replaced D3D9 draw (re-reads image hash on streaming)
+  remixapi_InstanceInfoD3DOverridesEXT  - per-instance RS42/149/150/220/169/210/211-216 values = our
+                                          identity-pinning mechanism moved INTO the API
+  remixapi_MeshInfoReplacementHashEXT   - pass the D3D9 asset hash so USD replacements still apply
+  runtime: rtx.preserveUnchangedExternalDraws, rtx.skinningCpuVertexLimit=0, own BLAS for animated
+  meshes, OMM rebind every N frames, dxvk.maxQueuedCommandBuffers=32.
+BRIDGE (32-bit) BUGS HE FIXED - directly relevant to SR3's API path:
+  SetupCamera not forwarded at all; SKINNED BLEND WEIGHT/INDEX ARRAYS MIS-SIZED WHEN SENT (compare our
+  memory sr3-remix-hardware-skinning: "the API skinning crash is a bridge marshalling bug"); capture
+  with skinned DrawInstance crashed; CreateMesh pNext chains looped forever; data ring deadlock on
+  wrap; window messages raced DrawInstance; SetConfigVariable not thread-safe (31ca5867, 2026-10-20).
+UI: F4 Dear ImGui menu (~6.4k lines) drawn from the EndScene hook through the game's D3D9 device,
+i.e. through the bridge as UI draws; live edits via SetConfigVariable; settings to TOML. A separate
+in-process overlay attempt (test/overlay_imgui) flickered and was never merged.
+UPSTREAM 2026: GpuInstancingEXT (many transforms per DrawInstance), view-model flag on instances,
+SetConfigVariable writes the user layer, 32-bit bridge returns the server's API init status
+(57bba448, 2026-10-14), material texture transform/scroll (API 0.6.6, 2026-10-22).
+Read-only clone of gta4-rtx master: scratchpad\gta4src\repo.
+
+================================================================================
+2026-10-22 - TEAM A SPEC MINING: RENDERING FACTS FOR THE MOD (+ a flaw in the tint exoneration)
+================================================================================
+(Read-only subagent pass over D:\Project Crreish\TEAM A; spec + section given for every fact.)
+1 [decals/skew] NO Lock/Unlock opcode exists (spec-render-pipeline 14 item 6, RESOLVED 2026-10-12): dynamic
+  VB writes happen OUTSIDE the recorded stream. Opcodes 0x19/0x1C store a POINTER to constant data read
+  only at replay (20.1 CONFIRMED) - the engine already relies on producer memory staying valid until
+  replay. One sync query created at replay-thread start; no main<->render wait found (6.6 OPEN).
+  TODO: log Lock/Unlock thread id vs the replay DIP thread for the decal VB; if they differ, snapshot at
+  Unlock and bind the snapshot. Also check whether the bridge/Remix answers that query instantly.
+2 [tint] forward shaders bind VIEW-DEPENDENT RENDER TARGETS as textures (23.5/23.13 CONFIRMED, CTAB census
+  of 844 shaders): s9 = IR_GBuffer_DSF_DataSampler (80%), s10/s11 dual-paraboloid reflection, s12 light
+  buffer. Same pointer every frame, contents change with the view. Several families sample NO diffuse
+  texture (spec-vertex-format item 5): ir_sr3diffcolonly, ir_vertexcoloring1, ir_sr3glass_diffuse_reflect,
+  ir_window_reflectmask_scraper, megatv, swimmingpool; UV from the reflection vector: rl_ir_envmap,
+  ir_decal_*, carglass. HYPOTHESIS: a textureless family converted to FFP inherits whatever stage-0 texture
+  the previous draw left bound - and draw ORDER changes with the camera.
+  !! FLAW IN THE 2026-09-29 EXONERATION: that five-angle diff keyed each draw identity INCLUDING tex0. A
+  draw whose bound texture changes with draw order therefore became a DIFFERENT identity and was never
+  compared - the diff was blind to exactly this mechanism. "The shim hands Remix identical state" holds
+  only for draws whose texture did NOT change. Re-run the diff keyed WITHOUT tex0/alb.
+3 [tint/perf] each surface is drawn in several passes (23.13/23.6.4 CONFIRMED): G-buffer roles 4/5 (no
+  texture), one light-volume draw per light, forward roles 6/7 (7 = stipple crossfade), reflection role 1,
+  up to 4 view-fitted sun shadow cascades + per-light shadow maps (camera mode 10, INTZ). Suggestion:
+  classify by bound render target and send only role 6/7 forward draws to Remix.
+4 [tint] constants with NO writer: c35/c36 Object_instance_params (20.12.14 CONFIRMED NEGATIVE - hold the
+  previous draw's values), c47 Target_dimensions, c48 IR_Pixel_Steps (stay 0, rcp->NaN). Tint_color c37 not
+  written by paint. Only derive colour from registers with a known producer.
+5 [lights] 13 ir_light_* techniques; PS c0 IR_Light_Pos (view space; direction for directional), colour c2
+  (dir)/c3 (point), Info=Color+1, Spot_Info=Info+1; VS c20-c27 pos + 3x3 basis + colour*intensity
+  (23.6.2/23.6.3/25 CONFIRMED). Effect lights (brake, underglow) use the same path. Could replace the
+  hand-injected lights.
+6 [sun] sun direction is a closed formula of the clock hour (0x00B9E670, min elevation 40 deg, peak at
+  H=13.5); colours from default_district.xtbl curves (sun 16.5 at noon); ambient/back-ambient c28/c29
+  (spec-tables-environment 19.1-19.2, 25.1 FINAL).
+7 [char colour] heads and bodies are separate assets with their own textures and LOD bands
+  (spec-tables-customization 12.1a/f); the PLAYER's skin is baked EVERY FRAME into render targets
+  (2x1024x512 A8R8G8B8 + 2x2048x1024 X8R8G8B8); opcode 0x24 sets D3DSAMP_SRGBTEXTURE PER BINDING. Log the
+  sRGB flag + texture size/format for head vs body draws.
+8 [decal identity] decal_info.xtbl: <=32 types, 14 shipped, each with Life_Time/Fade_Time/size/fades;
+  identity could be (texture, quantised world centroid of the quad). Unattributed immediate-batch DIP
+  producers 0x00e5a290 (triangle-list quads), 0x005d80b0, 0x00fcf8e0, 0x004ad070 (18.4) - one is likely the
+  decal batcher.
+9 [windows] time_of_day_objects "Windows" switch by time of day; Window_Tint colour (19.1). Nothing on
+  ir_sr3fauxinterior / room atlases.
+10 [perf] display.ini ShadowDetail/SceneDetail/LightingDetail/SSAO_Level; tree LOD x0.5/1/10/10000 by level.
