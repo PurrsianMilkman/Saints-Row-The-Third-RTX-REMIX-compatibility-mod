@@ -196,7 +196,8 @@ IDirect3DBaseTexture9* HairAlbedoHsv(IDirect3DDevice9* dev) {
         HsvSectorToRgb(c1[0], S, V, rgb);
         unsigned o[3];
         for (int k = 0; k < 3; ++k) {
-            o[k] = static_cast<unsigned>(LinearToSrgb(ExposureCurve(rgb[k], tintC)) * 255.0f + 0.5f);
+            o[k] = static_cast<unsigned>(
+                LinearToSrgb(ExposureCurve(rgb[k] * g_settings.hairBrightness, tintC)) * 255.0f + 0.5f);
             acc[k] += o[k];
         }
         // Dob.G is the shader's alpha. Kept binary: a fractional alpha on a blended draw would
@@ -388,7 +389,8 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
             for (int k = 0; k < 3; ++k) {
                 const float m = m1[k] + (m2[k] - m1[k]) * wgt;    // lrp Blend.r, Sphere2, Sphere1
                 const float tone = g_settings.clothColourCurve ? c0[k] * m * 2.0f : c0[k] * m;
-                const float v = LinearToSrgb(g_gammaLUT[d[2 - k]] * ExposureCurve(tone, tintC));
+                const float v = LinearToSrgb(g_gammaLUT[d[2 - k]] *
+                                             ExposureCurve(tone * g_settings.skinBrightness, tintC));
                 o[k] = static_cast<unsigned>(v * 255.0f + 0.5f);
                 acc += o[k];
             }

@@ -9,6 +9,21 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
     ++g_frames;
     TickAssetHashProbeBurst();   // ASSET HASH PROBE: end the burst and log its summary, if due
     if ((g_frames % 300) == 0) PruneRecentWrites();
+    // LIVE RELOAD (tools/sr3-tuner.pyw): the tuner writes the ini, then creates sr3-rtx.reload
+    // beside the game exe. Settings are re-read and every baked texture (cloth, hair, skin) is
+    // dropped so the next draws rebuild it with the new values. Checked every 15 frames.
+    if ((g_frames % 15) == 0) {
+        char rp[MAX_PATH]{};
+        GetModuleFileNameA(nullptr, rp, MAX_PATH);
+        if (char* slash = strrchr(rp, '\\')) strcpy_s(slash + 1, 32, "sr3-rtx.reload");
+        if (GetFileAttributesA(rp) != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileA(rp);
+            LoadSettings();
+            ReleaseClothCache();
+            ++g_clothCacheFlushes;
+            Log("LIVE RELOAD at frame %u: settings re-read, baked textures dropped for rebuild", g_frames);
+        }
+    }
     KickOcclusionJob();
     SweepTightWin();
     SweepOrphans();
