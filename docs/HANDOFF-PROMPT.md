@@ -131,6 +131,11 @@ Sequenced by the lead (measure before fixing):
    hairHsvAlbedo, skinGenPerFrame=2. Full formulas: worklog 2026-10-22 entry. NEXT: user runs once ->
    read report lines "HAIR (hairHsvAlbedo" and "SKIN (skinMatcapAlbedo" + log lines "HAIR HSV #" /
    "SKIN #". Key question: does NPC hair reach the generator (last run built ONE hair texture total)?
+   RUN 2026-10-23: user says heads UNCHANGED. Log: npcskinfull 2.4/frame ALL = player atlas (skipped),
+   pchair 0.3/frame = player only -> NPC heads/hair use OTHER shaders. Added (commit aaf8346, deployed,
+   logic md5 9c001a4e): one-matcap ir_sr3shaderball bake (lerp(1,Sphere_Map,c7 Sphere_Map_Amount)*D*c0*2,
+   skinSingleMatcap=1) + "SKINNED LAYOUTS" report listing every converted skinned draw's sampler layout.
+   NEXT: user runs near NPCs -> read SKINNED LAYOUTS to name the NPC head shader, then bake that one.
  STEP 2: fixes justified by step 1 - snapshot dynamic VB at Unlock and bind it for the replay DIP if
    threads differ; head/body sRGB/format correction if mismatched.
  STEP 3: features, each its own job: Remix lights from ir_light_* shader constants (PS c0 pos view-space,
