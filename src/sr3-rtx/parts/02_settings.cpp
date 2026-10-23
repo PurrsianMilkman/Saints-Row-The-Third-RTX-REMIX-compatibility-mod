@@ -490,6 +490,11 @@ struct Settings {
     // min/max-only scan (no allocation, no hashing - see ScanIndexMinMaxCheap). ON by default:
     // see CheckIndexWindow's own comment, above Hook_DrawIndexedPrimitive, for the full picture.
     bool indexWindowProbe = true;
+    // DIAGNOSTIC (measurement only): dynamic-VB last-unlock thread vs drawing thread. See LtNoteDraw.
+    bool lockThreadProbe = true;
+    // DIAGNOSTIC (measurement only): do a character head/body draws bind albedo with different
+    // sRGB / size / format / render-target state? See BhNoteDraw.
+    bool headBodyProbe = true;
     // INDEX WINDOW CLAMP - the fix. OFF (the default): measured only, every draw issued exactly
     // as today, byte for byte. ON: a converted, non-skinned, D3DPT_TRIANGLELIST draw the probe
     // above found referencing an out-of-window index is re-issued from a SHIM-OWNED index buffer
@@ -895,6 +900,8 @@ void LoadSettings() {
     g_settings.tightWinEvictByAge = flag("tightWinEvictByAge", true);
     g_settings.widenUnderDeclaredWindow = flag("widenUnderDeclaredWindow", true);
     g_settings.indexWindowProbe = flag("indexWindowProbe", true);
+    g_settings.lockThreadProbe = flag("lockThreadProbe", true);
+    g_settings.headBodyProbe = flag("headBodyProbe", true);
     g_settings.indexWindowClamp = flag("indexWindowClamp", false);
     g_settings.indexWindowClampStrips = flag("indexWindowClampStrips", false);
     g_settings.orphanSweep = flag("orphanSweep", true);

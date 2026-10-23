@@ -533,6 +533,8 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             "%.2f/frame skipped for it (deferFreshStaticDraws=%d) | recent-write table %u buffers | rolling record %d frames (F9 writes it)",
             g_freshSeen / f, g_settings.deferFreshFrames, g_deferredFresh / f, g_settings.deferFreshStaticDraws ? 1 : 0,
             static_cast<unsigned>(g_recentWrites.size()), g_settings.ringFrames);
+        if (g_settings.lockThreadProbe) LtReport(f);
+        if (g_settings.headBodyProbe) BhReport(f);
         Log("        OVERLAY OFFSET: %.1f converted draws/frame pulled toward the camera by %d/1000 of their distance. "
             "By signature: no depth write or ZFUNC=EQUAL %.1f, first sampler is a DECAL map %.1f, truly blended (by the "
             "FACTORS) %.1f, depth bias set %.1f | LAYERS (same triangles, same placement, drawn again) %.1f/frame, "

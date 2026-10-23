@@ -101,6 +101,19 @@ UI options put to the user: in-game ImGui overlay (through the bridge, fights ga
 separate tuning window (local panel/second monitor/phone, safest) vs a tab in Remix's Alt+X menu
 (64-bit bridge process, no channel to the 32-bit shim - hardest). Recommended: separate window.
 
+## >>> ACTIVE TASK 2026-10-22: USER SAID "implement our findings" (the TEAM A findings) <<<
+Sequenced by the lead (measure before fixing):
+ STEP 1 (DELEGATED to a Sonnet subagent, in flight at compaction): two cheap DIAGNOSTICS behind ini
+   switches, default ON, with report lines: (a) per dynamic VB - thread id of Lock/Unlock vs thread id
+   of the DrawIndexedPrimitive that reads it (decal record/replay skew); (b) head vs body draws of the
+   same character - D3DSAMP_SRGBTEXTURE, texture size, format (character colour mismatch).
+   Then: deploy, ask the user for ONE run, read the log.
+ STEP 2: fixes justified by step 1 - snapshot dynamic VB at Unlock and bind it for the replay DIP if
+   threads differ; head/body sRGB/format correction if mismatched.
+ STEP 3: features, each its own job: Remix lights from ir_light_* shader constants (PS c0 pos view-space,
+   c2/c3 colour, Info/Spot_Info; VS c20-c27); sun from the hour formula (0x00B9E670); send Remix only
+   forward-pass (roles 6/7) draws by render target.
+ Commit+push each step (standing instruction; scan for never-commit files first).
 ## TEAM A MINED 2026-10-22 - see worklog entry 'TEAM A SPEC MINING'. TOP LEADS: tint = textureless families (ir_sr3diffcolonly etc.) inheriting the previous draw's stage-0 texture under camera-dependent draw order; THE 2026-09-29 DIFF WAS BLIND TO THIS (key included tex0) - RE-RUN 2026-10-22 KEYED WITHOUT tex0/alb: 165 draws in >=3 rotations, 0 change texture (7 flagged only change draw MULTIPLICITY - visibility, not texture). Exoneration HOLDS; texture-inheritance theory NOT supported by these dumps. Decals = no Lock opcode, VB writes outside the stream: log lock thread vs replay thread.
 ## HOT-RELOAD PHASE 1 DONE + DEPLOYED + CONFIRMED IN GAME 2026-10-22 21:58 (no host log = no failure; logic loaded pid 37864, 164 ini keys, CreateDevice hooked, 42 fps, hooks firing via thunks). NEXT: phase 2 (clean shutdown). TUNING UI NOT BUILT YET - user asked how to use it; waiting on their list of what to tune.
 Shim is now TWO DLLs: host src/sr3-rtx-host/host.cpp -> sr3-rtx.asi (3126475f2191187eda2d826519cb644e,

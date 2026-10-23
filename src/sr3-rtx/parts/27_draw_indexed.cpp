@@ -1,6 +1,105 @@
 // parts/27_draw_indexed.cpp - Hook_DrawIndexedPrimitive.
 // NOT a standalone translation unit: #included, in order, by ../sr3rtx.cpp inside its anonymous
 // namespace. Originally sr3rtx.cpp lines 23119-23643 (old file:line citations map here).
+// DIAGNOSTIC headBodyProbe (measurement only). For CONVERTED SKINNED draws: the albedo's sRGB sampler
+// state (g_ssShadow, the game's own SetSamplerState as the shim saw it), size, format, render-target
+// status, prim count and rounded world position. Draws at the same rounded position within a frame
+// are grouped as one character; a frame is closed (and its mixed-state counts added) when the first
+// probed draw of the next frame arrives. Bounded (48 characters x 8 draws).
+struct BhDraw { UINT prims; int srgb; UINT w, h; DWORD fmt; bool rt, haveDesc; void* tex; };
+struct BhChar { int x, y, z; unsigned n; BhDraw d[8]; };
+constexpr unsigned kBhMaxChars = 48, kBhMaxDraws = 8;
+BhChar g_bhChars[kBhMaxChars];
+unsigned g_bhNChars = 0, g_bhFrame = 0, g_bhOverflow = 0, g_bhExamples = 0;
+unsigned long long g_bhFramesClosed = 0, g_bhDraws = 0, g_bhNoAlbedo = 0, g_bhCharsSeen = 0, g_bhMulti = 0,
+                   g_bhMixSrgb = 0, g_bhMixRT = 0, g_bhMixFmt = 0, g_bhMixSize = 0, g_bhMixAny = 0;
+const char* BhFmtName(DWORD f) {
+    switch (f) {
+        case D3DFMT_A8R8G8B8: return "A8R8G8B8"; case D3DFMT_X8R8G8B8: return "X8R8G8B8";
+        case D3DFMT_R5G6B5: return "R5G6B5"; case D3DFMT_A16B16G16R16F: return "A16B16G16R16F";
+        case D3DFMT_L8: return "L8"; case D3DFMT_A8: return "A8";
+        case D3DFMT_DXT1: return "DXT1"; case D3DFMT_DXT3: return "DXT3"; case D3DFMT_DXT5: return "DXT5";
+        default: return "?";
+    }
+}
+void BhCloseFrame() {
+    for (unsigned c = 0; c < g_bhNChars; ++c) {
+        const BhChar& ch = g_bhChars[c];
+        ++g_bhCharsSeen;
+        if (ch.n < 2) continue;
+        ++g_bhMulti;
+        bool ms = false, mr = false, mf = false, mz = false;
+        for (unsigned i = 1; i < ch.n; ++i) {
+            if (ch.d[i].srgb != ch.d[0].srgb) ms = true;
+            if (ch.d[i].rt != ch.d[0].rt) mr = true;
+            if (ch.d[i].fmt != ch.d[0].fmt) mf = true;
+            if (ch.d[i].w != ch.d[0].w || ch.d[i].h != ch.d[0].h) mz = true;
+        }
+        if (ms) ++g_bhMixSrgb;
+        if (mr) ++g_bhMixRT;
+        if (mf) ++g_bhMixFmt;
+        if (mz) ++g_bhMixSize;
+        const bool any = ms || mr || mf || mz;
+        if (any) ++g_bhMixAny;
+        // Up to 10 examples: mixed characters always; uniform multi-draw ones only while fewer
+        // than 7 are logged, as a control.
+        if (g_bhExamples < 10 && (any || g_bhExamples < 7)) {
+            ++g_bhExamples;
+            char buf[900]; buf[0] = 0;
+            for (unsigned i = 0; i < ch.n; ++i)
+                sprintf_s(buf + strlen(buf), sizeof(buf) - strlen(buf),
+                          " [prims=%u srgb=%d %ux%u %s%s rt=%d tex=%p]", ch.d[i].prims, ch.d[i].srgb,
+                          ch.d[i].w, ch.d[i].h, BhFmtName(ch.d[i].fmt),
+                          ch.d[i].haveDesc ? "" : "(nodesc)", ch.d[i].rt ? 1 : 0, ch.d[i].tex);
+            Log("HEAD/BODY PROBE example #%u (%s) frame %u at(%d,%d,%d): %u draws:%s", g_bhExamples,
+                any ? "MIXED" : "uniform", g_bhFrame, ch.x, ch.y, ch.z, ch.n, buf);
+        }
+    }
+    ++g_bhFramesClosed;
+    g_bhNChars = 0;
+}
+void BhNoteDraw(UINT primitiveCount) {
+    if (g_bhFrame != g_frames) { if (g_bhNChars) BhCloseFrame(); g_bhFrame = g_frames; }
+    ++g_bhDraws;
+    IDirect3DBaseTexture9* const tex = g_lastBoundAlbedo;
+    BhDraw bd{};
+    bd.prims = primitiveCount; bd.srgb = -1; bd.tex = static_cast<void*>(tex);
+    int st = g_lastEffectiveAlbedoStage;
+    if (st < 0 || st > 15) st = (g_curPS.albedoStage >= 0 && g_curPS.albedoStage < 16) ? g_curPS.albedoStage : 0;
+    if (g_ssKnown[st][D3DSAMP_SRGBTEXTURE]) bd.srgb = static_cast<int>(g_ssShadow[st][D3DSAMP_SRGBTEXTURE]);
+    if (tex) {
+        bd.rt = g_rtTextures.count(tex) != 0;
+        if (tex->GetType() == D3DRTYPE_TEXTURE) {
+            D3DSURFACE_DESC sd{};
+            if (SUCCEEDED(static_cast<IDirect3DTexture9*>(tex)->GetLevelDesc(0, &sd))) {
+                bd.w = sd.Width; bd.h = sd.Height; bd.fmt = static_cast<DWORD>(sd.Format); bd.haveDesc = true;
+            }
+        }
+    } else ++g_bhNoAlbedo;
+    const D3DMATRIX o = FromRegisters(&g_vsConst[kRegObjTM][0], 3);
+    const int x = static_cast<int>(floorf(o._41 + 0.5f)), y = static_cast<int>(floorf(o._42 + 0.5f)),
+              z = static_cast<int>(floorf(o._43 + 0.5f));
+    BhChar* ch = nullptr;
+    for (unsigned c = 0; c < g_bhNChars; ++c)
+        if (g_bhChars[c].x == x && g_bhChars[c].y == y && g_bhChars[c].z == z) { ch = &g_bhChars[c]; break; }
+    if (!ch) {
+        if (g_bhNChars >= kBhMaxChars) { ++g_bhOverflow; return; }
+        ch = &g_bhChars[g_bhNChars++];
+        ch->x = x; ch->y = y; ch->z = z; ch->n = 0;
+    }
+    if (ch->n >= kBhMaxDraws) { ++g_bhOverflow; return; }
+    ch->d[ch->n++] = bd;
+}
+void BhReport(double f) {
+    Log("    HEAD/BODY PROBE (headBodyProbe=ON, converted SKINNED draws, grouped by rounded objTM position): "
+        "%.1f probed draws/frame, %llu frames closed | characters seen %llu, of which %llu have 2+ draws | "
+        "MIXED sRGB state %llu, MIXED render-target-vs-not %llu, MIXED format %llu, MIXED size %llu, "
+        "any mix %llu | %llu draws had no albedo bound | %u draws dropped by the 48-char/8-draw cap | "
+        "%u/10 examples logged (srgb=-1 means the game never set it)",
+        g_bhDraws / f, g_bhFramesClosed, g_bhCharsSeen, g_bhMulti, g_bhMixSrgb, g_bhMixRT, g_bhMixFmt,
+        g_bhMixSize, g_bhMixAny, g_bhNoAlbedo, g_bhOverflow, g_bhExamples);
+}
+
 HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type,
                                          INT baseVertex, UINT minIndex, UINT numVertices,
                                          UINT startIndex, UINT primitiveCount) {
@@ -24,6 +123,7 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     g_curDrawStartIndex = startIndex;
     g_curDrawPrimCount = primitiveCount;
     g_curDrawPrimType = type;
+    if (g_settings.lockThreadProbe) LtNoteDraw(g_stream0, numVertices, primitiveCount);   // diagnostic only
     NoteIfFinalComposite(dev);   // injectProbe/injectControl PART 1/2: before Classify runs
     { const LONGLONG t0 = Now(); EmitLight(dev); g_phaseMs[PH_ENTRY_LIGHT] += MsSince(t0); }
     LONGLONG tP = tShim;
@@ -241,6 +341,7 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // Population of the deferred G-buffer pass, measured against what is actually converted.
     // Purely observational until the numbers say what hiding it would cost.
     PhaseAdd(PH_SKIN, tP);
+    if (g_settings.headBodyProbe && d == Disp::Convert && g_curLayout.skinned) BhNoteDraw(primitiveCount);   // diagnostic only
     if (g_curPS.isPixelShader && g_curPS.rtCount > 1) {
         ++g_mrtWouldHide;
         if (d == Disp::Convert) {

@@ -71,6 +71,119 @@ void DrainPendingInvalidations() {
 bool VertexRangeFits(IDirect3DVertexBuffer9* vb, UINT streamOffset, UINT firstVertex,
                      UINT count, UINT stride);
 
+// DIAGNOSTIC lockThreadProbe (measurement only; never Locks, binds or draws anything).
+// For DYNAMIC vertex buffers that are drawn: is the thread that last Locked/Unlocked the buffer
+// different from the thread issuing the DrawIndexedPrimitive that reads it, and how many times was
+// the buffer re-locked between the previous draw from it and this one? All state below is guarded
+// by SnoopGuard - the lock Hook_VBLock/Hook_VBUnlock already hold - so no new lock is introduced.
+// Bounded: at kMaxLockStamps entries the map is flushed and rebuilt (as g_meshAlbedo is).
+struct LockStamp {
+    DWORD lockThread = 0, unlockThread = 0;
+    unsigned lockCount = 0;            // completed game write Lock/Unlock pairs on this buffer
+    unsigned lastDrawLockCount = 0;    // lockCount as of the previous draw reading it
+    unsigned unlockFrame = 0;
+    bool writeOpen = false, drawn = false;
+};
+std::unordered_map<IDirect3DVertexBuffer9*, LockStamp> g_lockStamps;
+constexpr size_t kMaxLockStamps = 4096;
+constexpr unsigned kLtMaxThreads = 8;
+DWORD g_ltLockThreads[kLtMaxThreads] = {}, g_ltDrawThreads[kLtMaxThreads] = {};
+unsigned g_ltNLockThreads = 0, g_ltNDrawThreads = 0, g_ltFlushes = 0, g_ltMaxDelta = 0;
+unsigned long long g_ltUnlocks = 0, g_ltDynDraws = 0, g_ltDiffThread = 0, g_ltFirstDraw = 0,
+                   g_ltDelta0 = 0, g_ltDelta1 = 0, g_ltDelta2Plus = 0, g_ltNoStamp = 0;
+struct LtExample { char ps[28]; UINT v, p, off; DWORD lockThread, drawThread; unsigned delta; void* vb; bool diff; };
+LtExample g_ltEx[10] = {};
+unsigned g_ltExN = 0, g_ltExDiff = 0, g_ltExSame = 0;
+void LtNoteThread(DWORD* list, unsigned& n, DWORD t) {
+    for (unsigned i = 0; i < n; ++i) if (list[i] == t) return;
+    if (n < kLtMaxThreads) list[n++] = t;
+}
+// Under SnoopGuard. A writable game Lock opens a stamp...
+void LtNoteLock(IDirect3DVertexBuffer9* vb) {
+    try {
+        if (g_lockStamps.size() >= kMaxLockStamps && !g_lockStamps.count(vb)) {
+            g_lockStamps.clear();
+            ++g_ltFlushes;
+        }
+        LockStamp& s = g_lockStamps[vb];
+        s.lockThread = GetCurrentThreadId();
+        s.writeOpen = true;
+        LtNoteThread(g_ltLockThreads, g_ltNLockThreads, s.lockThread);
+    } catch (...) {}
+}
+// ...and the matching Unlock closes it. Under SnoopGuard.
+void LtNoteUnlock(IDirect3DVertexBuffer9* vb) {
+    const auto it = g_lockStamps.find(vb);
+    if (it == g_lockStamps.end() || !it->second.writeOpen) return;
+    LockStamp& s = it->second;
+    s.writeOpen = false;
+    s.unlockThread = GetCurrentThreadId();
+    s.unlockFrame = g_frames;
+    ++s.lockCount;
+    ++g_ltUnlocks;
+    LtNoteThread(g_ltLockThreads, g_ltNLockThreads, s.unlockThread);
+}
+// Draw thread. Cheap exit for static buffers (cached desc lookup, no lock).
+void LtNoteDraw(IDirect3DVertexBuffer9* vb, UINT numVertices, UINT primCount) {
+    if (!vb || !IsDynamicVB(vb)) return;
+    const DWORD tid = GetCurrentThreadId();
+    SnoopGuard guard;
+    ++g_ltDynDraws;
+    LtNoteThread(g_ltDrawThreads, g_ltNDrawThreads, tid);
+    const auto it = g_lockStamps.find(vb);
+    if (it == g_lockStamps.end() || it->second.lockCount == 0) { ++g_ltNoStamp; return; }
+    LockStamp& s = it->second;
+    const bool diff = s.unlockThread != tid;
+    if (diff) ++g_ltDiffThread;
+    unsigned delta = 0;
+    if (!s.drawn) { ++g_ltFirstDraw; delta = s.lockCount; }
+    else {
+        delta = s.lockCount - s.lastDrawLockCount;
+        if (delta == 0) ++g_ltDelta0; else if (delta == 1) ++g_ltDelta1; else ++g_ltDelta2Plus;
+        if (delta > g_ltMaxDelta) g_ltMaxDelta = delta;
+    }
+    s.drawn = true;
+    s.lastDrawLockCount = s.lockCount;
+    if (g_ltExN < 10 && ((diff && g_ltExDiff < 5) || (!diff && g_ltExSame < 5))) {
+        LtExample& e = g_ltEx[g_ltExN++];
+        if (diff) ++g_ltExDiff; else ++g_ltExSame;
+        strncpy_s(e.ps, g_curPS.firstSampler, 27);
+        e.v = numVertices; e.p = primCount; e.off = g_stream0Offset; e.vb = static_cast<void*>(vb);
+        e.lockThread = s.unlockThread; e.drawThread = tid; e.delta = delta; e.diff = diff;
+    }
+}
+void LtReport(double f) {
+    unsigned long long unl, dyn, diffT, first, d0, d1, d2, nostamp;
+    unsigned nl, nd, maxd, flushes, nex;
+    DWORD lt[kLtMaxThreads], dt[kLtMaxThreads];
+    LtExample ex[10];
+    size_t stamps;
+    {
+        SnoopGuard guard;
+        unl = g_ltUnlocks; dyn = g_ltDynDraws; diffT = g_ltDiffThread; first = g_ltFirstDraw;
+        d0 = g_ltDelta0; d1 = g_ltDelta1; d2 = g_ltDelta2Plus; nostamp = g_ltNoStamp;
+        nl = g_ltNLockThreads; nd = g_ltNDrawThreads; maxd = g_ltMaxDelta; flushes = g_ltFlushes;
+        nex = g_ltExN; stamps = g_lockStamps.size();
+        memcpy(lt, g_ltLockThreads, sizeof(lt)); memcpy(dt, g_ltDrawThreads, sizeof(dt));
+        memcpy(ex, g_ltEx, sizeof(ex));
+    }
+    char ls[160] = "", ds[160] = "";
+    for (unsigned i = 0; i < nl; ++i) sprintf_s(ls + strlen(ls), sizeof(ls) - strlen(ls), "%s%lu", i ? "," : "", static_cast<unsigned long>(lt[i]));
+    for (unsigned i = 0; i < nd; ++i) sprintf_s(ds + strlen(ds), sizeof(ds) - strlen(ds), "%s%lu", i ? "," : "", static_cast<unsigned long>(dt[i]));
+    Log("    LOCK THREAD PROBE (lockThreadProbe=ON, DYNAMIC vertex buffers only): %.2f draws/frame read a "
+        "dynamic VB | %.2f/frame last unlocked by a DIFFERENT thread (%.1f%%) | re-locked since the "
+        "previous draw from the same buffer: 0x=%llu 1x=%llu 2+x=%llu (max %u), first draw of a buffer "
+        "%llu | no game unlock stamp yet %llu | game write unlocks stamped %llu | lock/unlock thread ids "
+        "{%s} draw thread ids {%s} | stamp table %u buffers, %u flushes",
+        dyn / f, diffT / f, dyn ? 100.0 * diffT / dyn : 0.0, d0, d1, d2, maxd, first, nostamp, unl,
+        ls, ds, static_cast<unsigned>(stamps), flushes);
+    for (unsigned i = 0; i < nex; ++i)
+        Log("        lock-thread example #%u (%s): ps='%s' v=%u p=%u vb=%p offset=%u lockThread=%lu "
+            "drawThread=%lu locksSincePrevDraw=%u", i + 1, ex[i].diff ? "DIFFERENT thread" : "same thread",
+            ex[i].ps, ex[i].v, ex[i].p, ex[i].vb, ex[i].off, static_cast<unsigned long>(ex[i].lockThread),
+            static_cast<unsigned long>(ex[i].drawThread), ex[i].delta);
+}
+
 HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size, void** data,
                            DWORD flags) {
     const HRESULT hr = g_origVBLock(self, offset, size, data, flags);
@@ -78,6 +191,7 @@ HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size,
     if (flags & D3DLOCK_READONLY) return hr;   // the game is reading; nothing new to capture
 
     SnoopGuard guard;   // everything below touches state the render thread also reads
+    if (g_settings.lockThreadProbe) LtNoteLock(self);   // diagnostic only
 
     // A discard invalidates everything we hold for this buffer, even the bytes it does not go on
     // to rewrite. Recorded rather than assumed away.
@@ -173,6 +287,7 @@ HRESULT WINAPI Hook_VBUnlock(IDirect3DVertexBuffer9* self) {
     // main-thread entry regardless of the internal flag, because pl.owner names that SAME thread
     // here - only a DIFFERENT thread's Unlock is now refused the entry.
     SnoopGuard guard;
+    if (g_settings.lockThreadProbe && !InternalHere()) LtNoteUnlock(self);   // diagnostic only
     PendingLock pl = g_pendingLock;
     const bool sameOwnerThread =
         !g_settings.vbUnlockOwnerThread || pl.owner == GetCurrentThreadId();
