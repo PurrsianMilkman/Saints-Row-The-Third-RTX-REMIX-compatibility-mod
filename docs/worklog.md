@@ -14962,3 +14962,24 @@ Read-only clone of gta4-rtx master: scratchpad\gta4src\repo.
 9 [windows] time_of_day_objects "Windows" switch by time of day; Window_Tint colour (19.1). Nothing on
   ir_sr3fauxinterior / room atlases.
 10 [perf] display.ini ShadowDetail/SceneDetail/LightingDetail/SSAO_Level; tree LOD x0.5/1/10/10000 by level.
+
+## 2026-10-22 - NPC skin tone and white hair: read from the shaders, fix built
+
+User: NPC heads a different colour, all heads white-haired, body skin lighter than the head.
+RE (subagent, verified against the disassembly myself):
+- SKIN ir_sr3npcskinfull_c ps[8] (asm 1004-1023): S = lerp(Sphere_Map_1[s3], Sphere_Map_2[s2],
+  Blend_Map[s4].r) sampled by view-space normal (matcap); albedo = Diffuse[s0]*Diffuse_Color(c0)*S*2;
+  out *= Tint_color c37. The shim bound only s0, so there was no tone; painted-on hair (Blend.r picks
+  the second matcap) came out white.
+- HAIR ir_sr3pchair_c ps[8]: b=Dob.B; S=lerp(c1.z,c1.y,b); V=b*c1.w+c2.y; albedo=HSV(c1.x sectors,S,V);
+  alpha=Dob.G. c3/c4 (Hair_Spec_Color1/2) weight the SPECULAR terms only. The old HairAlbedo used c4*Dob.R.
+  Logged c1=(0.133,.8,.8,.07), c2=(.3,.01) = the Brunette row of player_creation_hair_color.xtbl exactly.
+- The last run built ONE hair texture total (the player's), so NPC hair never reached HairAlbedo. Cause unknown:
+  the new census counts it.
+Built: HairAlbedoHsv + SkinAlbedo (08_hair.cpp), chained after ClothAlbedo in 16_time_accounting.cpp
+(both get the cloth cutout path), exposure = cloth curve Reinhard(Tint*x). Switches: hairHsvAlbedo=1,
+skinMatcapAlbedo=1, skinGenPerFrame=2. The player's dynamic/RT atlas is excluded from SkinAlbedo.
+Report lines: HAIR (seen/converted/reached/built/null reasons), SKIN (same + deferred), and the logs
+HAIR HSV #n / SKIN #n (matcap disc means, Blend mean, result mean).
+Expected: the Brunette strand colour at full mask is about sRGB (144,93,78).
+Deployed 2026-10-22: logic dll md5 7ecd80f3..., ini 4bfe5489.... Awaiting one run.

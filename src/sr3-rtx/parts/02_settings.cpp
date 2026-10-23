@@ -101,6 +101,16 @@ struct Settings {
     // Give hair its STRAND detail by modulating the hair colour with the Dob_Map's strand
     // channel, instead of shipping one flat colour. 0 restores the flat constant.
     bool hairStrandsFromDob = true;
+    // Colour hair the way ir_sr3pchair_c ps[8] does: HSV from Hair_Parameters/Hair_Spec_Alpha with
+    // the Dob_Map's B channel as the brightness/saturation mask, through the cloth exposure curve.
+    // 0 restores the older generator (Hair_Spec_Color2 * Dob.R), which used a SPECULAR colour.
+    bool hairHsvAlbedo = true;
+    // Bake the skin shader's matcap tone into the albedo: Diffuse * Diffuse_Color *
+    // lerp(Sphere_Map_1, Sphere_Map_2, Blend_Map.r) * 2, matcaps averaged over their disc. Without
+    // it the head binds the bare greyscale Diffuse_Map: no skin tone, and painted-on hair white.
+    bool skinMatcapAlbedo = true;
+    // Skin textures built per frame at most; a draw over budget keeps its raw diffuse for a frame.
+    int skinGenPerFrame = 2;
     // Last resort for a garment whose pattern is a DECAL on an independent uv set: take the
     // pattern's dominant colour for the whole surface. An approximation, and labelled as one -
     // it gets the garment's colour right and loses the decal. 0 leaves such garments untinted,
@@ -800,6 +810,9 @@ void LoadSettings() {
     g_settings.compositeFfp = flag("compositeFfp", true);
     g_settings.clothUniformFromDiffuse = flag("clothUniformFromDiffuse", true);
     g_settings.hairStrandsFromDob = flag("hairStrandsFromDob", true);
+    g_settings.hairHsvAlbedo = flag("hairHsvAlbedo", true);
+    g_settings.skinMatcapAlbedo = flag("skinMatcapAlbedo", true);
+    g_settings.skinGenPerFrame = num("skinGenPerFrame", 2);
     g_settings.clothDominantPattern = flag("clothDominantPattern", true);
     g_settings.clothPadUnused = flag("clothPadUnused", true);
     g_settings.clothCutout = flag("clothCutout", true);

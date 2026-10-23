@@ -1109,6 +1109,19 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                 "%u could not be generated",
                 g_clothGenerated, static_cast<unsigned>(g_clothCache.size()),
                 g_clothCacheFlushes, g_clothBound / f, g_clothGenFailed);
+        Log("    HAIR (hairHsvAlbedo=%s): hair-shader draws %.1f/frame seen, %.1f/frame converted, "
+            "%.1f/frame reached the generator | %u textures built | not built: %s %u, %s %u, %s %u, "
+            "%s %u, %s %u",
+            g_settings.hairHsvAlbedo ? "ON" : "off", g_hairShaderSeen / f, g_hairShaderConverted / f,
+            g_hairDraws / f, g_hairHsvGen, kHairNull[0], g_hairNull[0], kHairNull[1], g_hairNull[1],
+            kHairNull[2], g_hairNull[2], kHairNull[3], g_hairNull[3], kHairNull[4], g_hairNull[4]);
+        Log("    SKIN (skinMatcapAlbedo=%s): skin-shader draws %.1f/frame seen, %.1f/frame converted, "
+            "%.1f/frame reached the generator | %u textures built, %u builds deferred by the "
+            "%d/frame cap | not built: %s %u, %s %u, %s %u, %s %u, %s %u",
+            g_settings.skinMatcapAlbedo ? "ON" : "off", g_skinShaderSeen / f,
+            g_skinShaderConverted / f, g_skinDraws / f, g_skinGen, g_skinDeferred,
+            g_settings.skinGenPerFrame, kSkinNull[0], g_skinNull[0], kSkinNull[1], g_skinNull[1],
+            kSkinNull[2], g_skinNull[2], kSkinNull[3], g_skinNull[3], kSkinNull[4], g_skinNull[4]);
 
         // The measurement that says whether the stall is ours. "shim" is time inside our hooks
         // only - the draw call itself is excluded, so this does not charge us for bridge cost.

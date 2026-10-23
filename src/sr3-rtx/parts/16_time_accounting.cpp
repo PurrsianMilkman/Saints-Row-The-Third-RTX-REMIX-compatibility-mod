@@ -408,7 +408,13 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     // the base vertex, which together identify a mesh inside SR3's shared buffers; the pointer
     // alone would merge every mesh sharing a buffer onto one texture.
     // The player's chosen clothing colours, evaluated per texel into a texture of our own.
-    if (IDirect3DBaseTexture9* cloth = ClothAlbedo(dev)) {
+    // Hair and skin take the same route, and the same cutout: their ranked albedo is a mask
+    // (hair's Diffuse_Map is directional data) or a greyscale map the shader colours from
+    // constants and matcaps - see HairAlbedoHsv and SkinAlbedo.
+    IDirect3DBaseTexture9* cloth = ClothAlbedo(dev);
+    if (!cloth) cloth = HairAlbedo(dev);
+    if (!cloth) cloth = SkinAlbedo(dev);
+    if (cloth) {
         albedo = cloth;
         // A generated texture that carries a cutout is alpha-tested, the way a shader texkill is
         // in SetupTextureStages. That function has already run, and decided TFACTOR alpha for
@@ -483,9 +489,6 @@ Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
             }
         }
     }
-    // Hair takes the same route. Its ranked albedo is the Diffuse_Map, which for hair is
-    // DIRECTIONAL data rather than colour - binding it is what made hair render as a mask.
-    else if (IDirect3DBaseTexture9* hair = HairAlbedo(dev)) albedo = hair;
 
     PhaseAdd(PH_ALBEDO, tB);
     g_lastAlbedoFromCache = false;

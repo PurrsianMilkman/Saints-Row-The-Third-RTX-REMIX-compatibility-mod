@@ -24,6 +24,17 @@ The ordinary textured path never wrote `D3DRS_TEXTUREFACTOR`, contrary to the sh
 contract, so a normal draw inherited whatever the last constant-colour draw left behind. It now writes
 opaque white (`resetTFactorOnTexturedDraws`, on by default).
 
+### Fixed (awaiting an in-game check): NPC skin tone and white hair
+
+Read from the game's own shaders. Character skin (`ir_sr3npcskinfull`) gets its tone from two
+matcap textures (`Sphere_Map_1/2`) blended by `Blend_Map.r`, times `Diffuse_Color`, times 2. The shim
+bound only the greyscale diffuse, so heads had no skin tone and hair painted onto the head came out
+white. Hair meshes (`ir_sr3pchair`) are coloured by HSV from `Hair_Parameters`, with the Dob map's
+blue channel as the mask. The old generator used a specular colour instead. Both are now baked the way
+clothing is, through the same exposure curve: `skinMatcapAlbedo`, `hairHsvAlbedo` (both on), plus
+`skinGenPerFrame` (2). New HAIR and SKIN report lines count every hair and skin draw and why any
+were not generated.
+
 ### Investigated, not yet fixed
 
 - **World surfaces shifting to a dark tint with camera angle.** Fourteen causes ruled out. Frame dumps

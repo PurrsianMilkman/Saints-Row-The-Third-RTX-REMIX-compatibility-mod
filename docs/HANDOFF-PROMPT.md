@@ -103,11 +103,28 @@ separate tuning window (local panel/second monitor/phone, safest) vs a tab in Re
 
 ## >>> ACTIVE TASK 2026-10-22: USER SAID "implement our findings" (the TEAM A findings) <<<
 Sequenced by the lead (measure before fixing):
- STEP 1 (DELEGATED to a Sonnet subagent, in flight at compaction): two cheap DIAGNOSTICS behind ini
+ STEP 1 DONE, DEPLOYED + PUSHED (e4298c1) 2026-10-22: asi f32db31e, logic 9f1dc657, ini af9a464f. NOW WAITING ON ONE USER RUN, then read 'LOCK THREAD PROBE' and 'HEAD/BODY PROBE' lines in sr3-rtx.log (archive the log first). Original step-1 spec: two cheap DIAGNOSTICS behind ini
    switches, default ON, with report lines: (a) per dynamic VB - thread id of Lock/Unlock vs thread id
    of the DrawIndexedPrimitive that reads it (decal record/replay skew); (b) head vs body draws of the
    same character - D3DSAMP_SRGBTEXTURE, texture size, format (character colour mismatch).
    Then: deploy, ask the user for ONE run, read the log.
+ STEP 1 RESULTS (run 2026-10-22 22:21, log archived scratchpad/logsnap/sr3-rtx-2026-10-22-diag.log):
+   DECALS: 37.67 dyn-VB draws/frame, 98.4% last unlocked by a DIFFERENT thread; 6 writer thread ids, ONE
+   draw thread (8144); re-locked between consecutive draws from the same buffer 0x=153886 1x=394
+   2+x=3941 (max 101). Shared VB 03770190 appended at rising offsets (NOOVERWRITE pattern). NOT YET
+   PROVEN: probe can't tell harmless APPEND from harmful DISCARD between a region's write and its replay
+   draw -> NEXT refine lockThreadProbe to flag D3DLOCK_DISCARD (buffer rename) after the region's write.
+   CHARACTERS: 25,830 chars seen; MIXED sRGB 10,698, MIXED format 13,227, MIXED size 12,177, RT mix 0.
+   e.g. one char: [875 prims srgb=0 512x512 A8R8G8B8] [830 srgb=1 128x128] [401 srgb=1 128x128]
+   [1229 srgb=1 256x256]. Hypothesis: game samples one part WITHOUT sRGB decode; if Remix decodes all
+   albedo the same way that part shifts shade = body/head mismatch. ASKED USER which looks wrong (head or
+   body) to aim the fix; also check how Remix decides albedo sRGB before writing it.
+   USER ANSWER 2026-10-22: NPC HEADS are the wrong colour; ALL heads have WHITE HAIR; body skin is
+   usually LIGHTER than the head. User's theory: a TINT texture/value the head uses is not applied in the
+   shim's texture baking. Fits memory sr3-cloth-colour-formula (mask textures + tint constants). NEXT:
+   reverse-engineer the head/hair/skin shaders FIRST (re/shader_constants.csv, tools/fxo_disasm.py, TEAM A
+   spec-tables-customization 12.1 head sub-record) - find their tint samplers/constants - then apply them
+   like the cloth fix. Do NOT chase sRGB further until that is done.
  STEP 2: fixes justified by step 1 - snapshot dynamic VB at Unlock and bind it for the replay DIP if
    threads differ; head/body sRGB/format correction if mismatched.
  STEP 3: features, each its own job: Remix lights from ir_light_* shader constants (PS c0 pos view-space,

@@ -342,6 +342,13 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // Purely observational until the numbers say what hiding it would cost.
     PhaseAdd(PH_SKIN, tP);
     if (g_settings.headBodyProbe && d == Disp::Convert && g_curLayout.skinned) BhNoteDraw(primitiveCount);   // diagnostic only
+    // Census: does every hair/skin draw reach the albedo generators? Only 1 hair texture was ever
+    // built in a run full of NPCs. Diagnostic only.
+    if (g_curPS.hairParamsReg >= 0) { ++g_hairShaderSeen; if (d == Disp::Convert) ++g_hairShaderConverted; }
+    else if (g_curPS.diffuseColorMulReg >= 0 && g_curPS.samplerName[2][0] && g_curPS.samplerName[3][0] &&
+             StrStrIA(g_curPS.samplerName[3], "Sphere_Map")) {
+        ++g_skinShaderSeen; if (d == Disp::Convert) ++g_skinShaderConverted;
+    }
     if (g_curPS.isPixelShader && g_curPS.rtCount > 1) {
         ++g_mrtWouldHide;
         if (d == Disp::Convert) {

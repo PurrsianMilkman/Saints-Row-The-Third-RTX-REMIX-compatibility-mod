@@ -15,7 +15,356 @@
 // the objection the older note in ApiSlot raises against baking the hair SHADER. Different thing.
 unsigned g_hairAlbedoGen = 0, g_hairAlbedoFail = 0;
 
+// ------------------------------------------------- hair and skin, AS THEIR SHADERS COMPUTE THEM
+//
+// Read from the disassembly 2026-10-22 (re/shaders/DX9_disasm), after the user reported NPC heads
+// off-colour, body skin lighter than the head, and every head carrying WHITE hair.
+//
+// HAIR - ir_sr3pchair_c ps[8], the forward pass:
+//     b = Dob.B;  S = lerp(c1.z, c1.y, b);  V = b*c1.w + c2.y;  H = c1.x (hue in sectors, 0..6)
+//     albedo = HSV(H, S, V)            the six-sector cmp chain, standard HSV
+//     out    = (L*albedo + spec) -> fog -> * Tint_color        alpha = Dob.G
+// Hair_Parameters c1 and Hair_Spec_Alpha c2 match player_creation_hair_color.xtbl exactly (the
+// logged Brunette: Hue 8 -> 8/60 = 0.133, Saturation .8/.8, Brightness .07, bias .01). c3/c4,
+// which HairAlbedo coloured the strands with, only weight the SPECULAR terms.
+//
+// SKIN - ir_sr3npcskinfull_c ps[8] (ir_sr3pcskinfull has the same colour code):
+//     uv  = view-space normal mapped to (n.x*.5+.5, 1-(n.y*.5+.5))      a MATCAP lookup
+//     S   = lerp(Sphere_Map_1[s3](uv), Sphere_Map_2[s2](uv), Blend_Map[s4].r)
+//     out = (L * Diffuse[s0]*Diffuse_Color * S * 2 + spec + ...) -> fog -> * Tint_color
+// The skin TONE lives in the two matcaps, and Blend_Map.r picks between them - which is how a
+// head's painted-on hair gets its colour from the same draw. The shim bound only Diffuse_Map, a
+// greyscale map: no tone, and that hair white. The matcap is view-dependent lighting as well as
+// colour, so it is averaged over its disc - every disc texel stands for an equal share of what a
+// viewer sees of a sphere - which keeps the colour and leaves the lighting to Remix.
+//
+// Both go through the cloth exposure curve (Reinhard on Tint*colour, clothColourCurve) so hair,
+// skin and clothes sit on one scale, and share the cloth cache, its flushes and its orphan sweep.
+unsigned g_hairDraws = 0, g_hairHsvGen = 0, g_hairNull[5] = {};
+const char* const kHairNull[5] = {"no Dob_Map bound", "decode failed", "create failed",
+                                  "cached failure", "Hair_Parameters out of range"};
+unsigned g_skinDraws = 0, g_skinGen = 0, g_skinDeferred = 0, g_skinNull[5] = {};
+const char* const kSkinNull[5] = {"a matcap/blend/diffuse texture missing",
+                                  "dynamic or render-target diffuse (the player's atlas)",
+                                  "decode failed", "create failed", "cached failure"};
+unsigned g_skinGenFrame = 0, g_skinGenThisFrame = 0;
+unsigned g_hairShaderSeen = 0, g_hairShaderConverted = 0, g_skinShaderSeen = 0, g_skinShaderConverted = 0;
+
+// HSV with the hue in SECTORS, as Hair_Parameters.x carries it. Sector 6 wraps to 0 with the same
+// fraction, which is what the shader's (i==0 || i==6) default does.
+void HsvSectorToRgb(float h, float s, float v, float out[3]) {
+    const float fi = floorf(h);
+    const float f = h - fi;
+    int sec = static_cast<int>(fi) % 6;
+    if (sec < 0) sec += 6;
+    const float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (sec) {
+        case 0:  out[0] = v; out[1] = t; out[2] = p; break;
+        case 1:  out[0] = q; out[1] = v; out[2] = p; break;
+        case 2:  out[0] = p; out[1] = v; out[2] = t; break;
+        case 3:  out[0] = p; out[1] = q; out[2] = v; break;
+        case 4:  out[0] = t; out[1] = p; out[2] = v; break;
+        default: out[0] = v; out[1] = p; out[2] = q; break;
+    }
+}
+
+// Tint_color from the bound pixel shader, the way ClothAlbedoUniform reads it.
+float CurrentTintScalar() {
+    float tintC = 5.0f;
+    if (g_curPS.tintColorReg >= 0 && g_curPS.tintColorReg < static_cast<int>(kMaxPsConst)) {
+        const float t = g_psConst[g_curPS.tintColorReg][0];
+        if (std::isfinite(t) && t > 0.0f && t < 50.0f) tintC = t;
+    }
+    return tintC;
+}
+
+// The cloth exposure curve on one linear channel.
+inline float ExposureCurve(float c, float tintC) {
+    if (!g_settings.clothColourCurve) return c * g_settings.clothTintScale;
+    const float x = max(0.0f, c) * tintC;
+    return x / (1.0f + x);
+}
+
+// BGRA pixels -> a DEFAULT-pool texture through a SYSTEMMEM staging copy (UpdateTexture is the
+// upload Remix hashes). Null on any failure.
+IDirect3DTexture9* UploadGeneratedBgra(IDirect3DDevice9* dev, const std::vector<unsigned>& pixels,
+                                       UINT w, UINT h) {
+    IDirect3DTexture9* staging = nullptr;
+    IDirect3DTexture9* generated = nullptr;
+    const bool wasInternal = g_internal;
+    g_internal = true;
+    g_internalThread = GetCurrentThreadId();
+    if (SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
+                                     &staging, nullptr)) && staging) {
+        D3DLOCKED_RECT dst{};
+        bool filled = false;
+        if (SUCCEEDED(staging->LockRect(0, &dst, nullptr, 0)) && dst.pBits) {
+            for (UINT y = 0; y < h; ++y)
+                memcpy(static_cast<unsigned char*>(dst.pBits) + y * dst.Pitch,
+                       &pixels[static_cast<size_t>(y) * w], static_cast<size_t>(w) * 4);
+            staging->UnlockRect(0);
+            filled = true;
+        }
+        if (filled &&
+            SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                         &generated, nullptr)) && generated &&
+            FAILED(dev->UpdateTexture(staging, generated))) {
+            generated->Release();
+            generated = nullptr;
+        }
+        staging->Release();
+    }
+    g_internal = wasInternal;
+    return generated;
+}
+
+IDirect3DBaseTexture9* HairAlbedoHsv(IDirect3DDevice9* dev) {
+    const ShaderInfo& ps = g_curPS;
+    if (ps.hairParamsReg < 0) return nullptr;   // not the hair shader: not counted
+    ++g_hairDraws;
+    if (ps.hairParamsReg >= static_cast<int>(kMaxPsConst)) { ++g_hairNull[4]; return nullptr; }
+
+    IDirect3DBaseTexture9* dobTex = nullptr;
+    for (int st = 0; st < 8; ++st)
+        if (g_curTexture[st] && ps.samplerName[st][0] && StrStrIA(ps.samplerName[st], "dob")) {
+            dobTex = g_curTexture[st];
+            break;
+        }
+    if (!dobTex) { ++g_hairNull[0]; return nullptr; }
+
+    float c1[4]{}, c2[4]{};
+    memcpy(c1, g_psConst[ps.hairParamsReg], 16);
+    if (ps.hairSpecAlphaReg >= 0 && ps.hairSpecAlphaReg < static_cast<int>(kMaxPsConst))
+        memcpy(c2, g_psConst[ps.hairSpecAlphaReg], 16);
+    const float tintC = CurrentTintScalar();
+
+    // ClothKey quantises each value to 0..1 and reads xyz only, so the hue (0..6) is scaled into
+    // range and the brightness/bias get a row of their own - or every hue past red, and every
+    // brightness, would share one texture.
+    float col[3][4]{};
+    col[0][0] = c1[0] / 6.0f; col[0][1] = c1[1]; col[0][2] = c1[2];
+    col[1][0] = c1[3];        col[1][1] = c2[1]; col[1][2] = tintC / 50.0f;
+    col[2][0] = g_settings.clothColourCurve ? 1.0f : 0.0f;
+    const unsigned long long key = ClothKey(dobTex, col) ^ 0xC2B2AE3D27D4EB4Full;
+    const auto it = g_clothCache.find(key);
+    if (it != g_clothCache.end()) {
+        if (it->second.generated) ++g_clothBound; else ++g_hairNull[3];
+        return it->second.generated;
+    }
+    if (g_clothCache.size() >= kMaxClothTextures) { ReleaseClothCache(); ++g_clothCacheFlushes; }
+
+    std::vector<unsigned char> dob;
+    UINT w = 0, h = 0;
+    if (!TextureToBgra(dobTex, dob, w, h) || !w || !h || w > 2048 || h > 2048 ||
+        dob.size() < static_cast<size_t>(w) * h * 4) {
+        ++g_hairNull[1];
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    std::vector<unsigned> pixels;
+    try { pixels.assign(static_cast<size_t>(w) * h, 0xFF000000u); }
+    catch (...) { ++g_hairNull[2]; return nullptr; }
+    // The Dob_Map is sampled without sRGB decode (its stage reads srgb=0 in the HEAD/BODY probe),
+    // so B is used raw. The HSV result is LINEAR shader arithmetic, encoded once on the way out.
+    double acc[3] = {};
+    size_t cut = 0;
+    for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i) {
+        const float b = dob[i * 4 + 0] / 255.0f;            // BGRA: B is the colour mask
+        const float S = c1[2] + (c1[1] - c1[2]) * b;        // lrp b, c1.y, c1.z
+        const float V = b * c1[3] + c2[1];
+        float rgb[3];
+        HsvSectorToRgb(c1[0], S, V, rgb);
+        unsigned o[3];
+        for (int k = 0; k < 3; ++k) {
+            o[k] = static_cast<unsigned>(LinearToSrgb(ExposureCurve(rgb[k], tintC)) * 255.0f + 0.5f);
+            acc[k] += o[k];
+        }
+        // Dob.G is the shader's alpha. Kept binary: a fractional alpha on a blended draw would
+        // read to Remix as translucency, and the strands are a cutout, not glass.
+        const bool solid = dob[i * 4 + 1] >= 128;
+        if (!solid) ++cut;
+        pixels[i] = (solid ? 0xFF000000u : 0u) | (o[0] << 16) | (o[1] << 8) | o[2];
+    }
+
+    IDirect3DTexture9* generated = UploadGeneratedBgra(dev, pixels, w, h);
+    if (!generated) {
+        ++g_hairNull[2];
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    ++g_hairHsvGen;
+    if (g_hairHsvGen <= 12) {
+        float top[3];
+        HsvSectorToRgb(c1[0], c1[1], c1[3] + c2[1], top);
+        const double n = static_cast<double>(w) * h;
+        Log("HAIR HSV #%u: %ux%u | Hair_Parameters (%.3f %.3f %.3f %.3f) bias %.3f tint %.2f | "
+            "strand colour at full mask: linear (%.3f %.3f %.3f) -> sRGB (%.0f %.0f %.0f) | "
+            "texture mean sRGB (%.1f %.1f %.1f) | cut out %.1f%%",
+            g_hairHsvGen, w, h, c1[0], c1[1], c1[2], c1[3], c2[1], tintC, top[0], top[1], top[2],
+            LinearToSrgb(ExposureCurve(top[0], tintC)) * 255.0f,
+            LinearToSrgb(ExposureCurve(top[1], tintC)) * 255.0f,
+            LinearToSrgb(ExposureCurve(top[2], tintC)) * 255.0f,
+            acc[0] / n, acc[1] / n, acc[2] / n, 100.0 * cut / n);
+    }
+    dobTex->AddRef();
+    g_clothCache[key] = ClothTex{dobTex, generated};
+    if (cut && g_settings.clothCutout) g_clothCutoutTex.insert(generated);
+    ++g_clothBound;
+    return generated;
+}
+
+// Mean LINEAR colour of a matcap over its inscribed disc (gammaLUT, as the cloth maps are read).
+bool MatcapDiscMean(const std::vector<unsigned char>& m, UINT w, UINT h, float out[3]) {
+    double acc[3] = {};
+    double n = 0.0;
+    for (UINT y = 0; y < h; ++y) {
+        const float ny = 1.0f - 2.0f * (y + 0.5f) / h;
+        for (UINT x = 0; x < w; ++x) {
+            const float nx = 2.0f * (x + 0.5f) / w - 1.0f;
+            if (nx * nx + ny * ny >= 1.0f) continue;
+            const unsigned char* p = &m[(static_cast<size_t>(y) * w + x) * 4];
+            acc[0] += g_gammaLUT[p[2]]; acc[1] += g_gammaLUT[p[1]]; acc[2] += g_gammaLUT[p[0]];
+            n += 1.0;
+        }
+    }
+    if (n < 1.0) return false;
+    for (int k = 0; k < 3; ++k) out[k] = static_cast<float>(acc[k] / n);
+    return true;
+}
+
+IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
+    if (!g_settings.skinMatcapAlbedo) return nullptr;
+    const ShaderInfo& ps = g_curPS;
+    int sDif = -1, sS1 = -1, sS2 = -1, sBl = -1;
+    for (int st = 0; st < 8; ++st) {
+        const char* nm = ps.samplerName[st];
+        if (!nm[0]) continue;
+        if (StrStrIA(nm, "Sphere_Map_1")) sS1 = st;
+        else if (StrStrIA(nm, "Sphere_Map_2")) sS2 = st;
+        else if (StrStrIA(nm, "Blend_Map")) sBl = st;
+        else if (StrStrIA(nm, "Diffuse_Map")) sDif = st;
+    }
+    if (sDif < 0 || sS1 < 0 || sS2 < 0 || sBl < 0) return nullptr;   // not the skin shader
+    ++g_skinDraws;
+    IDirect3DBaseTexture9* const dif = g_curTexture[sDif];
+    IDirect3DBaseTexture9* const s1 = g_curTexture[sS1];
+    IDirect3DBaseTexture9* const s2 = g_curTexture[sS2];
+    IDirect3DBaseTexture9* const bl = g_curTexture[sBl];
+    if (!dif || !s1 || !s2 || !bl || dif->GetType() != D3DRTYPE_TEXTURE) {
+        ++g_skinNull[0];
+        return nullptr;
+    }
+    // The player's skin is the composited atlas - a dynamic texture the game rewrites, already
+    // handled by the atlas path. Baking it here would freeze one moment of it.
+    {
+        D3DSURFACE_DESC sd{};
+        if (g_rtTextures.count(dif) ||
+            (SUCCEEDED(static_cast<IDirect3DTexture9*>(dif)->GetLevelDesc(0, &sd)) &&
+             (sd.Usage & (D3DUSAGE_DYNAMIC | D3DUSAGE_RENDERTARGET)))) {
+            ++g_skinNull[1];
+            return nullptr;
+        }
+    }
+
+    float c0[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (ps.diffuseColorMulReg >= 0 && ps.diffuseColorMulReg < static_cast<int>(kMaxPsConst))
+        memcpy(c0, g_psConst[ps.diffuseColorMulReg], 16);
+    const float tintC = CurrentTintScalar();
+
+    float col[3][4]{};
+    col[0][0] = c0[0]; col[0][1] = c0[1]; col[0][2] = c0[2];
+    col[1][0] = tintC / 50.0f; col[1][1] = g_settings.clothColourCurve ? 1.0f : 0.0f;
+    unsigned long long key = ClothKey(dif, col) ^ 0x165667B19E3779F9ull;
+    for (IDirect3DBaseTexture9* t : {s1, s2, bl}) {
+        key ^= reinterpret_cast<uintptr_t>(t);
+        key *= 1099511628211ull;
+    }
+    const auto it = g_clothCache.find(key);
+    if (it != g_clothCache.end()) {
+        if (it->second.generated) ++g_clothBound; else ++g_skinNull[4];
+        return it->second.generated;
+    }
+    // A new head: built on the draw thread like the clothes, so capped per frame. Over the cap
+    // the draw keeps its raw diffuse for this frame and is built on a later one.
+    if (g_skinGenFrame != g_frames) { g_skinGenFrame = g_frames; g_skinGenThisFrame = 0; }
+    if (g_settings.skinGenPerFrame > 0 &&
+        g_skinGenThisFrame >= static_cast<unsigned>(g_settings.skinGenPerFrame)) {
+        ++g_skinDeferred;
+        return nullptr;
+    }
+    ++g_skinGenThisFrame;
+    if (g_clothCache.size() >= kMaxClothTextures) { ReleaseClothCache(); ++g_clothCacheFlushes; }
+    BuildClothLUTs();
+
+    std::vector<unsigned char> D, M1, M2, B;
+    UINT dw = 0, dh = 0, w1 = 0, h1 = 0, w2 = 0, h2 = 0, bw = 0, bh = 0;
+    if (!TextureToBgra(dif, D, dw, dh) || !dw || !dh || dw > 2048 || dh > 2048 ||
+        D.size() < static_cast<size_t>(dw) * dh * 4 ||
+        !TextureToBgra(s1, M1, w1, h1) || M1.size() < static_cast<size_t>(w1) * h1 * 4 ||
+        !TextureToBgra(s2, M2, w2, h2) || M2.size() < static_cast<size_t>(w2) * h2 * 4 ||
+        !TextureToBgra(bl, B, bw, bh) || !bw || !bh || B.size() < static_cast<size_t>(bw) * bh * 4) {
+        ++g_skinNull[2];
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    float m1[3], m2[3];
+    if (!MatcapDiscMean(M1, w1, h1, m1) || !MatcapDiscMean(M2, w2, h2, m2)) {
+        ++g_skinNull[2];
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    std::vector<unsigned> pixels;
+    try { pixels.assign(static_cast<size_t>(dw) * dh, 0xFF000000u); }
+    catch (...) { ++g_skinNull[3]; return nullptr; }
+    // Diffuse and Blend_Map share the shader's uv (v4.xy), so the blend is read at the same
+    // normalised position, nearest texel when the sizes differ. Blend.r is a weight, used raw.
+    double acc = 0.0, blendAcc = 0.0;
+    for (UINT y = 0; y < dh; ++y) {
+        const UINT by = static_cast<UINT>((static_cast<unsigned long long>(y) * bh) / dh);
+        for (UINT x = 0; x < dw; ++x) {
+            const UINT bx = static_cast<UINT>((static_cast<unsigned long long>(x) * bw) / dw);
+            const float wgt = B[(static_cast<size_t>(by) * bw + bx) * 4 + 2] / 255.0f;
+            blendAcc += wgt;
+            const size_t i = static_cast<size_t>(y) * dw + x;
+            const unsigned char* d = &D[i * 4];
+            unsigned o[3];
+            for (int k = 0; k < 3; ++k) {
+                const float m = m1[k] + (m2[k] - m1[k]) * wgt;    // lrp Blend.r, Sphere2, Sphere1
+                const float tone = g_settings.clothColourCurve ? c0[k] * m * 2.0f : c0[k] * m;
+                const float v = LinearToSrgb(g_gammaLUT[d[2 - k]] * ExposureCurve(tone, tintC));
+                o[k] = static_cast<unsigned>(v * 255.0f + 0.5f);
+                acc += o[k];
+            }
+            pixels[i] = (static_cast<unsigned>(d[3]) << 24) | (o[0] << 16) | (o[1] << 8) | o[2];
+        }
+    }
+    IDirect3DTexture9* generated = UploadGeneratedBgra(dev, pixels, dw, dh);
+    if (!generated) {
+        ++g_skinNull[3];
+        g_clothCache[key] = ClothTex{nullptr, nullptr};
+        return nullptr;
+    }
+    ++g_skinGen;
+    if (g_skinGen <= 16) {
+        const double n = static_cast<double>(dw) * dh;
+        Log("SKIN #%u: diffuse %ux%u, matcaps %ux%u / %ux%u, blend %ux%u | Diffuse_Color (%.3f %.3f "
+            "%.3f) tint %.2f | Sphere_Map_1 disc mean linear (%.3f %.3f %.3f) = sRGB (%.0f %.0f %.0f), "
+            "Sphere_Map_2 (%.3f %.3f %.3f) = sRGB (%.0f %.0f %.0f) | Blend.r mean %.3f | result mean "
+            "%.1f of 255",
+            g_skinGen, dw, dh, w1, h1, w2, h2, bw, bh, c0[0], c0[1], c0[2], tintC,
+            m1[0], m1[1], m1[2], LinearToSrgb(m1[0]) * 255.0f, LinearToSrgb(m1[1]) * 255.0f,
+            LinearToSrgb(m1[2]) * 255.0f, m2[0], m2[1], m2[2], LinearToSrgb(m2[0]) * 255.0f,
+            LinearToSrgb(m2[1]) * 255.0f, LinearToSrgb(m2[2]) * 255.0f, blendAcc / n,
+            acc / (3.0 * n));
+    }
+    dif->AddRef();
+    g_clothCache[key] = ClothTex{dif, generated};
+    ++g_clothBound;
+    return generated;
+}
+
 IDirect3DBaseTexture9* HairAlbedo(IDirect3DDevice9* dev) {
+    if (g_settings.hairHsvAlbedo) return HairAlbedoHsv(dev);
     if (!g_settings.hairStrandsFromDob) return nullptr;
     const ShaderInfo& ps = g_curPS;
     const int reg = (ps.hairColorReg[1] >= 0) ? ps.hairColorReg[1] : ps.hairColorReg[0];
