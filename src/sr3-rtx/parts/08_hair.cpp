@@ -45,7 +45,7 @@ const char* const kHairNull[5] = {"no Dob_Map bound", "decode failed", "create f
                                   "cached failure", "Hair_Parameters out of range"};
 unsigned g_skinDraws = 0, g_skinGen = 0, g_skinDeferred = 0, g_skinNull[5] = {};
 const char* const kSkinNull[5] = {"a matcap/blend/diffuse texture missing",
-                                  "dynamic or render-target diffuse (the player's atlas)",
+                                  "composited diffuse with no snooped CPU pixels",
                                   "decode failed", "create failed", "cached failure"};
 unsigned g_skinGenFrame = 0, g_skinGenThisFrame = 0, g_skinSingleDraws = 0;
 // Which material layouts do converted SKINNED draws use? Keyed by the shader's sampler names, so the
@@ -252,6 +252,10 @@ bool MatcapDiscMean(const std::vector<unsigned char>& m, UINT w, UINT h, float o
     return true;
 }
 
+bool AtlasPixelsFor(IDirect3DBaseTexture9* tex, std::vector<unsigned char>& out, UINT& w, UINT& h,
+                    unsigned& version);   // 09_atlas_textures.cpp
+unsigned g_skinFromAtlas = 0;
+
 IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
     if (!g_settings.skinMatcapAlbedo) return nullptr;
     const ShaderInfo& ps = g_curPS;
@@ -285,15 +289,25 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
         ++g_skinNull[0];
         return nullptr;
     }
-    // The player's skin is the composited atlas - a dynamic texture the game rewrites, already
-    // handled by the atlas path. Baking it here would freeze one moment of it.
+    // COMPOSITED diffuse (2026-10-23 run: EVERY skin draw, NPCs included, binds one - the game
+    // composites a texture per character). A lock reads undefined pixels there, so the atlas
+    // snoop's CPU copy is the source, and its capture version joins the key so a re-composite
+    // rebuilds the bake instead of freezing one moment of it.
+    std::vector<unsigned char> atlasPix;
+    UINT aw = 0, ah = 0;
+    unsigned atlasVer = 0;
+    bool fromAtlas = false;
     {
         D3DSURFACE_DESC sd{};
         if (g_rtTextures.count(dif) ||
             (SUCCEEDED(static_cast<IDirect3DTexture9*>(dif)->GetLevelDesc(0, &sd)) &&
              (sd.Usage & (D3DUSAGE_DYNAMIC | D3DUSAGE_RENDERTARGET)))) {
-            ++g_skinNull[1];
-            return nullptr;
+            if (!g_settings.skinFromAtlas || !AtlasPixelsFor(dif, atlasPix, aw, ah, atlasVer) ||
+                !aw || !ah || aw > 2048 || ah > 2048) {
+                ++g_skinNull[1];
+                return nullptr;
+            }
+            fromAtlas = true;
         }
     }
 
@@ -308,6 +322,7 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
     col[1][2] = single ? (std::isfinite(amount) ? amount : 0.0f) : 1.0f;
     col[2][0] = single ? 1.0f : 0.0f;
     unsigned long long key = ClothKey(dif, col) ^ 0x165667B19E3779F9ull;
+    key ^= static_cast<unsigned long long>(atlasVer) * 0x9E3779B97F4A7C15ull;
     for (IDirect3DBaseTexture9* t : {s1, s2, bl}) {
         key ^= reinterpret_cast<uintptr_t>(t);
         key *= 1099511628211ull;
@@ -331,7 +346,12 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
 
     std::vector<unsigned char> D, M1, M2, B;
     UINT dw = 0, dh = 0, w1 = 0, h1 = 0, w2 = 0, h2 = 0, bw = 0, bh = 0;
-    if (!TextureToBgra(dif, D, dw, dh) || !dw || !dh || dw > 2048 || dh > 2048 ||
+    if (fromAtlas) {
+        D.swap(atlasPix); dw = aw; dh = ah;
+        for (size_t i = 3; i < D.size(); i += 4) D[i] = 255;   // X8R8G8B8: alpha undefined
+        ++g_skinFromAtlas;
+    }
+    if ((!fromAtlas && !TextureToBgra(dif, D, dw, dh)) || !dw || !dh || dw > 2048 || dh > 2048 ||
         D.size() < static_cast<size_t>(dw) * dh * 4 ||
         !TextureToBgra(s1, M1, w1, h1) || M1.size() < static_cast<size_t>(w1) * h1 * 4 ||
         !TextureToBgra(s2, M2, w2, h2) || M2.size() < static_cast<size_t>(w2) * h2 * 4 ||

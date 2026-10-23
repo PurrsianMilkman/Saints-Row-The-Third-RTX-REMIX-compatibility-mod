@@ -117,6 +117,7 @@ struct AtlasSnoop {
     bool fresh = false;                     // written since the copy was last built
     IDirect3DTexture9* copy = nullptr;      // what gets bound instead
     double mean = -1.0;
+    unsigned version = 0;                   // bumped on every capture; keys SkinAlbedo's bake
 };
 constexpr unsigned kMaxAtlasSnoop = 8;
 AtlasSnoop g_atlasSnoop[kMaxAtlasSnoop];
@@ -480,6 +481,7 @@ void ConsumeAtlasPendingLock(const PendingSurfLock& p) {
                     }
                 e->mean = n ? acc / (3.0 * n) : 0.0;
                 e->fresh = true;
+                ++e->version;
                 ++g_atlasCaptured;
                 if (g_atlasCaptured <= 4)
                     Log("ATLAS CAPTURED #%u: %ux%u from the game's own write | mean %.1f of 255",
@@ -644,6 +646,21 @@ void ProbeRenderTargetContents(IDirect3DDevice9* dev) {
 }
 
 // Build (or refresh) the texture handed to Remix from the snooped pixels. Render thread only.
+// The snooped CPU pixels of a composited texture (BGRA mip 0) and their capture version, for
+// SkinAlbedo: NPC heads draw from these composited textures too, which a lock cannot read.
+bool AtlasPixelsFor(IDirect3DBaseTexture9* tex, std::vector<unsigned char>& out, UINT& w, UINT& h,
+                    unsigned& version) {
+    if (!g_atlasCsReady) return false;
+    EnterCriticalSection(&g_atlasCs);
+    AtlasSnoop* e = FindSnoop(tex);
+    bool ok = false;
+    if (e && !e->pixels.empty()) {
+        try { out = e->pixels; w = e->w; h = e->h; version = e->version; ok = true; } catch (...) {}
+    }
+    LeaveCriticalSection(&g_atlasCs);
+    return ok;
+}
+
 IDirect3DTexture9* AtlasCopyFor(IDirect3DDevice9* dev, IDirect3DBaseTexture9* tex) {
     if (!g_atlasCsReady) return nullptr;
     EnterCriticalSection(&g_atlasCs);

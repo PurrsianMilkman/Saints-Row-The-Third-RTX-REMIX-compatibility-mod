@@ -113,6 +113,8 @@ struct Settings {
     int skinGenPerFrame = 2;
     // Also bake the ONE-matcap form (ir_sr3shaderball: lerp(1, Sphere_Map, Sphere_Map_Amount)).
     bool skinSingleMatcap = true;
+    // Bake skin on COMPOSITED diffuses too, from the atlas snoop's CPU pixels.
+    bool skinFromAtlas = true;
     // Last resort for a garment whose pattern is a DECAL on an independent uv set: take the
     // pattern's dominant colour for the whole surface. An approximation, and labelled as one -
     // it gets the garment's colour right and loses the decal. 0 leaves such garments untinted,
@@ -816,6 +818,7 @@ void LoadSettings() {
     g_settings.skinMatcapAlbedo = flag("skinMatcapAlbedo", true);
     g_settings.skinGenPerFrame = num("skinGenPerFrame", 2);
     g_settings.skinSingleMatcap = flag("skinSingleMatcap", true);
+    g_settings.skinFromAtlas = flag("skinFromAtlas", true);
     g_settings.clothDominantPattern = flag("clothDominantPattern", true);
     g_settings.clothPadUnused = flag("clothPadUnused", true);
     g_settings.clothCutout = flag("clothCutout", true);
