@@ -270,6 +270,8 @@ struct ShaderInfo {
     // bias. hairColorReg above only weights the specular terms. See HairAlbedoHsv.
     int hairParamsReg = -1;
     int hairSpecAlphaReg = -1;
+    // Sphere_Map_Amount (ir_sr3shaderball ps[8]): matcap = lerp(1, Sphere_Map, amount).
+    int sphereAmountReg = -1;
     // First sampler this shader declares, kept only so a blanked draw can say WHAT it sampled.
     // Over half of converted draws currently render untextured and the reason has been inferred
     // rather than observed.
@@ -613,6 +615,7 @@ ShaderInfo ReflectShader(const DWORD* tokens) {
             else if (!_stricmp(name, "Hair_Spec_Color2")) result.hairColorReg[1] = reg;
             else if (!_stricmp(name, "Hair_Parameters")) result.hairParamsReg = reg;
             else if (!_stricmp(name, "Hair_Spec_Alpha")) result.hairSpecAlphaReg = reg;
+            else if (!_stricmp(name, "Sphere_Map_Amount")) result.sphereAmountReg = reg;
             if (crank > result.colourConstRank) {
                 result.colourConstRank = crank;
                 result.colourConstReg = reg;

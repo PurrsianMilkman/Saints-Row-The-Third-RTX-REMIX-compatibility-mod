@@ -47,7 +47,27 @@ unsigned g_skinDraws = 0, g_skinGen = 0, g_skinDeferred = 0, g_skinNull[5] = {};
 const char* const kSkinNull[5] = {"a matcap/blend/diffuse texture missing",
                                   "dynamic or render-target diffuse (the player's atlas)",
                                   "decode failed", "create failed", "cached failure"};
-unsigned g_skinGenFrame = 0, g_skinGenThisFrame = 0;
+unsigned g_skinGenFrame = 0, g_skinGenThisFrame = 0, g_skinSingleDraws = 0;
+// Which material layouts do converted SKINNED draws use? Keyed by the shader's sampler names, so the
+// NPC head's shader is named by measurement - the 2026-10-23 run showed npcskinfull and pchair are
+// drawn for the PLAYER only. Diagnostic only, capped at 24 layouts.
+std::unordered_map<std::string, unsigned> g_skinnedLayouts;
+void NoteSkinnedLayout() {
+    std::string sig;
+    for (int st = 0; st < 8; ++st) {
+        const char* nm = g_curPS.samplerName[st];
+        if (!nm[0]) continue;
+        char b[32];
+        sprintf_s(b, "s%d:%s ", st, nm);
+        if (char* sm = strstr(b, "Sampler")) { sm[0] = ' '; sm[1] = 0; }
+        sig += b;
+    }
+    if (g_curPS.sphereAmountReg >= 0) sig += "[Sphere_Map_Amount]";
+    if (g_curPS.hairParamsReg >= 0) sig += "[Hair_Parameters]";
+    auto it = g_skinnedLayouts.find(sig);
+    if (it != g_skinnedLayouts.end()) ++it->second;
+    else if (g_skinnedLayouts.size() < 24) g_skinnedLayouts[sig] = 1;
+}
 unsigned g_hairShaderSeen = 0, g_hairShaderConverted = 0, g_skinShaderSeen = 0, g_skinShaderConverted = 0;
 
 // HSV with the hue in SECTORS, as Hair_Parameters.x carries it. Sector 6 wraps to 0 with the same
@@ -235,17 +255,28 @@ bool MatcapDiscMean(const std::vector<unsigned char>& m, UINT w, UINT h, float o
 IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
     if (!g_settings.skinMatcapAlbedo) return nullptr;
     const ShaderInfo& ps = g_curPS;
-    int sDif = -1, sS1 = -1, sS2 = -1, sBl = -1;
+    // Two forms. SKINFULL: Sphere_Map_1/2 blended by Blend_Map.r. SHADERBALL (ir_sr3shaderball
+    // ps[8], read 2026-10-23): ONE Sphere_Map, matcap = lerp(1, Sphere_Map, Sphere_Map_Amount c7),
+    // then the same Diffuse * Diffuse_Color * matcap * 2. The single form is run through the same
+    // code with Sphere_Map in both slots, the Diffuse_Map as a dummy blend, and the amount applied
+    // to the disc mean.
+    int sDif = -1, sS1 = -1, sS2 = -1, sBl = -1, sOne = -1;
     for (int st = 0; st < 8; ++st) {
         const char* nm = ps.samplerName[st];
         if (!nm[0]) continue;
         if (StrStrIA(nm, "Sphere_Map_1")) sS1 = st;
         else if (StrStrIA(nm, "Sphere_Map_2")) sS2 = st;
+        else if (StrStrIA(nm, "Sphere_Map")) sOne = st;
         else if (StrStrIA(nm, "Blend_Map")) sBl = st;
         else if (StrStrIA(nm, "Diffuse_Map")) sDif = st;
     }
-    if (sDif < 0 || sS1 < 0 || sS2 < 0 || sBl < 0) return nullptr;   // not the skin shader
+    const bool single = g_settings.skinSingleMatcap && sDif >= 0 && sOne >= 0 &&
+                        ps.sphereAmountReg >= 0 && ps.sphereAmountReg < static_cast<int>(kMaxPsConst);
+    if (single) { sS1 = sS2 = sOne; sBl = sDif; }
+    if (sDif < 0 || sS1 < 0 || sS2 < 0 || sBl < 0) return nullptr;   // not a matcap skin shader
     ++g_skinDraws;
+    if (single) ++g_skinSingleDraws;
+    const float amount = single ? g_psConst[ps.sphereAmountReg][0] : 1.0f;
     IDirect3DBaseTexture9* const dif = g_curTexture[sDif];
     IDirect3DBaseTexture9* const s1 = g_curTexture[sS1];
     IDirect3DBaseTexture9* const s2 = g_curTexture[sS2];
@@ -274,6 +305,8 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
     float col[3][4]{};
     col[0][0] = c0[0]; col[0][1] = c0[1]; col[0][2] = c0[2];
     col[1][0] = tintC / 50.0f; col[1][1] = g_settings.clothColourCurve ? 1.0f : 0.0f;
+    col[1][2] = single ? (std::isfinite(amount) ? amount : 0.0f) : 1.0f;
+    col[2][0] = single ? 1.0f : 0.0f;
     unsigned long long key = ClothKey(dif, col) ^ 0x165667B19E3779F9ull;
     for (IDirect3DBaseTexture9* t : {s1, s2, bl}) {
         key ^= reinterpret_cast<uintptr_t>(t);
@@ -313,6 +346,10 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
         g_clothCache[key] = ClothTex{nullptr, nullptr};
         return nullptr;
     }
+    if (single) {   // lerp(1, mean, amount); m1 == m2 so the blend weight is irrelevant
+        const float a = std::isfinite(amount) ? amount : 0.0f;
+        for (int k = 0; k < 3; ++k) m1[k] = m2[k] = 1.0f + a * (m1[k] - 1.0f);
+    }
     std::vector<unsigned> pixels;
     try { pixels.assign(static_cast<size_t>(dw) * dh, 0xFF000000u); }
     catch (...) { ++g_skinNull[3]; return nullptr; }
@@ -347,11 +384,11 @@ IDirect3DBaseTexture9* SkinAlbedo(IDirect3DDevice9* dev) {
     ++g_skinGen;
     if (g_skinGen <= 16) {
         const double n = static_cast<double>(dw) * dh;
-        Log("SKIN #%u: diffuse %ux%u, matcaps %ux%u / %ux%u, blend %ux%u | Diffuse_Color (%.3f %.3f "
+        Log("SKIN #%u%s: diffuse %ux%u, matcaps %ux%u / %ux%u, blend %ux%u | Diffuse_Color (%.3f %.3f "
             "%.3f) tint %.2f | Sphere_Map_1 disc mean linear (%.3f %.3f %.3f) = sRGB (%.0f %.0f %.0f), "
             "Sphere_Map_2 (%.3f %.3f %.3f) = sRGB (%.0f %.0f %.0f) | Blend.r mean %.3f | result mean "
             "%.1f of 255",
-            g_skinGen, dw, dh, w1, h1, w2, h2, bw, bh, c0[0], c0[1], c0[2], tintC,
+            g_skinGen, single ? " (SHADERBALL, one Sphere_Map, amount applied)" : "", dw, dh, w1, h1, w2, h2, bw, bh, c0[0], c0[1], c0[2], tintC,
             m1[0], m1[1], m1[2], LinearToSrgb(m1[0]) * 255.0f, LinearToSrgb(m1[1]) * 255.0f,
             LinearToSrgb(m1[2]) * 255.0f, m2[0], m2[1], m2[2], LinearToSrgb(m2[0]) * 255.0f,
             LinearToSrgb(m2[1]) * 255.0f, LinearToSrgb(m2[2]) * 255.0f, blendAcc / n,

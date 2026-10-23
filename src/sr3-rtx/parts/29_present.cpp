@@ -1122,6 +1122,11 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
             g_skinShaderConverted / f, g_skinDraws / f, g_skinGen, g_skinDeferred,
             g_settings.skinGenPerFrame, kSkinNull[0], g_skinNull[0], kSkinNull[1], g_skinNull[1],
             kSkinNull[2], g_skinNull[2], kSkinNull[3], g_skinNull[3], kSkinNull[4], g_skinNull[4]);
+        Log("        of which the one-Sphere_Map SHADERBALL form %.1f/frame (skinSingleMatcap=%s)",
+            g_skinSingleDraws / f, g_settings.skinSingleMatcap ? "ON" : "off");
+        Log("    SKINNED LAYOUTS (converted skinned draws by the shader's sampler names, cumulative):");
+        for (const auto& kv : g_skinnedLayouts)
+            Log("        %8.1f/frame  %s", kv.second / f, kv.first.c_str());
 
         // The measurement that says whether the stall is ours. "shim" is time inside our hooks
         // only - the draw call itself is excluded, so this does not charge us for bridge cost.

@@ -111,6 +111,8 @@ struct Settings {
     bool skinMatcapAlbedo = true;
     // Skin textures built per frame at most; a draw over budget keeps its raw diffuse for a frame.
     int skinGenPerFrame = 2;
+    // Also bake the ONE-matcap form (ir_sr3shaderball: lerp(1, Sphere_Map, Sphere_Map_Amount)).
+    bool skinSingleMatcap = true;
     // Last resort for a garment whose pattern is a DECAL on an independent uv set: take the
     // pattern's dominant colour for the whole surface. An approximation, and labelled as one -
     // it gets the garment's colour right and loses the decal. 0 leaves such garments untinted,
@@ -813,6 +815,7 @@ void LoadSettings() {
     g_settings.hairHsvAlbedo = flag("hairHsvAlbedo", true);
     g_settings.skinMatcapAlbedo = flag("skinMatcapAlbedo", true);
     g_settings.skinGenPerFrame = num("skinGenPerFrame", 2);
+    g_settings.skinSingleMatcap = flag("skinSingleMatcap", true);
     g_settings.clothDominantPattern = flag("clothDominantPattern", true);
     g_settings.clothPadUnused = flag("clothPadUnused", true);
     g_settings.clothCutout = flag("clothCutout", true);
