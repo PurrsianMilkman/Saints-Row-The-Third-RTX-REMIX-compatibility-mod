@@ -427,6 +427,31 @@ HRESULT WINAPI Hook_CreateDeviceEx(IDirect3D9Ex* self, UINT adapter, D3DDEVTYPE 
 DWORD WINAPI Init(LPVOID) {
     g_log = _fsopen("sr3-rtx.log", "w", _SH_DENYNO);   // shared so it can be tailed live
     LoadSettings();
+    // The tuning window. Started through the py launcher's windowless pyw.exe with the game folder
+    // and our pid; the tuner closes itself when this process exits. Once per process - Init runs
+    // once, and a live reload re-reads settings without coming back here.
+    if (g_settings.autoStartTuner) {
+        char dir[MAX_PATH]{};
+        GetModuleFileNameA(nullptr, dir, MAX_PATH);
+        if (char* slash = strrchr(dir, '\\')) *slash = 0;
+        char script[MAX_PATH + 32]{};
+        sprintf_s(script, "%s\\sr3-tuner.pyw", dir);
+        if (GetFileAttributesA(script) != INVALID_FILE_ATTRIBUTES) {
+            char cmd[3 * MAX_PATH]{};
+            sprintf_s(cmd, "pyw.exe \"%s\" \"%s\" %lu", script, dir, GetCurrentProcessId());
+            STARTUPINFOA si{}; si.cb = sizeof(si);
+            PROCESS_INFORMATION pi{};
+            if (CreateProcessA(nullptr, cmd, nullptr, nullptr, FALSE, DETACHED_PROCESS, nullptr, dir,
+                               &si, &pi)) {
+                CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+                Log("tuner started (autoStartTuner=1): %s", script);
+            } else {
+                Log("tuner NOT started: CreateProcess(pyw.exe) failed, error %lu", GetLastError());
+            }
+        } else {
+            Log("tuner NOT started: %s is missing", script);
+        }
+    }
     Log("sr3-rtx loaded (pid %lu) - FFP conversion, ported from sr2-rtx-remix-proxy",
         GetCurrentProcessId());
     Log("settings: ffp=%d convertSkinned=%d hiddenPassMode=%d skipUntextured=%d "

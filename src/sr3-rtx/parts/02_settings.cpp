@@ -118,6 +118,8 @@ struct Settings {
     // Tuning UI knobs: scale the hair / skin colour before the exposure curve (100 = as computed).
     float hairBrightness = 1.0f;
     float skinBrightness = 1.0f;
+    // Open the tuning window (sr3-tuner.pyw beside the game exe) when the game starts.
+    bool autoStartTuner = true;
     // Last resort for a garment whose pattern is a DECAL on an independent uv set: take the
     // pattern's dominant colour for the whole surface. An approximation, and labelled as one -
     // it gets the garment's colour right and loses the decal. 0 leaves such garments untinted,
@@ -824,6 +826,7 @@ void LoadSettings() {
     g_settings.skinFromAtlas = flag("skinFromAtlas", true);
     g_settings.hairBrightness = num("hairBrightnessPercent", 100) / 100.0f;
     g_settings.skinBrightness = num("skinBrightnessPercent", 100) / 100.0f;
+    g_settings.autoStartTuner = flag("autoStartTuner", true);
     g_settings.clothDominantPattern = flag("clothDominantPattern", true);
     g_settings.clothPadUnused = flag("clothPadUnused", true);
     g_settings.clothCutout = flag("clothCutout", true);

@@ -156,7 +156,26 @@ class Tuner(tk.Tk):
         self.status.config(text="Reverted to the values in the ini.")
 
 
+def watch_game(app, pid):
+    """Started by the shim with the game's pid: close when the game does."""
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    h = k32.OpenProcess(0x00100000, False, pid)   # SYNCHRONIZE
+    if not h:
+        return
+
+    def poll():
+        if k32.WaitForSingleObject(h, 0) == 0:   # signalled = the game exited
+            k32.CloseHandle(h)
+            app.destroy()
+        else:
+            app.after(2000, poll)
+    app.after(2000, poll)
+
+
 if __name__ == "__main__":
     app = Tuner()
     if app.winfo_exists():
+        if len(sys.argv) > 2 and sys.argv[2].isdigit():
+            watch_game(app, int(sys.argv[2]))
         app.mainloop()
