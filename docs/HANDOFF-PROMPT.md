@@ -125,6 +125,12 @@ Sequenced by the lead (measure before fixing):
    reverse-engineer the head/hair/skin shaders FIRST (re/shader_constants.csv, tools/fxo_disasm.py, TEAM A
    spec-tables-customization 12.1 head sub-record) - find their tint samplers/constants - then apply them
    like the cloth fix. Do NOT chase sRGB further until that is done.
+   DONE 2026-10-22, commit 5bd1a4f, DEPLOYED (logic md5 7ecd80f3, ini 4bfe5489): SkinAlbedo (matcap
+   disc means lerped by Blend.r * Diffuse_Color * 2, cloth Reinhard curve) + HairAlbedoHsv (HSV from
+   Hair_Parameters c1 / Hair_Spec_Alpha c2, mask Dob.B, alpha Dob.G). Switches skinMatcapAlbedo,
+   hairHsvAlbedo, skinGenPerFrame=2. Full formulas: worklog 2026-10-22 entry. NEXT: user runs once ->
+   read report lines "HAIR (hairHsvAlbedo" and "SKIN (skinMatcapAlbedo" + log lines "HAIR HSV #" /
+   "SKIN #". Key question: does NPC hair reach the generator (last run built ONE hair texture total)?
  STEP 2: fixes justified by step 1 - snapshot dynamic VB at Unlock and bind it for the replay DIP if
    threads differ; head/body sRGB/format correction if mismatched.
  STEP 3: features, each its own job: Remix lights from ir_light_* shader constants (PS c0 pos view-space,
