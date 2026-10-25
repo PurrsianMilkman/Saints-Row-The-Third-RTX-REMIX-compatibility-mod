@@ -35,6 +35,22 @@ clothing is, through the same exposure curve: `skinMatcapAlbedo`, `hairHsvAlbedo
 `skinGenPerFrame` (2). New HAIR and SKIN report lines count every hair and skin draw and why any
 were not generated.
 
+### Added: tuning window with live reload
+
+`tools/sr3-tuner.pyw` opens automatically with the game (`autoStartTuner=1`; it is copied beside the
+exe) and closes when the game exits. It edits the bake settings that are safe to change while
+playing: clothing curve and brightness, cutout and decals, hair and skin switches, and new
+`hairBrightnessPercent` / `skinBrightnessPercent`. **Reload in game** (or auto-reload) writes the ini
+and creates `sr3-rtx.reload`. The shim checks for it every 15 frames, re-reads the settings, and
+rebuilds every baked texture. Code reload without a restart is not built yet.
+
+### Not fixed: NPC heads (white hair, light body skin)
+
+NPC heads and bodies draw from a per-character texture the game builds itself, and the shim does
+not see how it is filled. It is not a captured lock and not one of the re-issued composites, so the
+skin and hair bakes never reach NPCs. `skinFromAtlas` (off) reached only the player and tinted it
+wrong. Next step: a probe naming how an NPC head texture is created and written.
+
 ### Investigated, not yet fixed
 
 - **World surfaces shifting to a dark tint with camera angle.** Fourteen causes ruled out. Frame dumps
