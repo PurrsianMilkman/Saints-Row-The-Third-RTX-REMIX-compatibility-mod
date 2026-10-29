@@ -136,6 +136,13 @@ Sequenced by the lead (measure before fixing):
    logic md5 9c001a4e): one-matcap ir_sr3shaderball bake (lerp(1,Sphere_Map,c7 Sphere_Map_Amount)*D*c0*2,
    skinSingleMatcap=1) + "SKINNED LAYOUTS" report listing every converted skinned draw's sampler layout.
    NEXT: user runs near NPCs -> read SKINNED LAYOUTS to name the NPC head shader, then bake that one.
+## REMIX 1.6.1 QUICK TEST (2026-10-28) - game dir now runs NVIDIA's OFFICIAL 1.6.1 x86 release (sha256
+   runtime CA71EDF1..., bridge d3d9 A2CBEBED...), WITHOUT our 7 fork fixes -> expect the staging leak
+   (crash ~8 min) + hard skinned shading. ROLLBACK: old files sit beside it - .trex-1.5.2-fork/ (incl. dmps),
+   d3d9.dll.bridge-1.5.2, NvRemixLauncher32.exe.1.5.2; full backup D:\SR3RTXREMIXCOMP-backups\2026-10-28-pre-remix-1.6;
+   repo tag pre-remix-1.6. Porting the fixes: staging-release + identity-pinning apply clean to remix-1.6.1;
+   build-env, bvh-count, skinning-normal-format conflict (3-way); drawcallcache, instance-history lack blobs.
+   D: has ~8.8 GB free.
  STEP 2: fixes justified by step 1 - snapshot dynamic VB at Unlock and bind it for the replay DIP if
    threads differ; head/body sRGB/format correction if mismatched.
  STEP 3: features, each its own job: Remix lights from ir_light_* shader constants (PS c0 pos view-space,
