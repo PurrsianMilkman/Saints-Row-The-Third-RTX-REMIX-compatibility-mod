@@ -14983,3 +14983,15 @@ Report lines: HAIR (seen/converted/reached/built/null reasons), SKIN (same + def
 HAIR HSV #n / SKIN #n (matcap disc means, Blend mean, result mean).
 Expected: the Brunette strand colour at full mask is about sRGB (144,93,78).
 Deployed 2026-10-22: logic dll md5 7ecd80f3..., ini 4bfe5489.... Awaiting one run.
+
+## 2026-10-29 - Remix 1.6.1 (official, unpatched) quick test: THE WORLD TINT IS FIXED
+
+Installed NVIDIA's official remix-1.6.1 x86 release (runtime sha256 CA71EDF1..., bridge d3d9 A2CBEBED...)
+in place of our fork BUILD 7 (1.5.2 + 7 fixes). User run: game starts; the camera-angle world TINT
+"seems fixed"; decals unchanged; NPC heads unchanged; frame rate slightly better.
+This confirms the 2026-09-30 conclusion: the shim handed Remix identical state and the tint was
+Remix's own bug, fixed between 1.5.2 and 1.6.1 (candidates in the 1.6 notes: shadow/reflection/
+subsurface/geometry-flicker/texture-streaming fixes, transformed texture coordinates GH-157 or
+alpha blending GH-392). The tint investigation is CLOSED; nothing shim-side to change.
+Still missing on this runtime: our staging-leak and skinning-normal-format fixes (and the other 5).
+Rollback paths and port status: HANDOFF-PROMPT.md "REMIX 1.6.1 QUICK TEST".
