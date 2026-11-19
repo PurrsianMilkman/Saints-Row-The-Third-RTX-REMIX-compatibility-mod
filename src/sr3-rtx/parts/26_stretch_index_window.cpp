@@ -106,6 +106,15 @@ bool ReadRigidPositionsRaw(const std::vector<UINT>& globalVerts, int posOffset, 
 }
 
 unsigned long long g_sdOowDraws = 0;              // scanned draws that referenced a vertex outside their window
+// PER-TRIANGLE EDGE CHECK (stretchDetectEdgeUnits): real (3 distinct indices) triangles examined,
+// a histogram of each one's longest world edge, and how many exceeded the limit.
+unsigned long long g_sdTris = 0, g_sdLongTris = 0, g_sdLongDraws = 0, g_sdTriDrawsScanned = 0;
+unsigned long long g_sdEdgeHist[6] = {};
+unsigned g_sdTriDumped = 0;
+bool ReadIndexRawForClamp(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, UINT startIndex,
+                          UINT primitiveCount, std::vector<UINT>* out);
+bool ExpandStripOrFanToTriangleList(const std::vector<UINT>& src, D3DPRIMITIVETYPE type,
+                                    UINT primitiveCount, std::vector<UINT>* out);
 unsigned long long g_stretchDetectChecked = 0;     // converted draws actually scanned
 unsigned long long g_stretchDetectUnreadable = 0;  // no position data AND a finite matrix - no verdict possible
 unsigned long long g_stretchDetectFlagged = 0;     // flagged, all-time - NOT capped by stretchDetectDumps
@@ -311,6 +320,78 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
     }
 
     if (!havePositions && !anyNonFinite) { ++g_stretchDetectUnreadable; return; }
+
+    // PER-TRIANGLE EDGE CHECK. A whole-draw AABB cannot see one bad quad inside a 476-quad batch that
+    // legitimately spans a district; a triangle's own edge length can. Judges only triangles whose
+    // three vertices were all read (the clamp owns the out-of-window ones) and skips the game's
+    // stitching degenerates (a repeated index), which have no area.
+    if (g_settings.stretchDetectEdgeUnits > 0 && havePositions && !worldPos.empty() &&
+        worldPos.size() == gvFinal.size()) {
+        std::vector<UINT> rawIdx, tris;
+        bool haveTris = false;
+        if (ReadIndexRawForClamp(g_curIB, type, startIndex, primitiveCount, &rawIdx)) {
+            if (type == D3DPT_TRIANGLELIST) { tris.swap(rawIdx); haveTris = true; }
+            else haveTris = ExpandStripOrFanToTriangleList(rawIdx, type, primitiveCount, &tris);
+        }
+        if (haveTris) {
+            ++g_sdTriDrawsScanned;
+            auto posOf = [&](UINT idxRaw, D3DVECTOR& o) -> bool {
+                const long long g = static_cast<long long>(baseVertex) + static_cast<long long>(idxRaw);
+                if (g < 0 || g > 0xFFFFFFFFll) return false;
+                const auto it = std::lower_bound(gvFinal.begin(), gvFinal.end(), static_cast<UINT>(g));
+                if (it == gvFinal.end() || *it != static_cast<UINT>(g)) return false;
+                const size_t k = static_cast<size_t>(it - gvFinal.begin());
+                if (k >= worldPos.size()) return false;
+                o = worldPos[k];
+                return std::isfinite(o.x) && std::isfinite(o.y) && std::isfinite(o.z);
+            };
+            auto dist = [](const D3DVECTOR& a, const D3DVECTOR& b) {
+                const float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+                return std::sqrt(dx * dx + dy * dy + dz * dz);
+            };
+            const float limit = static_cast<float>(g_settings.stretchDetectEdgeUnits);
+            unsigned longHere = 0, judged = 0;
+            size_t firstLong = 0; float firstEdges[3] = {}; D3DVECTOR fA{}, fB{}, fC{}; UINT fi[3] = {};
+            float drawMaxEdge = 0.0f;
+            for (size_t t = 0; t + 3 <= tris.size(); t += 3) {
+                const UINT a = tris[t], b = tris[t + 1], c = tris[t + 2];
+                if (a == b || b == c || a == c) continue;
+                D3DVECTOR pa, pb, pc;
+                if (!posOf(a, pa) || !posOf(b, pb) || !posOf(c, pc)) continue;
+                const float e0 = dist(pa, pb), e1 = dist(pb, pc), e2 = dist(pc, pa);
+                const float m = max(e0, max(e1, e2));
+                ++judged; ++g_sdTris;
+                ++g_sdEdgeHist[m < 5.0f ? 0 : m < 20.0f ? 1 : m < 50.0f ? 2 : m < 100.0f ? 3 : m < 500.0f ? 4 : 5];
+                if (m > drawMaxEdge) drawMaxEdge = m;
+                if (m > limit) {
+                    if (!longHere) {
+                        firstLong = t / 3; firstEdges[0] = e0; firstEdges[1] = e1; firstEdges[2] = e2;
+                        fA = pa; fB = pb; fC = pc; fi[0] = a; fi[1] = b; fi[2] = c;
+                    }
+                    ++longHere; ++g_sdLongTris;
+                }
+            }
+            if (longHere) {
+                ++g_sdLongDraws;
+                if (g_sdTriDumped < static_cast<unsigned>(max(0, g_settings.stretchDetectTriDumps))) {
+                    ++g_sdTriDumped;
+                    const float cx = (fB.y - fA.y) * (fC.z - fA.z) - (fB.z - fA.z) * (fC.y - fA.y);
+                    const float cy = (fB.z - fA.z) * (fC.x - fA.x) - (fB.x - fA.x) * (fC.z - fA.z);
+                    const float cz = (fB.x - fA.x) * (fC.y - fA.y) - (fB.y - fA.y) * (fC.x - fA.x);
+                    Log("STRETCH TRI #%u: frame %u tick %lu | ps='%s' type=%d v=%u p=%u vb=%p off=%u stride=%u ib=%p "
+                        "start=%u baseVtx=%d | %u of %u triangles in this draw exceed %.0f units (longest edge %.1f) | "
+                        "FIRST is triangle #%u: idx (%u %u %u) world A(%.1f %.1f %.1f) B(%.1f %.1f %.1f) "
+                        "C(%.1f %.1f %.1f) edges %.1f %.1f %.1f area %.1f",
+                        g_sdTriDumped, g_frames, static_cast<unsigned long>(GetTickCount()), g_curPS.albedoSampler,
+                        static_cast<int>(type), numVertices, primitiveCount, static_cast<void*>(g_stream0),
+                        g_stream0Offset, g_stream0Stride, static_cast<void*>(g_curIB), startIndex, baseVertex,
+                        longHere, judged, limit, drawMaxEdge, static_cast<unsigned>(firstLong), fi[0], fi[1], fi[2],
+                        fA.x, fA.y, fA.z, fB.x, fB.y, fB.z, fC.x, fC.y, fC.z, firstEdges[0], firstEdges[1],
+                        firstEdges[2], 0.5f * std::sqrt(cx * cx + cy * cy + cz * cz));
+                }
+            }
+        }
+    }
 
     const float diag = (nFinite > 0)
         ? std::sqrt((worldMax.x - worldMin.x) * (worldMax.x - worldMin.x) +

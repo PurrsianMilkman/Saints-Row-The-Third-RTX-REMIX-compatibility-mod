@@ -279,6 +279,12 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         // outcome, neither flagged nor cleared - the index buffer was dynamic, or no bind
         // pose was cached yet, so no verdict was possible for that draw.
         if (g_settings.stretchDetect) {
+            Log("    STRETCH TRIANGLES (limit %d world units, %u dumped of cap %d): %llu draws read, %llu real "
+                "triangles judged | longest-edge histogram [0-5)=%llu [5-20)=%llu [20-50)=%llu [50-100)=%llu "
+                "[100-500)=%llu [500+)=%llu | %llu triangles over the limit, in %llu draws",
+                g_settings.stretchDetectEdgeUnits, g_sdTriDumped, g_settings.stretchDetectTriDumps,
+                g_sdTriDrawsScanned, g_sdTris, g_sdEdgeHist[0], g_sdEdgeHist[1], g_sdEdgeHist[2], g_sdEdgeHist[3],
+                g_sdEdgeHist[4], g_sdEdgeHist[5], g_sdLongTris, g_sdLongDraws);
             Log("    STRETCH DETECT scope: dynamic-VB draws only=%d, in-window only=%d | %llu scanned draws referenced a "
                 "vertex OUTSIDE their window (the clamp's population) - the flagged count below is RESIDUAL "
                 "anomalies in what the clamp leaves",

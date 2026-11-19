@@ -764,6 +764,10 @@ struct Settings {
     // window, because indexWindowClamp already collapses every triangle that reaches outside it.
     bool stretchDetectDynamicOnly = true;
     bool stretchDetectInWindowOnly = true;
+    // PER-TRIANGLE check on the scanned draws: longest WORLD edge of every non-degenerate triangle.
+    // A decal triangle is metres across; a stretched one is not. 0 disables; the unit is world units.
+    int stretchDetectEdgeUnits = 50;
+    int stretchDetectTriDumps = 30;
 
     // hideShaderContains - DIAGNOSTIC bisection switch, not a fix. This project is hunting a
     // TRANSIENT artifact: a large flat polygon that appears for a frame or two, stretching
@@ -989,6 +993,8 @@ void LoadSettings() {
     g_settings.stretchDetectDumps = static_cast<int>(num("stretchDetectDumps", 20));
     g_settings.stretchDetectDynamicOnly = flag("stretchDetectDynamicOnly", true);
     g_settings.stretchDetectInWindowOnly = flag("stretchDetectInWindowOnly", true);
+    g_settings.stretchDetectEdgeUnits = static_cast<int>(num("stretchDetectEdgeUnits", 50));
+    g_settings.stretchDetectTriDumps = static_cast<int>(num("stretchDetectTriDumps", 30));
     {
         char list[128]{};
         if (!checkPresent("probeVerts"))
