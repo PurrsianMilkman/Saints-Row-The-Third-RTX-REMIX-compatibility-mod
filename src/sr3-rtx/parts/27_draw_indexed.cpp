@@ -462,6 +462,7 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     // ProbeAssetHash immediately above - the two diagnostics are gated independently and pay
     // nothing for each other. See ProbeStretchDetect's own comment, above, for what it looks
     // for and why it is built the way it is.
+    g_sdPendingOow = false;
     if (ffp && g_settings.stretchDetect)
         ProbeStretchDetect(dev, type, baseVertex, minIndex, numVertices, startIndex, primitiveCount,
                            skinned, skinnedFF, scope);
@@ -586,6 +587,23 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
                                                                      primitiveCount, &hr);
             } else {
                 ++g_iwcTopologyRefused;
+            }
+        }
+        if (g_sdPendingOow) {
+            if (clampCorrected) {
+                ++g_sdOowClamped;
+            } else {
+                ++g_sdOowUnclamped;
+                if (g_sdOowUnclampedDumped < 12) {
+                    ++g_sdOowUnclampedDumped;
+                    Log("OOW UNCLAMPED #%u: frame %u | ps='%s' type=%d v=%u p=%u vb=%p off=%u ib=%p start=%u | window "
+                        "verdict measured=%d outside=%d | clampEligible=%d skinned=%d - this draw references a vertex "
+                        "outside its window and reached Remix with the original indices",
+                        g_sdOowUnclampedDumped, g_frames, g_curPS.albedoSampler, static_cast<int>(type), numVertices,
+                        primitiveCount, static_cast<void*>(g_stream0), g_stream0Offset, static_cast<void*>(g_curIB),
+                        startIndex, iwVerdict.measured ? 1 : 0, iwVerdict.outside ? 1 : 0, clampEligible ? 1 : 0,
+                        skinned ? 1 : 0);
+                }
             }
         }
         if (!clampCorrected) {

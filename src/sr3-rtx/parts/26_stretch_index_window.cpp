@@ -106,6 +106,11 @@ bool ReadRigidPositionsRaw(const std::vector<UINT>& globalVerts, int posOffset, 
 }
 
 unsigned long long g_sdOowDraws = 0;              // scanned draws that referenced a vertex outside their window
+// Detector-side coverage check: a scanned draw that referenced a vertex outside its window, and whether the
+// clamp then actually corrected it before it reached Remix.
+bool g_sdPendingOow = false;
+unsigned long long g_sdOowClamped = 0, g_sdOowUnclamped = 0;
+unsigned g_sdOowUnclampedDumped = 0;
 // PER-TRIANGLE EDGE CHECK (stretchDetectEdgeUnits): real (3 distinct indices) triangles examined,
 // a histogram of each one's longest world edge, and how many exceeded the limit.
 unsigned long long g_sdTris = 0, g_sdLongTris = 0, g_sdLongDraws = 0, g_sdTriDrawsScanned = 0;
@@ -222,6 +227,7 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
         } catch (...) { oowVerts = 0; }
         if (oowVerts) ++g_sdOowDraws;
     }
+    g_sdPendingOow = (oowVerts > 0);
 
     // THE PATH TAG: exactly what ProbeAssetHash's own UV component computes for this identical
     // draw, reused verbatim so a stretch dump and an asset-hash dump name the same draw the
@@ -610,6 +616,7 @@ unsigned g_iwpWorstOvershoot = 0;            // worst (maxIndex - (MinVertexInde
 unsigned g_iwpReports = 0;                   // INDEX WINDOW PROBE example lines written, capped at 10 for the whole session (not re-armed - see g_albedoChurnReports for the same style)
 unsigned long long g_iwpRigidReuse = 0;      // measured via the g_tightWin cache TightenConvertedWindow already populated - zero extra Locks
 unsigned long long g_iwpSkinnedScan = 0;     // measured via a fresh ScanIndexMinMaxCheap Lock
+unsigned long long g_iwpRigidMiss = 0, g_iwpRigidMissScanned = 0;   // rigid draws with NO cached window (budget spent), and how many were scanned directly instead
 unsigned long long g_iwpRefuseDynamic = 0;   // skinned draw, DYNAMIC index buffer - not measured (no snoop copy for index buffers)
 unsigned long long g_iwpRefuseOther = 0;     // no IB / unhandled or empty primitive type / GetDesc failed / index slice past buffer end / lock failed
 
@@ -685,6 +692,17 @@ IndexWindowVerdict CheckIndexWindow(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE 
                 lo = it->second.lo; hi = it->second.hi;
                 have = true;
                 ++g_iwpRigidReuse;
+            }
+        }
+        // No cached window: TightenConvertedWindow refused this draw (its per-frame Lock budget was spent, or
+        // it was refused for another reason). Without a verdict the clamp never runs and the game's stray
+        // out-of-window index reaches Remix - so measure it directly.
+        if (!have) {
+            ++g_iwpRigidMiss;
+            if (g_settings.indexWindowScanOnMiss &&
+                ScanIndexMinMaxCheap(ib, type, startIndex, primitiveCount, &lo, &hi)) {
+                have = true;
+                ++g_iwpRigidMissScanned;
             }
         }
     } else if (ScanIndexMinMaxCheap(ib, type, startIndex, primitiveCount, &lo, &hi)) {

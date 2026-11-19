@@ -782,6 +782,13 @@ struct Settings {
     // more than skipDrawsWithoutUvMaxFrames frames in a row is let through, so one the game never rewrites
     // cannot stay invisible for good.
     bool skipDrawsWithoutUv = true;
+    // THE CLAMP COVERAGE FIX (2026-11-19). indexWindowClamp only ran on draws whose index range was already
+    // cached by TightenConvertedWindow; that scan has a per-frame Lock budget (32), and decal batches are new
+    // every frame (a new primitive count = a cache miss) and draw late, after the world has spent the budget.
+    // Those draws were "not measured", never clamped, and reached Remix with the game's stray index one past
+    // their window - which Remix reads as the NEXT batch's vertex, a triangle across the district. With this
+    // on, a rigid draw with no cached window is scanned directly (one read-only Lock) instead.
+    bool indexWindowScanOnMiss = true;
     int skipDrawsWithoutUvMaxFrames = 12;
 
     // hideShaderContains - DIAGNOSTIC bisection switch, not a fix. This project is hunting a
@@ -1014,6 +1021,7 @@ void LoadSettings() {
     g_settings.stretchDetectUvDumps = static_cast<int>(num("stretchDetectUvDumps", 30));
     g_settings.stretchDetectStaleDumps = static_cast<int>(num("stretchDetectStaleDumps", 25));
     g_settings.skipDrawsWithoutUv = flag("skipDrawsWithoutUv", true);
+    g_settings.indexWindowScanOnMiss = flag("indexWindowScanOnMiss", true);
     g_settings.skipDrawsWithoutUvMaxFrames = static_cast<int>(num("skipDrawsWithoutUvMaxFrames", 12));
     {
         char list[128]{};

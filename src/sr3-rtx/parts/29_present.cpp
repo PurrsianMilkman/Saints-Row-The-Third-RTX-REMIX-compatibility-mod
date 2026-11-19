@@ -292,6 +292,11 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                 g_settings.stretchDetectUv ? 1 : 0, g_sdUvDumped, g_settings.stretchDetectUvDumps, g_sdUvTris,
                 g_sdUvHist[0], g_sdUvHist[1], g_sdUvHist[2], g_sdUvHist[3], g_sdUvHist[4], g_sdUvHist[5],
                 g_sdUvCollapsed, g_sdUvHuge, g_sdUvUnreadable);
+            Log("    CLAMP COVERAGE (indexWindowScanOnMiss=%d): scanned draws that referenced a vertex OUTSIDE their window: "
+                "%llu were clamped, %llu REACHED REMIX UNCLAMPED | rigid draws with no cached window (the tighten "
+                "step's Lock budget was spent) %llu, of which scanned directly instead %llu",
+                g_settings.indexWindowScanOnMiss ? 1 : 0, g_sdOowClamped, g_sdOowUnclamped, g_iwpRigidMiss,
+                g_iwpRigidMissScanned);
             Log("    UV-LESS DRAWS (skipDrawsWithoutUv=%d, streak cap %d frames): %llu draws SKIPPED because their SHORT2 "
                 "texcoords could not be converted (%llu of them because the snoop had no data yet) - each would have "
                 "reached Remix with discarded texcoords as a flat polygon | %llu let through after the streak cap",

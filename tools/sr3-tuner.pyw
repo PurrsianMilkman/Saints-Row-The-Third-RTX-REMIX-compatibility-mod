@@ -44,6 +44,7 @@ SECTIONS = [
         ("resetTFactorOnTexturedDraws", "Reset texture factor on textured draws", "bool", 0, 1, 1),
         ("vbPendingPerThread", "Per-thread pending buffer writes (decal snoop fix)", "bool", 0, 1, 1),
         ("skipDrawsWithoutUv", "Skip draws without texcoords (flat-polygon decal fix)", "bool", 0, 1, 1),
+        ("indexWindowScanOnMiss", "Scan unmeasured draws so the index clamp covers them (decal stretch fix)", "bool", 0, 1, 1),
     ]),
 ]
 
