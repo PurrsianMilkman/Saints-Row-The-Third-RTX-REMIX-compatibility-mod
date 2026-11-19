@@ -639,3 +639,16 @@ calls a frame still cross the bridge (a lazy layer needs a BRIDGE-side shadow).
 Backups: `D:\SR3RTXREMIXCOMP-backup-2026-09-10` and earlier. `engine-control/` holds the inert
 74-entry engine census plugin, MOVED OUT of the game folder on 2026-09-10 to
 `engine-control/removed-from-game-dir-2026-09-10/`.
+
+## DECAL STRETCH - NEW LEAD 2026-11-19 (commit 20c4426, deployed: logic md5 caec50ee, ini, tuner; game runs Remix 1.6.1 official)
+Read the REAL bridge client (C:emix-fork\dxvk-remixridge\src\client\lockable_buffer.h, identical 1.5.2 vs 1.6.1): dynamic
+buffers use the plain SHADOW path (optimizedDynamicLock=False, shared heap off), lock infos pair FIFO with std::queue, no mutex.
+RULED OUT: bridge queue lag (data is copied in-order at Unlock); 1e10 "sentinel" = neighbour data, clamp fixed nothing.
+FOUND IN OUR SHIM: Hook_VBLock/Unlock kept ONE global g_pendingLock; SR3 writes dynamic VBs from ~6 threads, so a Lock
+overwrites another thread's pending entry and that write is never snooped -> stale snoop still marked fresh -> stale UV
+conversion (convertDynamicUV) for decal draws = one-frame wrong decal. FIX: per-(thread,buffer) table, switch
+vbPendingPerThread (default 1; tuner Other tab = live A/B). Report line "SNOOP PENDING WRITES": clobbered (old mode),
+matched/evicted/foreign (new mode), overlapping write locks per buffer (bridge-FIFO risk, expect 0).
+NEXT: user plays a decal-heavy area; read that line + ask if the stretch still happens. If it persists: add DISCARD-coverage
+check at DIP (range not rewritten since the buffer's last DISCARD = Remix reads undefined bytes); stretchDetect=1 is the
+position-side detector (cost: fps).
