@@ -652,3 +652,16 @@ matched/evicted/foreign (new mode), overlapping write locks per buffer (bridge-F
 NEXT: user plays a decal-heavy area; read that line + ask if the stretch still happens. If it persists: add DISCARD-coverage
 check at DIP (range not rewritten since the buffer's last DISCARD = Remix reads undefined bytes); stretchDetect=1 is the
 position-side detector (cost: fps).
+
+## DECAL STRETCH - STRONGEST LEAD 2026-11-19 (flat polygon = texcoords Remix discards)
+RULED OUT by measurement (runs 2026-11-19, Remix 1.6.1): pending-lock slot (0 overlaps, fix changed nothing); d3d9.allowDiscard=False
+(no change); DISCARD staleness (0 TRUE STALE ranges); position anomalies (2.76M tris, longest edge 52; the only long ones are
+steady 1.5x51 vertical streak decals, tiled UV x12); collapsed UVs (0). Remix copies vertices synchronously at the DIP (read
+d3d9_rtx.cpp) so no timing gap there.
+FOUND: BeginFFP ignores InstallFloatUV's return value (16_time_accounting.cpp ~261). When UvBufferFor has no snooped data yet
+("waiting", first sight after a load: 40 draws/run, Remix logs "[rtx-interleaver] Unsupported texcoord buffer format (80),
+skipping texcoord") the draw still goes to Remix with SHORT2 texcoords it DISCARDS -> every pixel one texel -> flat polygon,
+one frame, at decal load/unload, angle/location dependent. FIX (deployed, switch skipDrawsWithoutUv=1, tuner Other tab):
+skip those draws (Disp::Skip) with a per-buffer streak cap (skipDrawsWithoutUvMaxFrames=12). Report line "UV-LESS DRAWS".
+NEXT: user plays; if the stretch is gone -> done (consider registering dynamic VBs with the snoop at creation so first sight
+never happens + release note). If not: check "UV-LESS DRAWS" count and "STRETCH TRIANGLES/UV" again.

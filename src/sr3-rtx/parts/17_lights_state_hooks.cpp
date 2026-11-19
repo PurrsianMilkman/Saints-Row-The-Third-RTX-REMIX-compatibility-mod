@@ -816,6 +816,7 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
             try { staging.resize(sliceLen); } catch (...) { ++g_uvRingFail; return nullptr; }
             if (!SnoopCopy(g_stream0, sliceOff, staging.data(), sliceLen, &fresh) || !fresh) {
                 ++g_uvDynWaiting;
+                g_uvDrawWaiting = true;
                 return nullptr;
             }
             void* dstData = nullptr;
@@ -909,6 +910,7 @@ IDirect3DVertexBuffer9* UvBufferFor(IDirect3DDevice9* dev) {
         if (!SnoopCopy(g_stream0, sliceOff, staging.data(), sliceLen, &fresh) || !fresh) {
             entry.uv->Release();
             ++g_uvDynWaiting;
+            g_uvDrawWaiting = true;
             return nullptr;      // not a conversion failure - the snoop has no data yet
         }
         src8 = staging.data();

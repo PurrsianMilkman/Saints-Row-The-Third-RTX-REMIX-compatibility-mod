@@ -34,6 +34,8 @@ void ProbeDecalDraw();
 
 Disp BeginFFP(IDirect3DDevice9* dev, FFPScope& scope) {
     g_clothRemap = nullptr;
+    g_uvDrawNoUv = false;
+    g_uvDrawWaiting = false;
     LONGLONG tB = Now();
     const Disp d = Classify(dev);
     PhaseAdd(PH_CLASSIFY, tB);

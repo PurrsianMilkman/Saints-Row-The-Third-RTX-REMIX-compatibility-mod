@@ -774,6 +774,15 @@ struct Settings {
     bool stretchDetectUv = true;
     int stretchDetectUvDumps = 30;
     int stretchDetectStaleDumps = 25;
+    // THE FLAT-POLYGON FIX (2026-11-19). A converted draw whose SHORT2 texcoords could not be converted to
+    // float (the snoop had no data for its buffer yet - first sight after a load - or the ring/declaration
+    // was unavailable) used to go to Remix anyway, which DISCARDS SHORT2 texcoords ("Unsupported texcoord
+    // buffer format (80)"): every pixel then samples one texel and a decal draws as a flat polygon for a
+    // frame. With this on the draw is SKIPPED instead (like the fresh-buffer deferral). A buffer skipped for
+    // more than skipDrawsWithoutUvMaxFrames frames in a row is let through, so one the game never rewrites
+    // cannot stay invisible for good.
+    bool skipDrawsWithoutUv = true;
+    int skipDrawsWithoutUvMaxFrames = 12;
 
     // hideShaderContains - DIAGNOSTIC bisection switch, not a fix. This project is hunting a
     // TRANSIENT artifact: a large flat polygon that appears for a frame or two, stretching
@@ -1004,6 +1013,8 @@ void LoadSettings() {
     g_settings.stretchDetectUv = flag("stretchDetectUv", true);
     g_settings.stretchDetectUvDumps = static_cast<int>(num("stretchDetectUvDumps", 30));
     g_settings.stretchDetectStaleDumps = static_cast<int>(num("stretchDetectStaleDumps", 25));
+    g_settings.skipDrawsWithoutUv = flag("skipDrawsWithoutUv", true);
+    g_settings.skipDrawsWithoutUvMaxFrames = static_cast<int>(num("skipDrawsWithoutUvMaxFrames", 12));
     {
         char list[128]{};
         if (!checkPresent("probeVerts"))

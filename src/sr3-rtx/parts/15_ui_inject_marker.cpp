@@ -646,6 +646,9 @@ inline int DecalUvSourceSet() {
 // cameraOnly use it. The replacement buffer holds the RAW short values widened to float, and a
 // SHORT2 declaration delivers exactly those raw values to a shader. The game's vertex shader
 // therefore reads identical numbers either way: a change of representation, not of the render.
+// Set by InstallFloatUV when THIS draw needed its SHORT2 texcoords converted and could not get them (and
+// whether UvBufferFor said the snoop was merely still empty); read by Hook_DrawIndexedPrimitive.
+bool g_uvDrawNoUv = false, g_uvDrawWaiting = false;
 bool InstallFloatUV(IDirect3DDevice9* dev, FFPScope& scope, bool deinstance) {
     if (!g_settings.remixShortUV || g_curLayout.skinned || !g_curDecl) return false;
     // FIX A: which vertex texcoord usage index this draw's albedo actually needs - see
@@ -674,9 +677,13 @@ bool InstallFloatUV(IDirect3DDevice9* dev, FFPScope& scope, bool deinstance) {
         ++g_uvSet1WrongStream;
         return false;
     }
+    g_uvDrawWaiting = false;
     IDirect3DVertexBuffer9* uvBuf = UvBufferFor(dev);
     IDirect3DVertexDeclaration9* alt = uvBuf ? FloatUVDeclaration(dev, g_curDecl) : nullptr;
-    if (!uvBuf || !alt) return false;
+    if (!uvBuf || !alt) {
+        g_uvDrawNoUv = true;
+        return false;
+    }
     g_origSetVertexDeclaration(dev, alt);
     g_origSetStreamSource(dev, g_uvStream, uvBuf, g_uvBindOffset, kUvBytesPerVertex);
     // Our entries are indexed per vertex exactly as stream 0 is, so under instancing the two need

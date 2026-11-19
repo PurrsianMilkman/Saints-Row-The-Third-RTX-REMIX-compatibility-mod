@@ -100,6 +100,25 @@ void BhReport(double f) {
         g_bhMixSize, g_bhMixAny, g_bhNoAlbedo, g_bhOverflow, g_bhExamples);
 }
 
+// Per-buffer streak of consecutive frames a draw was skipped for lack of converted texcoords (the
+// flat-polygon fix). A fixed array, round-robin replaced; only the render thread touches it.
+struct UvSkipEntry { IDirect3DVertexBuffer9* vb = nullptr; unsigned lastFrame = 0, streak = 0; };
+UvSkipEntry g_uvSkip[32];
+unsigned g_uvSkipNext = 0, g_uvSkipExamples = 0;
+unsigned long long g_uvSkipped = 0, g_uvSkippedWaiting = 0, g_uvSkipGaveUp = 0;
+bool UvSkipAllowed(IDirect3DVertexBuffer9* vb) {
+    UvSkipEntry* e = nullptr;
+    for (UvSkipEntry& x : g_uvSkip) if (x.vb == vb) { e = &x; break; }
+    if (!e) {
+        e = &g_uvSkip[g_uvSkipNext++ % 32];
+        *e = UvSkipEntry{vb, g_frames, 1};
+    } else if (e->lastFrame != g_frames) {
+        e->streak = (e->lastFrame + 1 == g_frames) ? e->streak + 1 : 1;
+        e->lastFrame = g_frames;
+    }
+    return e->streak <= static_cast<unsigned>(max(1, g_settings.skipDrawsWithoutUvMaxFrames));
+}
+
 HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type,
                                          INT baseVertex, UINT minIndex, UINT numVertices,
                                          UINT startIndex, UINT primitiveCount) {
@@ -131,6 +150,25 @@ HRESULT WINAPI Hook_DrawIndexedPrimitive(IDirect3DDevice9* dev, D3DPRIMITIVETYPE
     FFPScope scope;
     Disp d = BeginFFP(dev, scope);
     tP = Now();
+    // THE FLAT-POLYGON FIX (skipDrawsWithoutUv, see its comment in the settings): a converted draw that needed
+    // its SHORT2 texcoords converted and did not get them would reach Remix with texcoords it discards.
+    if (d == Disp::Convert && g_uvDrawNoUv && g_settings.skipDrawsWithoutUv) {
+        if (UvSkipAllowed(g_stream0)) {
+            ++g_uvSkipped;
+            if (g_uvDrawWaiting) ++g_uvSkippedWaiting;
+            if (g_uvSkipExamples < 12) {
+                ++g_uvSkipExamples;
+                Log("UV SKIP #%u: frame %u | ps='%s' v=%u p=%u vb=%p off=%u stride=%u | snoop %s", g_uvSkipExamples,
+                    g_frames, g_curPS.albedoSampler, numVertices, primitiveCount, static_cast<void*>(g_stream0),
+                    g_stream0Offset, g_stream0Stride, g_uvDrawWaiting ? "had no data for this range yet" : "conversion failed");
+            }
+            EndFFP(dev, scope);
+            scope = FFPScope{};
+            d = Because("uv: SHORT2 texcoord conversion unavailable - skipped (Remix discards SHORT2 texcoords and would draw a flat polygon)", Disp::Skip);
+        } else {
+            ++g_uvSkipGaveUp;
+        }
+    }
     // Fresh-buffer deferral (see g_recentWrites). SKIPPED, not hidden: a Hide draw still goes
     // to the bridge, under an identity projection, which is itself a way to make a stretched
     // quad. Skinned draws are exempt - they render from our own ring, decoded after the write.

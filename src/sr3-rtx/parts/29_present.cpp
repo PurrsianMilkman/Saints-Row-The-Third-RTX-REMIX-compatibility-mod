@@ -292,6 +292,11 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                 g_settings.stretchDetectUv ? 1 : 0, g_sdUvDumped, g_settings.stretchDetectUvDumps, g_sdUvTris,
                 g_sdUvHist[0], g_sdUvHist[1], g_sdUvHist[2], g_sdUvHist[3], g_sdUvHist[4], g_sdUvHist[5],
                 g_sdUvCollapsed, g_sdUvHuge, g_sdUvUnreadable);
+            Log("    UV-LESS DRAWS (skipDrawsWithoutUv=%d, streak cap %d frames): %llu draws SKIPPED because their SHORT2 "
+                "texcoords could not be converted (%llu of them because the snoop had no data yet) - each would have "
+                "reached Remix with discarded texcoords as a flat polygon | %llu let through after the streak cap",
+                g_settings.skipDrawsWithoutUv ? 1 : 0, g_settings.skipDrawsWithoutUvMaxFrames, g_uvSkipped,
+                g_uvSkippedWaiting, g_uvSkipGaveUp);
             Log("    STALE RANGES (scanned dynamic draws whose vertex range could not be read fresh): %llu TRUE STALE "
                 "(registered buffer, bytes not rewritten since the game's last DISCARD - what Remix would read as "
                 "undefined) | %llu first sight (buffer new to the snoop) | %llu other | %u dumped of cap %d",
