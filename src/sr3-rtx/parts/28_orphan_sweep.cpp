@@ -88,6 +88,8 @@ void ForgetInstanceStream(IDirect3DVertexBuffer9* vb) {
         const size_t rel = it->second.data.size() + it->second.fresh.size();
         g_snoopBytes -= (rel <= g_snoopBytes) ? rel : g_snoopBytes;
         if (g_pendingLock.vb == vb) g_pendingLock = {};
+        for (unsigned i = 0; i < kMaxPendingLocks; ++i)
+            if (g_pendingLocks[i].vb == vb) g_pendingLocks[i] = PendingLock{};
         g_instCache.erase(it);
         vb->Release();
     }

@@ -42,6 +42,7 @@ SECTIONS = [
     ]),
     ("Other", [
         ("resetTFactorOnTexturedDraws", "Reset texture factor on textured draws", "bool", 0, 1, 1),
+        ("vbPendingPerThread", "Per-thread pending buffer writes (decal snoop fix)", "bool", 0, 1, 1),
     ]),
 ]
 

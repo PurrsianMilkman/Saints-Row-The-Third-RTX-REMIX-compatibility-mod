@@ -93,6 +93,10 @@ unsigned long long g_ltUnlocks = 0, g_ltDynDraws = 0, g_ltDiffThread = 0, g_ltFi
                    g_ltDelta0 = 0, g_ltDelta1 = 0, g_ltDelta2Plus = 0, g_ltNoStamp = 0;
 struct LtExample { char ps[28]; UINT v, p, off; DWORD lockThread, drawThread; unsigned delta; void* vb; bool diff; };
 LtExample g_ltEx[10] = {};
+// Two writable lock sessions open on ONE buffer at the same time (D3D9 forbids it; the bridge
+// client pairs Unlocks to Locks first-in-first-out, so a cross-thread overlap would send the wrong
+// region). Measured, expected zero.
+unsigned long long g_ltOverlapSame = 0, g_ltOverlapCross = 0;
 unsigned g_ltExN = 0, g_ltExDiff = 0, g_ltExSame = 0;
 void LtNoteThread(DWORD* list, unsigned& n, DWORD t) {
     for (unsigned i = 0; i < n; ++i) if (list[i] == t) return;
@@ -106,6 +110,9 @@ void LtNoteLock(IDirect3DVertexBuffer9* vb) {
             ++g_ltFlushes;
         }
         LockStamp& s = g_lockStamps[vb];
+        if (s.writeOpen) {
+            if (s.lockThread != GetCurrentThreadId()) ++g_ltOverlapCross; else ++g_ltOverlapSame;
+        }
         s.lockThread = GetCurrentThreadId();
         s.writeOpen = true;
         LtNoteThread(g_ltLockThreads, g_ltNLockThreads, s.lockThread);
@@ -170,6 +177,20 @@ void LtReport(double f) {
     char ls[160] = "", ds[160] = "";
     for (unsigned i = 0; i < nl; ++i) sprintf_s(ls + strlen(ls), sizeof(ls) - strlen(ls), "%s%lu", i ? "," : "", static_cast<unsigned long>(lt[i]));
     for (unsigned i = 0; i < nd; ++i) sprintf_s(ds + strlen(ds), sizeof(ds) - strlen(ds), "%s%lu", i ? "," : "", static_cast<unsigned long>(dt[i]));
+    {
+        unsigned long long set, clob, evict, taken, foreign, ovS, ovC;
+        {
+            SnoopGuard guard;
+            set = g_plSet; clob = g_plClobbered; evict = g_plEvicted; taken = g_plTaken;
+            foreign = g_plForeignUnlock; ovS = g_ltOverlapSame; ovC = g_ltOverlapCross;
+        }
+        Log("    SNOOP PENDING WRITES (vbPendingPerThread=%s): %llu writable locks on snooped buffers | "
+            "single-slot mode CLOBBERED another thread's or buffer's pending write %llu times (each a LOST snoop "
+            "update: that range stays stale but marked fresh) | per-thread mode: %llu unlocks matched, %llu table "
+            "evictions, %llu unlocks that found only another thread's entry | overlapping write locks on one "
+            "buffer: %llu cross-thread, %llu same-thread",
+            g_settings.vbPendingPerThread ? "ON" : "off", set, clob, taken, evict, foreign, ovC, ovS);
+    }
     Log("    LOCK THREAD PROBE (lockThreadProbe=ON, DYNAMIC vertex buffers only): %.2f draws/frame read a "
         "dynamic VB | %.2f/frame last unlocked by a DIFFERENT thread (%.1f%%) | re-locked since the "
         "previous draw from the same buffer: 0x=%llu 1x=%llu 2+x=%llu (max %u), first draw of a buffer "
@@ -182,6 +203,62 @@ void LtReport(double f) {
             "drawThread=%lu locksSincePrevDraw=%u", i + 1, ex[i].diff ? "DIFFERENT thread" : "same thread",
             ex[i].ps, ex[i].v, ex[i].p, ex[i].vb, ex[i].off, static_cast<unsigned long>(ex[i].lockThread),
             static_cast<unsigned long>(ex[i].drawThread), ex[i].delta);
+}
+
+// Under SnoopGuard. Record a writable lock on a snooped buffer for its Unlock to find.
+void PendingLockSet(const PendingLock& n) {
+    ++g_plSet;
+    if (!g_settings.vbPendingPerThread) {
+        if (g_pendingLock.ptr && (g_pendingLock.vb != n.vb || g_pendingLock.owner != n.owner)) ++g_plClobbered;
+        g_pendingLock = n;
+        return;
+    }
+    int slot = -1, oldest = 0;
+    for (unsigned i = 0; i < kMaxPendingLocks; ++i) {
+        const PendingLock& e = g_pendingLocks[i];
+        if (e.ptr) {
+            if (e.vb == n.vb && e.owner == n.owner) { slot = static_cast<int>(i); break; }   // re-lock: replace
+            if (g_pendingLockAge[i] < g_pendingLockAge[oldest]) oldest = static_cast<int>(i);
+        } else if (slot < 0) {
+            slot = static_cast<int>(i);
+        }
+    }
+    if (slot < 0) { slot = oldest; ++g_plEvicted; }
+    g_pendingLocks[slot] = n;
+    g_pendingLockAge[slot] = ++g_pendingLockTick;
+}
+// Under SnoopGuard. The entry this Unlock finishes: pl is empty when there is none.
+// sameOwnerThread keeps the meaning Hook_VBUnlock's copy test already gives it.
+void PendingLockTake(IDirect3DVertexBuffer9* self, PendingLock& pl, bool& sameOwnerThread) {
+    const DWORD tid = GetCurrentThreadId();
+    if (!g_settings.vbPendingPerThread) {
+        pl = g_pendingLock;
+        sameOwnerThread = !g_settings.vbUnlockOwnerThread || pl.owner == tid;
+        if (pl.vb == self && pl.ptr && sameOwnerThread) g_pendingLock = {};
+        return;
+    }
+    pl = PendingLock{};
+    sameOwnerThread = false;
+    int foreign = -1;
+    for (unsigned i = 0; i < kMaxPendingLocks; ++i) {
+        if (!g_pendingLocks[i].ptr || g_pendingLocks[i].vb != self) continue;
+        if (g_pendingLocks[i].owner == tid) {
+            pl = g_pendingLocks[i];
+            g_pendingLocks[i] = PendingLock{};
+            sameOwnerThread = true;
+            ++g_plTaken;
+            return;
+        }
+        foreign = static_cast<int>(i);
+    }
+    if (foreign >= 0) {
+        ++g_plForeignUnlock;
+        if (!g_settings.vbUnlockOwnerThread) {   // the permissive setting takes it regardless of thread
+            pl = g_pendingLocks[foreign];
+            g_pendingLocks[foreign] = PendingLock{};
+            sameOwnerThread = true;
+        }
+    }
 }
 
 HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size, void** data,
@@ -254,7 +331,7 @@ HRESULT WINAPI Hook_VBLock(IDirect3DVertexBuffer9* self, UINT offset, UINT size,
         if (FAILED(self->GetDesc(&d))) return hr;
         span = (d.Size > offset) ? (d.Size - offset) : 0;
     }
-    g_pendingLock = {self, *data, offset, span, GetCurrentThreadId()};
+    PendingLockSet(PendingLock{self, *data, offset, span, GetCurrentThreadId()});
     return hr;
 }
 
@@ -288,10 +365,9 @@ HRESULT WINAPI Hook_VBUnlock(IDirect3DVertexBuffer9* self) {
     // here - only a DIFFERENT thread's Unlock is now refused the entry.
     SnoopGuard guard;
     if (g_settings.lockThreadProbe && !InternalHere()) LtNoteUnlock(self);   // diagnostic only
-    PendingLock pl = g_pendingLock;
-    const bool sameOwnerThread =
-        !g_settings.vbUnlockOwnerThread || pl.owner == GetCurrentThreadId();
-    if (pl.vb == self && pl.ptr && sameOwnerThread) g_pendingLock = {};
+    PendingLock pl;
+    bool sameOwnerThread = false;
+    PendingLockTake(self, pl, sameOwnerThread);
     if (pl.vb == self && pl.ptr && pl.size && sameOwnerThread) {
         InstanceCache& c = g_instCache[self];
         // Grows to what the game actually writes, which is a fraction of most buffers'

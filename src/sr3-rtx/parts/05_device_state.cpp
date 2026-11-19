@@ -968,6 +968,17 @@ struct PendingLock {
     DWORD owner = 0;
 };
 PendingLock g_pendingLock;
+// The per-(thread, buffer) table behind vbPendingPerThread. Entries are claimed by Lock and
+// released by the matching Unlock on the same thread; when full the OLDEST entry is evicted (a
+// lock whose Unlock never came) and counted. Guarded by SnoopGuard, like g_pendingLock.
+constexpr unsigned kMaxPendingLocks = 32;
+PendingLock g_pendingLocks[kMaxPendingLocks];
+unsigned g_pendingLockAge[kMaxPendingLocks] = {};
+unsigned g_pendingLockTick = 0;
+// Writable locks on snooped buffers, how many CLOBBERED another thread's/buffer's still-pending
+// write (single-slot mode: a lost snoop update), table evictions, unlocks matched, and unlocks
+// that found only ANOTHER thread's entry for their buffer.
+unsigned long long g_plSet = 0, g_plClobbered = 0, g_plEvicted = 0, g_plTaken = 0, g_plForeignUnlock = 0;
 // Snoop refusals on the copy below: a stale/unmapped source range rejected before copying, or
 // an exception caught during the copy itself despite passing that check. One counter for both
 // (unlike the atlas snoop's two), since this hook never had either defence before - any nonzero

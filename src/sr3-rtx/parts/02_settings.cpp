@@ -276,6 +276,11 @@ struct Settings {
     // regardless of the internal flag, which is what the September 14 change was actually for);
     // OFF restores that change's unconditional consume for an A/B.
     bool vbUnlockOwnerThread = true;
+    // Track pending buffer writes per (thread, buffer) instead of in ONE global slot. SR3 fills its
+    // dynamic buffers from ~6 worker threads at once; with one slot the next Lock overwrites the
+    // previous thread's entry, that thread's finished write is never copied into the snoop, and the
+    // range stays STALE while still marked fresh. 0 restores the single slot (the A/B).
+    bool vbPendingPerThread = true;
     bool cameraOnly = false;     // hand Remix a camera and touch no draw at all
     bool cameraOnlyFloatUV = false;  // also convert SHORT2 texcoords on pass-through draws
     bool cameraMainViewOnly = true;  // give Remix ONLY the main scene camera, not all ~11
@@ -869,6 +874,7 @@ void LoadSettings() {
     g_settings.snoopValidateSource = flag("snoopValidateSource", true);
     g_settings.snoopThreadScopedInternal = flag("snoopThreadScopedInternal", true);
     g_settings.vbUnlockOwnerThread = flag("vbUnlockOwnerThread", true);
+    g_settings.vbPendingPerThread = flag("vbPendingPerThread", true);
     g_settings.cameraOnly = flag("cameraOnly", false);
     g_settings.cameraOnlyFloatUV = flag("cameraOnlyFloatUV", false);
     g_settings.cameraMainViewOnly = flag("cameraMainViewOnly", true);
