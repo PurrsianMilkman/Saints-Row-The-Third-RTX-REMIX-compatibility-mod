@@ -759,6 +759,11 @@ struct Settings {
     // still counted past this cap (see g_stretchDetectFlagged), only the Log() calls stop, so a
     // systemic false positive cannot flood the log the way an uncapped version would.
     int stretchDetectDumps = 20;
+    // 2026-11-19: scan only DYNAMIC-vertex-buffer rigid draws (the batched-decal population), so the
+    // detector is cheap enough to leave on; and judge only the vertices INSIDE the draw's declared
+    // window, because indexWindowClamp already collapses every triangle that reaches outside it.
+    bool stretchDetectDynamicOnly = true;
+    bool stretchDetectInWindowOnly = true;
 
     // hideShaderContains - DIAGNOSTIC bisection switch, not a fix. This project is hunting a
     // TRANSIENT artifact: a large flat polygon that appears for a frame or two, stretching
@@ -982,6 +987,8 @@ void LoadSettings() {
     g_settings.stretchDetect = flag("stretchDetect", false);
     g_settings.stretchDetectUnits = static_cast<int>(num("stretchDetectUnits", 5000));
     g_settings.stretchDetectDumps = static_cast<int>(num("stretchDetectDumps", 20));
+    g_settings.stretchDetectDynamicOnly = flag("stretchDetectDynamicOnly", true);
+    g_settings.stretchDetectInWindowOnly = flag("stretchDetectInWindowOnly", true);
     {
         char list[128]{};
         if (!checkPresent("probeVerts"))

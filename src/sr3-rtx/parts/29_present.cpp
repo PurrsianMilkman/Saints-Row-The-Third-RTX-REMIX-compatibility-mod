@@ -279,6 +279,11 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
         // outcome, neither flagged nor cleared - the index buffer was dynamic, or no bind
         // pose was cached yet, so no verdict was possible for that draw.
         if (g_settings.stretchDetect) {
+            Log("    STRETCH DETECT scope: dynamic-VB draws only=%d, in-window only=%d | %llu scanned draws referenced a "
+                "vertex OUTSIDE their window (the clamp's population) - the flagged count below is RESIDUAL "
+                "anomalies in what the clamp leaves",
+                g_settings.stretchDetectDynamicOnly ? 1 : 0, g_settings.stretchDetectInWindowOnly ? 1 : 0,
+                g_sdOowDraws);
             Log("    STRETCH DETECT (stretchDetectUnits=%d, dump cap %d): %.1f draws/frame "
                 "scanned, %.2f/frame unreadable (no verdict possible) | %llu flagged total "
                 "(%.4f%% of scanned) | %u dumped to the log%s",

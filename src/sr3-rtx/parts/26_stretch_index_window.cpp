@@ -105,6 +105,7 @@ bool ReadRigidPositionsRaw(const std::vector<UINT>& globalVerts, int posOffset, 
     return true;
 }
 
+unsigned long long g_sdOowDraws = 0;              // scanned draws that referenced a vertex outside their window
 unsigned long long g_stretchDetectChecked = 0;     // converted draws actually scanned
 unsigned long long g_stretchDetectUnreadable = 0;  // no position data AND a finite matrix - no verdict possible
 unsigned long long g_stretchDetectFlagged = 0;     // flagged, all-time - NOT capped by stretchDetectDumps
@@ -164,6 +165,7 @@ void StretchTopInsert(float diag, const char* ps, UINT v, UINT p, const char* pa
 void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVertex, UINT minIndex,
                         UINT numVertices, UINT startIndex, UINT primitiveCount, bool skinnedLocal,
                         bool skinnedFFLocal, const FFPScope& scope) {
+    if (g_settings.stretchDetectDynamicOnly && (skinnedLocal || !g_stream0 || !IsDynamicVB(g_stream0))) return;
     ++g_stretchDetectChecked;
     const D3DMATRIX& world = g_lastWorld;
     const bool worldFinite = IsFinite(world);
@@ -183,6 +185,25 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
                 gv.push_back(static_cast<UINT>(g));
             }
         } catch (...) { gv.clear(); }
+    }
+
+    // IN-WINDOW ONLY (stretchDetectInWindowOnly): count the vertices outside [minIndex,
+    // minIndex+numVertices) - indexWindowClamp collapses every triangle that reaches one - and judge
+    // only what the clamp leaves in play, so a flag here is a RESIDUAL anomaly the clamp cannot fix.
+    unsigned oowVerts = 0;
+    const long long winLo = static_cast<long long>(baseVertex) + static_cast<long long>(minIndex);
+    const long long winHi = winLo + static_cast<long long>(numVertices);
+    if (g_settings.stretchDetectInWindowOnly && !gv.empty()) {
+        std::vector<UINT> keep;
+        try {
+            keep.reserve(gv.size());
+            for (const UINT g : gv) {
+                if (static_cast<long long>(g) >= winLo && static_cast<long long>(g) < winHi) keep.push_back(g);
+                else ++oowVerts;
+            }
+            gv.swap(keep);
+        } catch (...) { oowVerts = 0; }
+        if (oowVerts) ++g_sdOowDraws;
     }
 
     // THE PATH TAG: exactly what ProbeAssetHash's own UV component computes for this identical
@@ -335,6 +356,9 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
         }
     }
 
+    Log("STRETCH DETECT residual (in-window only=%d): tick %lu | window gv [%lld,%lld) | %u vertices judged, "
+        "%u out-of-window vertices skipped", g_settings.stretchDetectInWindowOnly ? 1 : 0,
+        static_cast<unsigned long>(GetTickCount()), winLo, winHi, static_cast<unsigned>(gv.size()), oowVerts);
     const float* wf = &world._11;
     Log("STRETCH DETECT #%u: frame %u draw %u | ps(albedo sampler)='%s' shader=%p alb=%p | v=%u "
         "p=%u | ib=%p start=%u vb=%p off=%u baseVtx=%d stride=%u | path '%s' | positions: %s",
