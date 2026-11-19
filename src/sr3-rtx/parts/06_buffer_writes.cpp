@@ -494,6 +494,30 @@ bool SnoopCopy(IDirect3DVertexBuffer9* vb, UINT offset, unsigned char* dst, UINT
     return true;
 }
 
+// What the snoop knows about one byte range of a buffer, for the STALE RANGE diagnostic: is the buffer
+// registered, was it ever written, and how many bytes of [offset, offset+len) have NOT been written since
+// the game last DISCARDed it (those are the bytes Remix would read as undefined). Scans byte flags, so it is
+// only for the rare path where a draw's range was already found not fully fresh.
+struct SnoopRangeInfo {
+    bool registered = false, valid = false;
+    size_t dataSize = 0;
+    UINT staleBytes = 0, lenBytes = 0;
+    unsigned lastWriteFrame = 0xFFFFFFFFu, writeSeq = 0, discardSeq = 0;
+};
+SnoopRangeInfo SnoopInfoFor(IDirect3DVertexBuffer9* vb, UINT offset, UINT len) {
+    SnoopRangeInfo r;
+    if (!vb) return r;
+    SnoopGuard guard;
+    const auto it = g_instCache.find(vb);
+    if (it == g_instCache.end()) return r;
+    const InstanceCache& c = it->second;
+    r.registered = true; r.valid = c.valid; r.dataSize = c.data.size(); r.lenBytes = len;
+    r.lastWriteFrame = c.frame; r.writeSeq = c.writeSeq; r.discardSeq = c.discardSeq;
+    for (size_t b = offset; b < static_cast<size_t>(offset) + len; ++b)
+        if (b >= c.fresh.size() || !c.fresh[b]) ++r.staleBytes;
+    return r;
+}
+
 // World matrix of an instanced draw, read from its instance stream. Instance count is always 1
 // in SR3, so the record sits at the stream's base offset.
 bool InstanceWorld(D3DMATRIX& world) {

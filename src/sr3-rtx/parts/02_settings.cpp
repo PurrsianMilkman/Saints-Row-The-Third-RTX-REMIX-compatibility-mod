@@ -768,6 +768,12 @@ struct Settings {
     // A decal triangle is metres across; a stretched one is not. 0 disables; the unit is world units.
     int stretchDetectEdgeUnits = 50;
     int stretchDetectTriDumps = 30;
+    // ...and the same triangles' TEXTURE COORDINATES (read from the same snooped copy): a triangle with
+    // real world size whose UVs have collapsed to a point draws as a flat-colour polygon; one whose UVs
+    // span many repeats draws as a smear. Anomalies are dumped as they happen.
+    bool stretchDetectUv = true;
+    int stretchDetectUvDumps = 30;
+    int stretchDetectStaleDumps = 25;
 
     // hideShaderContains - DIAGNOSTIC bisection switch, not a fix. This project is hunting a
     // TRANSIENT artifact: a large flat polygon that appears for a frame or two, stretching
@@ -995,6 +1001,9 @@ void LoadSettings() {
     g_settings.stretchDetectInWindowOnly = flag("stretchDetectInWindowOnly", true);
     g_settings.stretchDetectEdgeUnits = static_cast<int>(num("stretchDetectEdgeUnits", 50));
     g_settings.stretchDetectTriDumps = static_cast<int>(num("stretchDetectTriDumps", 30));
+    g_settings.stretchDetectUv = flag("stretchDetectUv", true);
+    g_settings.stretchDetectUvDumps = static_cast<int>(num("stretchDetectUvDumps", 30));
+    g_settings.stretchDetectStaleDumps = static_cast<int>(num("stretchDetectStaleDumps", 25));
     {
         char list[128]{};
         if (!checkPresent("probeVerts"))

@@ -111,6 +111,14 @@ unsigned long long g_sdOowDraws = 0;              // scanned draws that referenc
 unsigned long long g_sdTris = 0, g_sdLongTris = 0, g_sdLongDraws = 0, g_sdTriDrawsScanned = 0;
 unsigned long long g_sdEdgeHist[6] = {};
 unsigned g_sdTriDumped = 0;
+// TEXCOORD side of the same check, in 1/1024-texture units: longest UV edge per triangle.
+unsigned long long g_sdUvTris = 0, g_sdUvCollapsed = 0, g_sdUvHuge = 0, g_sdUvUnreadable = 0;
+unsigned long long g_sdUvHist[6] = {};
+unsigned g_sdUvDumped = 0;
+// STALE RANGE (the DISCARD hazard): a scanned draw whose vertex range holds bytes the game has not
+// written since it last discarded the buffer - Remix copies those bytes at the draw call as they stand.
+unsigned long long g_sdStaleTrue = 0, g_sdStaleFirstSight = 0, g_sdStaleOther = 0;
+unsigned g_sdStaleDumped = 0;
 bool ReadIndexRawForClamp(IDirect3DIndexBuffer9* ib, D3DPRIMITIVETYPE type, UINT startIndex,
                           UINT primitiveCount, std::vector<UINT>* out);
 bool ExpandStripOrFanToTriangleList(const std::vector<UINT>& src, D3DPRIMITIVETYPE type,
@@ -319,7 +327,34 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
         }
     }
 
-    if (!havePositions && !anyNonFinite) { ++g_stretchDetectUnreadable; return; }
+    if (!havePositions && !anyNonFinite) {
+        ++g_stretchDetectUnreadable;
+        if (!skinnedLocal && g_stream0 && g_stream0Stride && !gv.empty()) {
+            const UINT lo = gv.front(), hi = gv.back();
+            const UINT off = g_stream0Offset + lo * g_stream0Stride;
+            const UINT len = (hi - lo + 1) * g_stream0Stride;
+            const SnoopRangeInfo si = SnoopInfoFor(g_stream0, off, len);
+            const bool trueStale = si.registered && si.valid && si.staleBytes > 0 && si.dataSize >= off + len;
+            if (trueStale) ++g_sdStaleTrue;
+            else if (!si.registered || !si.valid) ++g_sdStaleFirstSight;
+            else ++g_sdStaleOther;
+            if (g_sdStaleDumped < static_cast<unsigned>(max(0, g_settings.stretchDetectStaleDumps))) {
+                ++g_sdStaleDumped;
+                Log("STALE RANGE #%u (%s): frame %u tick %lu | ps='%s' type=%d v=%u p=%u vb=%p off=%u stride=%u "
+                    "baseVtx=%d | the draw reads bytes [%u,%u) | snoop registered=%d valid=%d holds %zu bytes | "
+                    "%u of %u bytes NOT written since the last discard | last write frame %u (%d frames ago), "
+                    "%u writes, %u discards",
+                    g_sdStaleDumped, trueStale ? "TRUE STALE after a discard" : (!si.registered || !si.valid) ? "first sight"
+                    : "other", g_frames, static_cast<unsigned long>(GetTickCount()), g_curPS.albedoSampler,
+                    static_cast<int>(type), numVertices, primitiveCount, static_cast<void*>(g_stream0), g_stream0Offset,
+                    g_stream0Stride, baseVertex, off, off + len, si.registered ? 1 : 0, si.valid ? 1 : 0, si.dataSize,
+                    si.staleBytes, si.lenBytes, si.lastWriteFrame,
+                    si.lastWriteFrame == 0xFFFFFFFFu ? -1 : static_cast<int>(g_frames - si.lastWriteFrame), si.writeSeq,
+                    si.discardSeq);
+            }
+        }
+        return;
+    }
 
     // PER-TRIANGLE EDGE CHECK. A whole-draw AABB cannot see one bad quad inside a 476-quad batch that
     // legitimately spans a district; a triangle's own edge length can. Judges only triangles whose
@@ -350,6 +385,22 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
                 return std::sqrt(dx * dx + dy * dy + dz * dz);
             };
             const float limit = static_cast<float>(g_settings.stretchDetectEdgeUnits);
+            std::vector<AssetHashUv2> uvs;
+            bool haveUv = false;
+            if (g_settings.stretchDetectUv && g_curLayout.hasTexcoord && g_curLayout.texcoordOffset >= 0 &&
+                (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2 || g_curLayout.texcoordType == D3DDECLTYPE_FLOAT2)) {
+                haveUv = ReadRigidTexcoordsRaw(gvFinal, g_curLayout.texcoordType, g_curLayout.texcoordOffset,
+                                               g_stream0Stride, IsDynamicVB(g_stream0), &uvs) &&
+                         uvs.size() == gvFinal.size();
+                if (!haveUv) ++g_sdUvUnreadable;
+            }
+            const float uvScale = (g_curLayout.texcoordType == D3DDECLTYPE_SHORT2) ? 1.0f : 1024.0f;
+            auto kOf = [&](UINT idxRaw) -> size_t {
+                const long long g = static_cast<long long>(baseVertex) + static_cast<long long>(idxRaw);
+                const auto it = std::lower_bound(gvFinal.begin(), gvFinal.end(), static_cast<UINT>(g));
+                return (it == gvFinal.end() || *it != static_cast<UINT>(g)) ? static_cast<size_t>(-1)
+                                                                              : static_cast<size_t>(it - gvFinal.begin());
+            };
             unsigned longHere = 0, judged = 0;
             size_t firstLong = 0; float firstEdges[3] = {}; D3DVECTOR fA{}, fB{}, fC{}; UINT fi[3] = {};
             float drawMaxEdge = 0.0f;
@@ -363,6 +414,37 @@ void ProbeStretchDetect(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT baseVe
                 ++judged; ++g_sdTris;
                 ++g_sdEdgeHist[m < 5.0f ? 0 : m < 20.0f ? 1 : m < 50.0f ? 2 : m < 100.0f ? 3 : m < 500.0f ? 4 : 5];
                 if (m > drawMaxEdge) drawMaxEdge = m;
+                if (haveUv) {
+                    const size_t ka = kOf(a), kb = kOf(b), kc = kOf(c);
+                    if (ka < uvs.size() && kb < uvs.size() && kc < uvs.size()) {
+                        const AssetHashUv2 ua = uvs[ka], ub = uvs[kb], uc = uvs[kc];
+                        auto ue = [&](const AssetHashUv2& p, const AssetHashUv2& q) {
+                            return std::sqrt((p.u - q.u) * (p.u - q.u) + (p.v - q.v) * (p.v - q.v)) * uvScale;
+                        };
+                        const float um = max(ue(ua, ub), max(ue(ub, uc), ue(uc, ua)));
+                        ++g_sdUvTris;
+                        ++g_sdUvHist[um <= 2.0f ? 0 : um < 32.0f ? 1 : um < 512.0f ? 2 : um < 4096.0f ? 3 : um < 32768.0f ? 4 : 5];
+                        const bool collapsed = (m > 3.0f && um <= 2.0f);
+                        const bool huge = (um > 8192.0f);
+                        if (collapsed) ++g_sdUvCollapsed;
+                        if (huge) ++g_sdUvHuge;
+                        if ((collapsed || huge) &&
+                            g_sdUvDumped < static_cast<unsigned>(max(0, g_settings.stretchDetectUvDumps))) {
+                            ++g_sdUvDumped;
+                            Log("STRETCH UV #%u (%s): frame %u tick %lu | ps='%s' type=%d v=%u p=%u vb=%p off=%u "
+                                "stride=%u uvtype=%d uvoff=%d | triangle #%u of %u idx (%u %u %u) | world edges "
+                                "%.1f %.1f %.1f A(%.1f %.1f %.1f) | UV (1/1024 tex) A(%.1f %.1f) B(%.1f %.1f) "
+                                "C(%.1f %.1f) longest UV edge %.1f",
+                                g_sdUvDumped, collapsed ? "UV COLLAPSED on a real-size triangle" : "UV HUGE",
+                                g_frames, static_cast<unsigned long>(GetTickCount()), g_curPS.albedoSampler,
+                                static_cast<int>(type), numVertices, primitiveCount, static_cast<void*>(g_stream0),
+                                g_stream0Offset, g_stream0Stride, g_curLayout.texcoordType, g_curLayout.texcoordOffset,
+                                static_cast<unsigned>(t / 3), static_cast<unsigned>(tris.size() / 3), a, b, c,
+                                e0, e1, e2, pa.x, pa.y, pa.z, ua.u * uvScale, ua.v * uvScale, ub.u * uvScale,
+                                ub.v * uvScale, uc.u * uvScale, uc.v * uvScale, um);
+                        }
+                    }
+                }
                 if (m > limit) {
                     if (!longHere) {
                         firstLong = t / 3; firstEdges[0] = e0; firstEdges[1] = e1; firstEdges[2] = e2;

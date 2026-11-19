@@ -285,6 +285,18 @@ HRESULT WINAPI Hook_Present(IDirect3DDevice9* dev, const RECT* src, const RECT* 
                 g_settings.stretchDetectEdgeUnits, g_sdTriDumped, g_settings.stretchDetectTriDumps,
                 g_sdTriDrawsScanned, g_sdTris, g_sdEdgeHist[0], g_sdEdgeHist[1], g_sdEdgeHist[2], g_sdEdgeHist[3],
                 g_sdEdgeHist[4], g_sdEdgeHist[5], g_sdLongTris, g_sdLongDraws);
+            Log("    STRETCH UV (stretchDetectUv=%d, %u dumped of cap %d): %llu triangles with readable UVs | longest-UV-edge "
+                "histogram (1/1024 texture) [0-2]=%llu (collapsed) [2-32)=%llu [32-512)=%llu [512-4096)=%llu "
+                "[4096-32768)=%llu [32768+)=%llu | %llu real-size triangles with COLLAPSED UVs, %llu with HUGE UVs "
+                "(>8 repeats) | draws whose UVs could not be read %llu",
+                g_settings.stretchDetectUv ? 1 : 0, g_sdUvDumped, g_settings.stretchDetectUvDumps, g_sdUvTris,
+                g_sdUvHist[0], g_sdUvHist[1], g_sdUvHist[2], g_sdUvHist[3], g_sdUvHist[4], g_sdUvHist[5],
+                g_sdUvCollapsed, g_sdUvHuge, g_sdUvUnreadable);
+            Log("    STALE RANGES (scanned dynamic draws whose vertex range could not be read fresh): %llu TRUE STALE "
+                "(registered buffer, bytes not rewritten since the game's last DISCARD - what Remix would read as "
+                "undefined) | %llu first sight (buffer new to the snoop) | %llu other | %u dumped of cap %d",
+                g_sdStaleTrue, g_sdStaleFirstSight, g_sdStaleOther, g_sdStaleDumped,
+                g_settings.stretchDetectStaleDumps);
             Log("    STRETCH DETECT scope: dynamic-VB draws only=%d, in-window only=%d | %llu scanned draws referenced a "
                 "vertex OUTSIDE their window (the clamp's population) - the flagged count below is RESIDUAL "
                 "anomalies in what the clamp leaves",
